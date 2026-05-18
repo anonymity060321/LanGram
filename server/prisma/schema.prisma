@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AccountType {
+  EMAIL
+  GUEST
+
+  @@map("account_type")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("user_status")
+}
+
+enum EmailVerificationPurpose {
+  REGISTER
+  LOGIN
+
+  @@map("email_verification_purpose")
+}
+
+model User {
+  id           String      @id @default(uuid()) @db.Uuid
+  email        String?     @unique
+  passwordHash String?     @map("password_hash")
+  displayName  String      @map("display_name")
+  accountType  AccountType @map("account_type")
+  status       UserStatus  @default(ACTIVE)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  devices   Device[]
+  sessions  Session[]
+  loginLogs LoginLog[]
+
+  @@map("users")
+}
+
+model Device {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  deviceIdentifier String    @map("device_identifier")
+  name             String?
+  platform         String?
+  lastSeenAt       DateTime? @map("last_seen_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id])
+  sessions Session[]
+
+  @@unique([userId, deviceIdentifier])
+  @@map("devices")
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  deviceId         String?   @map("device_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user   User    @relation(fields: [userId], references: [id])
+  device Device? @relation(fields: [deviceId], references: [id])
+
+  @@index([userId, revokedAt])
+  @@map("sessions")
+}
+
+model EmailVerificationCode {
+  id         String                   @id @default(uuid()) @db.Uuid
+  email      String
+  codeHash   String                   @map("code_hash")
+  purpose    EmailVerificationPurpose
+  expiresAt  DateTime                 @map("expires_at")
+  consumedAt DateTime?                @map("consumed_at")
+  createdAt  DateTime                 @default(now()) @map("created_at")
+
+  @@index([email, purpose, createdAt])
+  @@map("email_verification_codes")
+}
+
+model LoginLog {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String?  @map("user_id") @db.Uuid
+  email            String?
+  deviceIdentifier String?  @map("device_identifier")
+  success          Boolean
+  reason           String?
+  ipAddress        String?  @map("ip_address")
+  userAgent        String?  @map("user_agent")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+  @@map("login_logs")
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
