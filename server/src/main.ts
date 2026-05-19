@@ -4,6 +4,17 @@ import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  app.enableCors({
+    origin: [
+      'http://localhost:1420',
+      'http://127.0.0.1:1420',
+      'tauri://localhost',
+      'http://tauri.localhost',
+    ],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false,
+  });
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
