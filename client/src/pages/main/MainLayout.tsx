@@ -11,7 +11,10 @@ export function MainLayout(): JSX.Element {
       <aside className="conversation-panel">
         <div className="sidebar-header">
           <strong>{t('app.name')}</strong>
-          <Link to="/settings">{t('main.settings')}</Link>
+          <div className="sidebar-actions">
+            <Link to="/friends">{t('main.friends')}</Link>
+            <Link to="/settings">{t('main.settings')}</Link>
+          </div>
         </div>
         <section className="sidebar-section">
           <h2>{t('main.sidebarChats')}</h2>
@@ -19,7 +22,7 @@ export function MainLayout(): JSX.Element {
         </section>
         <section className="sidebar-section">
           <h2>{t('main.sidebarFriends')}</h2>
-          <p>{t('main.emptyBody')}</p>
+          <Link to="/friends">{t('friends.openFriends')}</Link>
         </section>
       </aside>
       <section className="chat-panel">

@@ -41,7 +41,8 @@ button {
 }
 
 .auth-page,
-.settings-page {
+.settings-page,
+.friends-page {
   min-height: 100vh;
   display: grid;
   place-items: center;
@@ -49,12 +50,17 @@ button {
 }
 
 .auth-panel,
-.settings-panel {
+.settings-panel,
+.friends-shell {
   width: min(100%, 440px);
   border: 1px solid #d6deea;
   border-radius: 8px;
   background: #ffffff;
   padding: 24px;
+}
+
+.friends-shell {
+  width: min(100%, 960px);
 }
 
 .brand-mark {
@@ -125,6 +131,12 @@ button {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 18px;
+  font-size: 14px;
+}
+
+.sidebar-actions {
+  display: flex;
+  gap: 12px;
   font-size: 14px;
 }
 
@@ -243,6 +255,79 @@ button {
   margin-bottom: 18px;
 }
 
+.friends-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.friends-panel {
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  padding: 18px;
+  background: #ffffff;
+}
+
+.friends-panel + .friends-panel,
+.form-error + .friends-panel,
+.form-success + .friends-panel,
+.friends-grid + .form-error,
+.friends-grid + .form-success {
+  margin-top: 16px;
+}
+
+.friends-panel h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.pairing-code-box {
+  margin-top: 14px;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.pairing-code-box strong {
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.pairing-code-box span,
+.friend-row span,
+.empty-list {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.request-list {
+  display: grid;
+  gap: 10px;
+}
+
+.friend-row {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.friend-row span {
+  display: block;
+  margin-top: 2px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+}
+
 @media (max-width: 960px) {
   .main-layout {
     grid-template-columns: minmax(220px, 300px) 1fr;
@@ -264,5 +349,15 @@ button {
 
   .inline-control {
     grid-template-columns: 1fr;
+  }
+
+  .friends-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .friend-row,
+  .row-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

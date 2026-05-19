@@ -27,6 +27,14 @@ enum EmailVerificationPurpose {
   @@map("email_verification_purpose")
 }
 
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+
+  @@map("friend_request_status")
+}
+
 model User {
   id           String      @id @default(uuid()) @db.Uuid
   email        String?     @unique
@@ -37,9 +45,14 @@ model User {
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
-  devices   Device[]
-  sessions  Session[]
-  loginLogs LoginLog[]
+  devices                Device[]
+  sessions               Session[]
+  loginLogs              LoginLog[]
+  pairingCodes           FriendPairingCode[] @relation("PairingCodeOwner")
+  sentFriendRequests     FriendRequest[]     @relation("FriendRequestRequester")
+  receivedFriendRequests FriendRequest[]     @relation("FriendRequestAddressee")
+  friendshipsAsUserA     Friendship[]        @relation("FriendshipUserA")
+  friendshipsAsUserB     Friendship[]        @relation("FriendshipUserB")
 
   @@map("users")
 }
@@ -108,6 +121,57 @@ model LoginLog {
   @@index([userId, createdAt])
   @@index([email, createdAt])
   @@map("login_logs")
+}
+
+model FriendPairingCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation("PairingCodeOwner", fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([expiresAt, consumedAt])
+  @@map("friend_pairing_codes")
+}
+
+model FriendRequest {
+  id          String              @id @default(uuid()) @db.Uuid
+  requesterId String              @map("requester_id") @db.Uuid
+  addresseeId String              @map("addressee_id") @db.Uuid
+  status      FriendRequestStatus @default(PENDING)
+  respondedAt DateTime?           @map("responded_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  requester  User        @relation("FriendRequestRequester", fields: [requesterId], references: [id])
+  addressee  User        @relation("FriendRequestAddressee", fields: [addresseeId], references: [id])
+  friendship Friendship?
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status, createdAt])
+  @@index([requesterId, status, createdAt])
+  @@map("friend_requests")
+}
+
+model Friendship {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userAId              String   @map("user_a_id") @db.Uuid
+  userBId              String   @map("user_b_id") @db.Uuid
+  createdFromRequestId String   @unique @map("created_from_request_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  userA              User          @relation("FriendshipUserA", fields: [userAId], references: [id])
+  userB              User          @relation("FriendshipUserB", fields: [userBId], references: [id])
+  createdFromRequest FriendRequest @relation(fields: [createdFromRequestId], references: [id])
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
+  @@map("friendships")
 }
 
 model AppSetting {
