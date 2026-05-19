@@ -96,6 +96,18 @@ Run the server:
 npm run start:dev -w server
 ```
 
+## Client Development
+
+Start the Tauri desktop client from `client/` with one command:
+
+```bash
+npm.cmd run tauri dev
+```
+
+Do not run `npm.cmd run dev` first. Tauri already starts Vite through `beforeDevCommand`.
+
+If port `1420` is already in use, close the leftover `node.exe` process or the process holding that port, then run `npm.cmd run tauri dev` again.
+
 Phase 1 endpoints are under `/api/auth`:
 
 - `POST /api/auth/email/code`
