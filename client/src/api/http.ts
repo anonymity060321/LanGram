@@ -25,6 +25,10 @@ export function setApiBaseUrl(nextBaseUrl: string): void {
   baseUrl = normalizeBaseUrl(nextBaseUrl);
 }
 
+export function getApiBaseUrl(): string {
+  return baseUrl;
+}
+
 export function setAccessToken(nextAccessToken: string | null): void {
   accessToken = nextAccessToken;
 }

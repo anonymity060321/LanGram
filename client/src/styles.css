@@ -207,7 +207,10 @@ button {
 
 .sidebar-section p,
 .empty-chat-state p,
-.profile-panel span {
+.profile-panel span,
+.conversation-item small,
+.message-bubble span,
+.profile-section p {
   margin: 0;
   color: #64748b;
   font-size: 14px;
@@ -216,8 +219,9 @@ button {
 .chat-panel {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: #f8fafc;
+  position: relative;
 }
 
 .chat-header span {
@@ -328,6 +332,155 @@ button {
   gap: 8px;
 }
 
+.conversation-list,
+.friend-start-list {
+  display: grid;
+  gap: 8px;
+}
+
+.conversation-list {
+  margin-top: 10px;
+}
+
+.conversation-item,
+.friend-start-button {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #172033;
+  text-align: left;
+}
+
+.conversation-item {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.conversation-item:hover,
+.conversation-item.is-active {
+  background: #eef4ff;
+  border-color: #bfdbfe;
+}
+
+.conversation-item strong,
+.conversation-item small {
+  display: block;
+}
+
+.conversation-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #14b8a6;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.message-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+}
+
+.message-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.message-row.is-own {
+  justify-content: flex-end;
+}
+
+.message-bubble {
+  max-width: min(680px, 78%);
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e5ebf3;
+  padding: 9px 11px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.message-row.is-own .message-bubble {
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.message-bubble p {
+  margin: 0 0 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-bubble span {
+  display: block;
+  text-align: right;
+  font-size: 12px;
+}
+
+.message-input {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid #d6deea;
+  background: #ffffff;
+}
+
+.message-input input {
+  min-height: 42px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+
+.chat-error {
+  position: absolute;
+  right: 18px;
+  bottom: 72px;
+  max-width: min(420px, calc(100% - 36px));
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b42318;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.profile-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e5ebf3;
+}
+
+.profile-section h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.friend-start-button {
+  min-height: 38px;
+  border-color: #d6deea;
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.friend-start-button:hover {
+  background: #f1f5f9;
+}
+
 @media (max-width: 960px) {
   .main-layout {
     grid-template-columns: minmax(220px, 300px) 1fr;
@@ -359,5 +512,9 @@ button {
   .row-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .message-input {
+    grid-template-columns: 1fr;
   }
 }
