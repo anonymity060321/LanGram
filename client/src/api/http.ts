@@ -1,0 +1,77 @@
+export interface ApiErrorPayload {
+  code?: string;
+  message?: string;
+  requestId?: string;
+}
+
+export class ApiClientError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly requestId?: string;
+
+  constructor(status: number, payload: ApiErrorPayload) {
+    super(payload.message ?? `HTTP ${status}`);
+    this.name = 'ApiClientError';
+    this.status = status;
+    this.code = payload.code;
+    this.requestId = payload.requestId;
+  }
+}
+
+let baseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api');
+let accessToken: string | null = null;
+
+export function setApiBaseUrl(nextBaseUrl: string): void {
+  baseUrl = normalizeBaseUrl(nextBaseUrl);
+}
+
+export function setAccessToken(nextAccessToken: string | null): void {
+  accessToken = nextAccessToken;
+}
+
+export async function apiRequest<TResponse>(
+  path: string,
+  options: RequestInit = {},
+): Promise<TResponse> {
+  const headers = new Headers(options.headers);
+  const hasBody = options.body !== undefined;
+
+  if (hasBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(`${baseUrl}${normalizePath(path)}`, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new ApiClientError(response.status, await parseErrorPayload(response));
+  }
+
+  if (response.status === 204) {
+    return undefined as TResponse;
+  }
+
+  return (await response.json()) as TResponse;
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+function normalizePath(path: string): string {
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+async function parseErrorPayload(response: Response): Promise<ApiErrorPayload> {
+  try {
+    return (await response.json()) as ApiErrorPayload;
+  } catch {
+    return { message: response.statusText };
+  }
+}
