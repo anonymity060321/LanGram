@@ -35,6 +35,27 @@ enum FriendRequestStatus {
   @@map("friend_request_status")
 }
 
+enum ConversationType {
+  DIRECT
+
+  @@map("conversation_type")
+}
+
+enum MessageType {
+  TEXT
+
+  @@map("message_type")
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  RECALLED
+
+  @@map("message_status")
+}
+
 model User {
   id           String      @id @default(uuid()) @db.Uuid
   email        String?     @unique
@@ -48,11 +69,14 @@ model User {
   devices                Device[]
   sessions               Session[]
   loginLogs              LoginLog[]
-  pairingCodes           FriendPairingCode[] @relation("PairingCodeOwner")
-  sentFriendRequests     FriendRequest[]     @relation("FriendRequestRequester")
-  receivedFriendRequests FriendRequest[]     @relation("FriendRequestAddressee")
-  friendshipsAsUserA     Friendship[]        @relation("FriendshipUserA")
-  friendshipsAsUserB     Friendship[]        @relation("FriendshipUserB")
+  pairingCodes           FriendPairingCode[]  @relation("PairingCodeOwner")
+  sentFriendRequests     FriendRequest[]      @relation("FriendRequestRequester")
+  receivedFriendRequests FriendRequest[]      @relation("FriendRequestAddressee")
+  friendshipsAsUserA     Friendship[]         @relation("FriendshipUserA")
+  friendshipsAsUserB     Friendship[]         @relation("FriendshipUserB")
+  conversationMembers    ConversationMember[]
+  sentMessages           Message[]            @relation("MessageSender")
+  messageDeliveries      MessageDelivery[]    @relation("MessageDeliveryReceiver")
 
   @@map("users")
 }
@@ -172,6 +196,79 @@ model Friendship {
   @@index([userAId])
   @@index([userBId])
   @@map("friendships")
+}
+
+model Conversation {
+  id            String           @id @default(uuid()) @db.Uuid
+  type          ConversationType
+  directUserAId String?          @map("direct_user_a_id") @db.Uuid
+  directUserBId String?          @map("direct_user_b_id") @db.Uuid
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  members  ConversationMember[]
+  messages Message[]
+
+  @@unique([type, directUserAId, directUserBId])
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id                String    @id @default(uuid()) @db.Uuid
+  conversationId    String    @map("conversation_id") @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  lastReadMessageId String?   @map("last_read_message_id") @db.Uuid
+  lastReadAt        DateTime? @map("last_read_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id                String        @id @default(uuid()) @db.Uuid
+  conversationId    String        @map("conversation_id") @db.Uuid
+  senderId          String        @map("sender_id") @db.Uuid
+  messageType       MessageType   @map("message_type")
+  ciphertext        String
+  encryptionVersion String        @map("encryption_version")
+  nonce             String
+  replyToMessageId  String?       @map("reply_to_message_id") @db.Uuid
+  status            MessageStatus @default(SENT)
+  editedAt          DateTime?     @map("edited_at")
+  recalledAt        DateTime?     @map("recalled_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  conversation Conversation      @relation(fields: [conversationId], references: [id])
+  sender       User              @relation("MessageSender", fields: [senderId], references: [id])
+  deliveries   MessageDelivery[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+  @@map("messages")
+}
+
+model MessageDelivery {
+  id          String    @id @default(uuid()) @db.Uuid
+  messageId   String    @map("message_id") @db.Uuid
+  receiverId  String    @map("receiver_id") @db.Uuid
+  deliveredAt DateTime? @map("delivered_at")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  message  Message @relation(fields: [messageId], references: [id])
+  receiver User    @relation("MessageDeliveryReceiver", fields: [receiverId], references: [id])
+
+  @@unique([messageId, receiverId])
+  @@index([receiverId, deliveredAt])
+  @@index([receiverId, readAt])
+  @@map("message_deliveries")
 }
 
 model AppSetting {

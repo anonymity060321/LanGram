@@ -1,0 +1,287 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConversationType, MessageStatus, Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
+
+type UserSummary = {
+  id: string;
+  email: string | null;
+  displayName: string;
+  accountType: string;
+};
+
+type ConversationWithMembers = {
+  id: string;
+  type: ConversationType;
+  createdAt: Date;
+  updatedAt: Date;
+  members: Array<{ user: UserSummary }>;
+};
+
+type MessageRecord = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  messageType: string;
+  ciphertext: string;
+  encryptionVersion: string;
+  nonce: string;
+  replyToMessageId: string | null;
+  status: MessageStatus;
+  editedAt: Date | null;
+  recalledAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+@Injectable()
+export class ConversationsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async listConversations(userId: string): Promise<{ conversations: unknown[] }> {
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        type: ConversationType.DIRECT,
+        members: { some: { userId } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: this.conversationInclude(),
+    });
+
+    return {
+      conversations: conversations.map((conversation) =>
+        this.toConversationDto(conversation as unknown as ConversationWithMembers, userId),
+      ),
+    };
+  }
+
+  async createDirectConversation(userId: string, friendUserId: string): Promise<unknown> {
+    if (userId === friendUserId) {
+      throw new BadRequestException('Cannot create a direct conversation with yourself');
+    }
+
+    await this.assertFriendship(userId, friendUserId);
+    const [directUserAId, directUserBId] = this.normalizeUserPair(userId, friendUserId);
+
+    const existing = await this.prisma.conversation.findUnique({
+      where: {
+        type_directUserAId_directUserBId: {
+          type: ConversationType.DIRECT,
+          directUserAId,
+          directUserBId,
+        },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (existing) {
+      return this.toConversationDto(existing as unknown as ConversationWithMembers, userId);
+    }
+
+    const conversation = await this.prisma.conversation.create({
+      data: {
+        type: ConversationType.DIRECT,
+        directUserAId,
+        directUserBId,
+        members: {
+          create: [{ userId }, { userId: friendUserId }],
+        },
+      },
+      include: this.conversationInclude(),
+    });
+
+    return this.toConversationDto(conversation as unknown as ConversationWithMembers, userId);
+  }
+
+  async listMessages(
+    userId: string,
+    conversationId: string,
+    query: ListMessagesQueryDto,
+  ): Promise<{ messages: unknown[] }> {
+    await this.assertConversationMember(userId, conversationId);
+    const limit = query.limit ?? 50;
+    const beforeMessage = query.before
+      ? await this.findMessageInConversation(conversationId, query.before)
+      : null;
+
+    const messages = await this.prisma.message.findMany({
+      where: {
+        conversationId,
+        ...(beforeMessage ? { createdAt: { lt: beforeMessage.createdAt } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: this.messageSelect(),
+    });
+
+    return {
+      messages: messages.reverse().map((message) => this.toMessageDto(message)),
+    };
+  }
+
+  async markRead(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<{ read: true; messageId: string }> {
+    await this.assertConversationMember(userId, conversationId);
+    const message = await this.findMessageInConversation(conversationId, messageId);
+    const now = new Date();
+
+    await this.prisma.$transaction([
+      this.prisma.conversationMember.update({
+        where: {
+          conversationId_userId: {
+            conversationId,
+            userId,
+          },
+        },
+        data: {
+          lastReadMessageId: message.id,
+          lastReadAt: now,
+        },
+      }),
+      this.prisma.messageDelivery.updateMany({
+        where: {
+          receiverId: userId,
+          message: {
+            conversationId,
+            createdAt: { lte: message.createdAt },
+          },
+          readAt: null,
+        },
+        data: { readAt: now },
+      }),
+    ]);
+
+    return { read: true, messageId };
+  }
+
+  private async assertFriendship(userId: string, friendUserId: string): Promise<void> {
+    const [userAId, userBId] = this.normalizeUserPair(userId, friendUserId);
+    const friendship = await this.prisma.friendship.findUnique({
+      where: { userAId_userBId: { userAId, userBId } },
+      select: { id: true },
+    });
+
+    if (!friendship) {
+      throw new ForbiddenException('Direct conversations can only be created between friends');
+    }
+  }
+
+  private async assertConversationMember(userId: string, conversationId: string): Promise<void> {
+    const member = await this.prisma.conversationMember.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!member) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+  }
+
+  private async findMessageInConversation(
+    conversationId: string,
+    messageId: string,
+  ): Promise<{ id: string; createdAt: Date }> {
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+      },
+      select: {
+        id: true,
+        createdAt: true,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    return message;
+  }
+
+  private conversationInclude(): Prisma.ConversationInclude {
+    return {
+      members: {
+        include: {
+          user: { select: this.userSelect() },
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+    };
+  }
+
+  private userSelect(): Prisma.UserSelect {
+    return {
+      id: true,
+      email: true,
+      displayName: true,
+      accountType: true,
+    };
+  }
+
+  private messageSelect(): Prisma.MessageSelect {
+    return {
+      id: true,
+      conversationId: true,
+      senderId: true,
+      messageType: true,
+      ciphertext: true,
+      encryptionVersion: true,
+      nonce: true,
+      replyToMessageId: true,
+      status: true,
+      editedAt: true,
+      recalledAt: true,
+      createdAt: true,
+      updatedAt: true,
+    };
+  }
+
+  private toConversationDto(conversation: ConversationWithMembers, currentUserId: string): unknown {
+    const peer = conversation.members.find((member) => member.user.id !== currentUserId)?.user ?? null;
+
+    return {
+      id: conversation.id,
+      type: conversation.type,
+      peer,
+      members: conversation.members.map((member) => member.user),
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+    };
+  }
+
+  private toMessageDto(message: MessageRecord): unknown {
+    return {
+      id: message.id,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      messageType: message.messageType,
+      ciphertext: message.ciphertext,
+      encryptionVersion: message.encryptionVersion,
+      nonce: message.nonce,
+      replyToMessageId: message.replyToMessageId,
+      status: message.status,
+      editedAt: message.editedAt,
+      recalledAt: message.recalledAt,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+    };
+  }
+
+  private normalizeUserPair(userId: string, friendUserId: string): [string, string] {
+    return userId < friendUserId ? [userId, friendUserId] : [friendUserId, userId];
+  }
+}
