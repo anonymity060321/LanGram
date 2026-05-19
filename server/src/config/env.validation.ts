@@ -5,7 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUrl,
+  Matches,
   Max,
   Min,
   validateSync,
@@ -21,7 +21,11 @@ class EnvironmentVariables {
   @Max(65535)
   PORT!: number;
 
-  @IsUrl({ require_tld: false })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^postgres(?:ql)?:\/\//, {
+    message: 'DATABASE_URL must start with postgresql:// or postgres://',
+  })
   DATABASE_URL!: string;
 
   @IsString()
