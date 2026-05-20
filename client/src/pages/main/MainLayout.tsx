@@ -13,6 +13,7 @@ export function MainLayout(): JSX.Element {
   const selectedConversationId = useChatStore((state) => state.selectedConversationId);
   const messagesByConversation = useChatStore((state) => state.messagesByConversation);
   const chatError = useChatStore((state) => state.error);
+  const searchQuery = useChatStore((state) => state.searchQuery);
   const isLoadingConversations = useChatStore((state) => state.isLoadingConversations);
   const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
@@ -21,11 +22,21 @@ export function MainLayout(): JSX.Element {
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
+  const deleteLocalMessage = useChatStore((state) => state.deleteLocalMessage);
+  const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
+  const setSearchQuery = useChatStore((state) => state.setSearchQuery);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
-  const messages = selectedConversationId ? messagesByConversation[selectedConversationId] ?? [] : [];
+  const messages = useMemo(
+    () => (selectedConversationId ? messagesByConversation[selectedConversationId] ?? [] : []),
+    [messagesByConversation, selectedConversationId],
+  );
+  const visibleMessages = useMemo(
+    () => filterMessages(messages, searchQuery),
+    [messages, searchQuery],
+  );
 
   useEffect(() => {
     void loadConversations();
@@ -57,6 +68,7 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
+    setSearchQuery('');
     await selectConversation(conversationId, user.id);
   }
 
@@ -77,6 +89,22 @@ export function MainLayout(): JSX.Element {
     const plaintext = messageDraft.trim();
     setMessageDraft('');
     await sendTextMessage(selectedConversationId, plaintext, user.id);
+  }
+
+  function handleDeleteLocalMessage(messageId: string): void {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    deleteLocalMessage(selectedConversationId, messageId);
+  }
+
+  function handleClearLocalConversation(): void {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    clearLocalConversation(selectedConversationId);
   }
 
   return (
@@ -130,10 +158,38 @@ export function MainLayout(): JSX.Element {
             </strong>
             <span>{selectedConversation ? t('chat.direct') : (user?.accountType ?? 'MVP')}</span>
           </div>
+          {selectedConversation ? (
+            <button
+              type="button"
+              className="secondary-button compact-button"
+              onClick={handleClearLocalConversation}
+              disabled={messages.length === 0}
+            >
+              {t('chat.clearLocal')}
+            </button>
+          ) : null}
         </header>
         {selectedConversation ? (
           <>
-            <MessageList messages={messages} isLoading={isLoadingMessages} />
+            <div className="chat-search-bar">
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={t('chat.searchPlaceholder')}
+              />
+              {searchQuery.trim() ? (
+                <span>
+                  {visibleMessages.length} / {messages.length}
+                </span>
+              ) : null}
+            </div>
+            <MessageList
+              messages={visibleMessages}
+              isLoading={isLoadingMessages}
+              searchQuery={searchQuery}
+              hasSearchQuery={searchQuery.trim().length > 0}
+              onDeleteLocalMessage={handleDeleteLocalMessage}
+            />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <input
                 value={messageDraft}
@@ -182,9 +238,15 @@ export function MainLayout(): JSX.Element {
 function MessageList({
   messages,
   isLoading,
+  searchQuery,
+  hasSearchQuery,
+  onDeleteLocalMessage,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
+  searchQuery: string;
+  hasSearchQuery: boolean;
+  onDeleteLocalMessage: (messageId: string) => void;
 }): JSX.Element {
   const { t } = useI18n();
 
@@ -199,7 +261,7 @@ function MessageList({
   if (messages.length === 0) {
     return (
       <div className="message-list empty-chat-state">
-        <p>{t('chat.noMessages')}</p>
+        <p>{hasSearchQuery ? t('chat.searchNoResults') : t('chat.noMessages')}</p>
       </div>
     );
   }
@@ -209,8 +271,19 @@ function MessageList({
       {messages.map((message) => (
         <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
           <div className="message-bubble">
-            <p>{message.plaintext}</p>
-            <span>{message.isOwn ? t(`chat.status.${message.status}`) : formatTime(message.createdAt)}</span>
+            <p>{renderHighlightedText(message.plaintext, searchQuery)}</p>
+            <div className="message-meta">
+              <span>
+                {message.isOwn ? t(`chat.status.${message.status}`) : formatTime(message.createdAt)}
+              </span>
+              <button
+                type="button"
+                className="message-action"
+                onClick={() => onDeleteLocalMessage(message.id)}
+              >
+                {t('chat.deleteLocal')}
+              </button>
+            </div>
           </div>
         </article>
       ))}
@@ -220,4 +293,48 @@ function MessageList({
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function filterMessages(messages: ChatMessage[], query: string): ChatMessage[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) {
+    return messages;
+  }
+
+  return messages.filter((message) =>
+    message.plaintext.toLocaleLowerCase().includes(normalizedQuery),
+  );
+}
+
+function renderHighlightedText(text: string, query: string): Array<string | JSX.Element> | string {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) {
+    return text;
+  }
+
+  const lowerText = text.toLocaleLowerCase();
+  const fragments: Array<string | JSX.Element> = [];
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(normalizedQuery);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      fragments.push(text.slice(cursor, matchIndex));
+    }
+
+    const matchEnd = matchIndex + normalizedQuery.length;
+    fragments.push(
+      <mark className="message-highlight" key={`${matchIndex}-${matchEnd}`}>
+        {text.slice(matchIndex, matchEnd)}
+      </mark>,
+    );
+    cursor = matchEnd;
+    matchIndex = lowerText.indexOf(normalizedQuery, cursor);
+  }
+
+  if (cursor < text.length) {
+    fragments.push(text.slice(cursor));
+  }
+
+  return fragments;
 }

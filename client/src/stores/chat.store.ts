@@ -37,6 +37,7 @@ interface ChatState {
   selectedConversationId: string | null;
   messagesByConversation: Record<string, ChatMessage[]>;
   error: string | null;
+  searchQuery: string;
   isLoadingConversations: boolean;
   isLoadingMessages: boolean;
   loadConversations: () => Promise<void>;
@@ -46,6 +47,9 @@ interface ChatState {
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
   markRead: (conversationId: string, messageId: string) => void;
+  deleteLocalMessage: (conversationId: string, messageId: string) => void;
+  clearLocalConversation: (conversationId: string) => void;
+  setSearchQuery: (query: string) => void;
 }
 
 type ChatSet = (
@@ -57,6 +61,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedConversationId: null,
   messagesByConversation: {},
   error: null,
+  searchQuery: '',
   isLoadingConversations: false,
   isLoadingMessages: false,
   loadConversations: async () => {
@@ -175,6 +180,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   markRead: (conversationId, messageId) => {
     sendRealtimeRead({ conversationId, messageId });
+  },
+  deleteLocalMessage: (conversationId, messageId) => {
+    set((state) => ({
+      messagesByConversation: {
+        ...state.messagesByConversation,
+        [conversationId]: (state.messagesByConversation[conversationId] ?? []).filter(
+          (message) => message.id !== messageId && message.clientMessageId !== messageId,
+        ),
+      },
+    }));
+  },
+  clearLocalConversation: (conversationId) => {
+    set((state) => ({
+      messagesByConversation: {
+        ...state.messagesByConversation,
+        [conversationId]: [],
+      },
+    }));
+  },
+  setSearchQuery: (query) => {
+    set({ searchQuery: query });
   },
 }));
 

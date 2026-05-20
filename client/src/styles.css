@@ -126,6 +126,18 @@ button {
   border-color: #bfdbfe;
 }
 
+.compact-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .auth-links {
   display: flex;
   flex-wrap: wrap;
@@ -219,7 +231,7 @@ button {
 .chat-panel {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   background: #f8fafc;
   position: relative;
 }
@@ -392,6 +404,29 @@ button {
   padding: 18px;
 }
 
+.chat-search-bar {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border-bottom: 1px solid #e5ebf3;
+  background: #ffffff;
+}
+
+.chat-search-bar input {
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+.chat-search-bar span {
+  color: #64748b;
+  font-size: 13px;
+}
+
 .message-row {
   display: flex;
   justify-content: flex-start;
@@ -423,8 +458,33 @@ button {
 
 .message-bubble span {
   display: block;
-  text-align: right;
   font-size: 12px;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.message-action {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  padding: 0;
+  font-size: 12px;
+}
+
+.message-action:hover {
+  color: #b42318;
+}
+
+.message-highlight {
+  border-radius: 3px;
+  background: #fde68a;
+  color: inherit;
+  padding: 0 2px;
 }
 
 .message-input {
