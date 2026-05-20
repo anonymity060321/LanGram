@@ -66,6 +66,9 @@ function createGateway(): {
     markRead: jest.MockedFunction<
       (readerId: string, conversationId: string, messageId: string) => Promise<unknown>
     >;
+    recallMessage: jest.MockedFunction<
+      (userId: string, conversationId: string, messageId: string) => Promise<unknown>
+    >;
     getConversationPeerIds: jest.MockedFunction<
       (conversationId: string, userId: string) => Promise<string[]>
     >;
@@ -79,6 +82,7 @@ function createGateway(): {
     markDelivered: jest.fn(),
     sendTextMessage: jest.fn(),
     markRead: jest.fn(),
+    recallMessage: jest.fn(),
     getConversationPeerIds: jest.fn(),
   };
 
@@ -197,6 +201,45 @@ describe('RealtimeGateway', () => {
     expect(sender.emit).toHaveBeenCalledWith(
       REALTIME_EVENTS.MESSAGE_DELIVERED,
       expect.objectContaining({ messageId: 'message-id' }),
+    );
+  });
+
+  it('handles message:recall and emits message:recalled to both peers', async () => {
+    const { gateway, authService, messagesService } = createGateway();
+    const sender = createSocket('sender-socket');
+    const receiver = createSocket('receiver-socket');
+    const recalledAt = new Date('2026-05-19T00:01:00.000Z');
+    authService.authenticate
+      .mockResolvedValueOnce({ id: 'user-a', sessionId: 'session-a', accountType: 'GUEST' })
+      .mockResolvedValueOnce({ id: 'user-b', sessionId: 'session-b', accountType: 'GUEST' });
+    messagesService.listUndeliveredMessages.mockResolvedValue([]);
+    messagesService.recallMessage.mockResolvedValue({
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      senderId: 'user-a',
+      recalledAt,
+    });
+    messagesService.getConversationPeerIds.mockResolvedValue(['user-b']);
+
+    await gateway.handleConnection(sender as never);
+    await gateway.handleConnection(receiver as never);
+    await gateway.handleMessageRecall(sender as never, {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+    });
+
+    expect(messagesService.recallMessage).toHaveBeenCalledWith(
+      'user-a',
+      'conversation-id',
+      'message-id',
+    );
+    expect(sender.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_RECALLED,
+      expect.objectContaining({ messageId: 'message-id', recalledAt }),
+    );
+    expect(receiver.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_RECALLED,
+      expect.objectContaining({ messageId: 'message-id', recalledAt }),
     );
   });
 });

@@ -11,6 +11,7 @@ import { AuthenticatedUser } from '../common/current-user';
 import { MessagesService } from '../messages/messages.service';
 import { RealtimeAuthService } from './realtime-auth.service';
 import {
+  MessageRecallPayload,
   MessageReadPayload,
   MessageSendPayload,
   REALTIME_EVENTS,
@@ -131,6 +132,37 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
       for (const peerId of peerIds) {
         this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_READ, read);
+      }
+    } catch (error) {
+      client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));
+    }
+  }
+
+  @SubscribeMessage(REALTIME_EVENTS.MESSAGE_RECALL)
+  async handleMessageRecall(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: MessageRecallPayload,
+  ): Promise<void> {
+    const user = this.getSocketUser(client);
+    if (!user) {
+      client.emit(REALTIME_EVENTS.ERROR, {
+        code: 'WS_UNAUTHORIZED',
+        message: 'Unauthorized realtime event',
+      } satisfies RealtimeErrorPayload);
+      return;
+    }
+
+    try {
+      const recalled = await this.messagesService.recallMessage(
+        user.id,
+        payload.conversationId,
+        payload.messageId,
+      );
+      client.emit(REALTIME_EVENTS.MESSAGE_RECALLED, recalled);
+
+      const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
+      for (const peerId of peerIds) {
+        this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_RECALLED, recalled);
       }
     } catch (error) {
       client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));

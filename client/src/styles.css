@@ -450,6 +450,12 @@ button {
   border-color: #bbf7d0;
 }
 
+.message-bubble.is-recalled {
+  background: #f8fafc;
+  border-color: #d6deea;
+  color: #64748b;
+}
+
 .message-bubble p {
   margin: 0 0 5px;
   white-space: pre-wrap;

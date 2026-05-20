@@ -13,13 +13,15 @@ import {
   disconnectRealtime,
   sendRealtimeMessage,
   sendRealtimeRead,
+  sendRealtimeRecall,
   type MessageDeliveredPayload,
   type MessageNewPayload,
   type MessageReadPayload,
+  type MessageRecalledPayload,
   type RealtimeErrorPayload,
 } from '../realtime/socket';
 
-export type LocalMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+export type LocalMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'recalled';
 
 export interface ChatMessage {
   id: string;
@@ -29,6 +31,7 @@ export interface ChatMessage {
   plaintext: string;
   status: LocalMessageStatus;
   createdAt: string;
+  recalledAt: string | null;
   isOwn: boolean;
 }
 
@@ -46,6 +49,7 @@ interface ChatState {
   connect: (accessToken: string) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
+  recallMessage: (conversationId: string, messageId: string) => void;
   markRead: (conversationId: string, messageId: string) => void;
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
   clearLocalConversation: (conversationId: string) => void;
@@ -126,6 +130,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onMessageRead: (payload) => {
         handleRead(payload, set);
       },
+      onMessageRecalled: (payload) => {
+        handleRecalled(payload, set);
+      },
       onError: (payload) => {
         handleRealtimeError(payload, set);
       },
@@ -151,6 +158,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       plaintext,
       status: 'sending',
       createdAt,
+      recalledAt: null,
       isOwn: true,
     };
 
@@ -181,6 +189,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markRead: (conversationId, messageId) => {
     sendRealtimeRead({ conversationId, messageId });
   },
+  recallMessage: (conversationId, messageId) => {
+    sendRealtimeRecall({ conversationId, messageId });
+  },
   deleteLocalMessage: (conversationId, messageId) => {
     set((state) => ({
       messagesByConversation: {
@@ -209,13 +220,15 @@ async function toChatMessage(
   conversation: Conversation,
   currentUserId: string,
 ): Promise<ChatMessage> {
+  const isRecalled = message.status === 'RECALLED';
   return {
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
-    plaintext: await decryptSafely(message.ciphertext, message.nonce, conversation),
+    plaintext: isRecalled ? '' : await decryptSafely(message.ciphertext, message.nonce, conversation),
     status: toLocalStatus(message.status),
     createdAt: message.createdAt,
+    recalledAt: message.recalledAt,
     isOwn: message.senderId === currentUserId,
   };
 }
@@ -245,6 +258,7 @@ async function handleIncomingMessage(
     plaintext,
     status: matched?.isOwn ? 'sent' : toLocalStatus(payload.status),
     createdAt: payload.createdAt,
+    recalledAt: null,
     isOwn: matched?.isOwn ?? false,
   };
 
@@ -275,6 +289,28 @@ function handleRead(
   updateMessageStatus(payload.conversationId, payload.messageId, 'read', set);
 }
 
+function handleRecalled(
+  payload: MessageRecalledPayload,
+  set: ChatSet,
+): void {
+  set((state: ChatState) => ({
+    messagesByConversation: {
+      ...state.messagesByConversation,
+      [payload.conversationId]: (state.messagesByConversation[payload.conversationId] ?? []).map(
+        (message) =>
+          message.id === payload.messageId || message.clientMessageId === payload.messageId
+            ? {
+                ...message,
+                plaintext: '',
+                status: 'recalled',
+                recalledAt: payload.recalledAt,
+              }
+            : message,
+      ),
+    },
+  }));
+}
+
 function handleRealtimeError(
   payload: RealtimeErrorPayload,
   set: ChatSet,
@@ -295,6 +331,9 @@ async function decryptSafely(
 }
 
 function toLocalStatus(status: EncryptedMessage['status']): LocalMessageStatus {
+  if (status === 'RECALLED') {
+    return 'recalled';
+  }
   if (status === 'READ') {
     return 'read';
   }

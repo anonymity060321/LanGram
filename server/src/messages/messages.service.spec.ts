@@ -238,4 +238,87 @@ describe('MessagesService', () => {
       }),
     );
   });
+
+  it('allows the sender to recall a message within two minutes', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(),
+    });
+    prisma.message.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.recallMessage('user-a', 'conversation-id', 'message-id');
+
+    expect(result).toMatchObject({
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      senderId: 'user-a',
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith({
+      where: { id: 'message-id' },
+      data: {
+        status: MessageStatus.RECALLED,
+        recalledAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('rejects recall from a non-sender', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.recallMessage('user-b', 'conversation-id', 'message-id'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects recall after two minutes', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(Date.now() - 121000),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.recallMessage('user-a', 'conversation-id', 'message-id'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects repeated recall', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.RECALLED,
+      createdAt: new Date(),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.recallMessage('user-a', 'conversation-id', 'message-id'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
 });

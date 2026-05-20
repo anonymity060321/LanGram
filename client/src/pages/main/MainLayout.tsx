@@ -22,6 +22,7 @@ export function MainLayout(): JSX.Element {
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
+  const recallMessage = useChatStore((state) => state.recallMessage);
   const deleteLocalMessage = useChatStore((state) => state.deleteLocalMessage);
   const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
   const setSearchQuery = useChatStore((state) => state.setSearchQuery);
@@ -97,6 +98,14 @@ export function MainLayout(): JSX.Element {
     }
 
     deleteLocalMessage(selectedConversationId, messageId);
+  }
+
+  function handleRecallMessage(messageId: string): void {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    recallMessage(selectedConversationId, messageId);
   }
 
   function handleClearLocalConversation(): void {
@@ -189,6 +198,7 @@ export function MainLayout(): JSX.Element {
               searchQuery={searchQuery}
               hasSearchQuery={searchQuery.trim().length > 0}
               onDeleteLocalMessage={handleDeleteLocalMessage}
+              onRecallMessage={handleRecallMessage}
             />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <input
@@ -241,12 +251,14 @@ function MessageList({
   searchQuery,
   hasSearchQuery,
   onDeleteLocalMessage,
+  onRecallMessage,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
   searchQuery: string;
   hasSearchQuery: boolean;
   onDeleteLocalMessage: (messageId: string) => void;
+  onRecallMessage: (messageId: string) => void;
 }): JSX.Element {
   const { t } = useI18n();
 
@@ -270,12 +282,27 @@ function MessageList({
     <div className="message-list">
       {messages.map((message) => (
         <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
-          <div className="message-bubble">
-            <p>{renderHighlightedText(message.plaintext, searchQuery)}</p>
+          <div className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}>
+            <p>
+              {message.status === 'recalled'
+                ? t('chat.messageRecalled')
+                : renderHighlightedText(message.plaintext, searchQuery)}
+            </p>
             <div className="message-meta">
               <span>
-                {message.isOwn ? t(`chat.status.${message.status}`) : formatTime(message.createdAt)}
+                {message.isOwn && message.status !== 'recalled'
+                  ? t(`chat.status.${message.status}`)
+                  : formatTime(message.recalledAt ?? message.createdAt)}
               </span>
+              {message.isOwn && message.status !== 'recalled' && canRecallMessage(message) ? (
+                <button
+                  type="button"
+                  className="message-action"
+                  onClick={() => onRecallMessage(message.id)}
+                >
+                  {t('chat.recall')}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="message-action"
@@ -293,6 +320,10 @@ function MessageList({
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function canRecallMessage(message: ChatMessage): boolean {
+  return Date.now() - new Date(message.createdAt).getTime() <= 2 * 60 * 1000;
 }
 
 function filterMessages(messages: ChatMessage[], query: string): ChatMessage[] {

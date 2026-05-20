@@ -41,6 +41,13 @@ export interface ReadEventPayload {
   readAt: Date;
 }
 
+export interface RecallEventPayload {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  recalledAt: Date;
+}
+
 type MessageWithSender = {
   id: string;
   conversationId: string;
@@ -53,6 +60,8 @@ type MessageWithSender = {
   status: MessageStatus;
   createdAt: Date;
 };
+
+const MESSAGE_RECALL_WINDOW_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class MessagesService {
@@ -233,6 +242,60 @@ export class MessagesService {
       messageId,
       readerId,
       readAt,
+    };
+  }
+
+  async recallMessage(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<RecallEventPayload> {
+    await this.assertConversationMember(userId, conversationId);
+
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        senderId: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    if (!message) {
+      throw new BadRequestException('Message does not belong to this conversation');
+    }
+
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('Only the sender can recall this message');
+    }
+
+    if (message.status === MessageStatus.RECALLED) {
+      throw new BadRequestException('Message has already been recalled');
+    }
+
+    if (Date.now() - message.createdAt.getTime() > MESSAGE_RECALL_WINDOW_MS) {
+      throw new BadRequestException('Message recall window has expired');
+    }
+
+    const recalledAt = new Date();
+    await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        status: MessageStatus.RECALLED,
+        recalledAt,
+      },
+    });
+
+    return {
+      conversationId: message.conversationId,
+      messageId: message.id,
+      senderId: message.senderId,
+      recalledAt,
     };
   }
 

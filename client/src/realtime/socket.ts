@@ -6,6 +6,8 @@ export const REALTIME_EVENTS = {
   MESSAGE_NEW: 'message:new',
   MESSAGE_DELIVERED: 'message:delivered',
   MESSAGE_READ: 'message:read',
+  MESSAGE_RECALL: 'message:recall',
+  MESSAGE_RECALLED: 'message:recalled',
   ERROR: 'error',
 } as const;
 
@@ -48,6 +50,13 @@ export interface MessageReadPayload {
   readAt: string;
 }
 
+export interface MessageRecalledPayload {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  recalledAt: string;
+}
+
 export interface RealtimeErrorPayload {
   code: string;
   message: string;
@@ -57,6 +66,7 @@ interface RealtimeHandlers {
   onMessageNew: (payload: MessageNewPayload) => void;
   onMessageDelivered: (payload: MessageDeliveredPayload) => void;
   onMessageRead: (payload: MessageReadPayload) => void;
+  onMessageRecalled: (payload: MessageRecalledPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
 }
 
@@ -78,6 +88,7 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.MESSAGE_NEW, handlers.onMessageNew);
   socket.on(REALTIME_EVENTS.MESSAGE_DELIVERED, handlers.onMessageDelivered);
   socket.on(REALTIME_EVENTS.MESSAGE_READ, handlers.onMessageRead);
+  socket.on(REALTIME_EVENTS.MESSAGE_RECALLED, handlers.onMessageRecalled);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
   socket.on('connect_error', (error) => {
     handlers.onError({ code: 'WS_CONNECT_ERROR', message: error.message });
@@ -99,6 +110,10 @@ export function sendRealtimeMessage(payload: MessageSendPayload): void {
 
 export function sendRealtimeRead(payload: { conversationId: string; messageId: string }): void {
   socket?.emit(REALTIME_EVENTS.MESSAGE_READ, payload);
+}
+
+export function sendRealtimeRecall(payload: { conversationId: string; messageId: string }): void {
+  socket?.emit(REALTIME_EVENTS.MESSAGE_RECALL, payload);
 }
 
 function resolveSocketUrl(apiBaseUrl: string): string {
