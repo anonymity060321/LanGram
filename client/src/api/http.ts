@@ -40,7 +40,7 @@ export async function apiRequest<TResponse>(
   const headers = new Headers(options.headers);
   const hasBody = options.body !== undefined;
 
-  if (hasBody && !headers.has('Content-Type')) {
+  if (hasBody && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 

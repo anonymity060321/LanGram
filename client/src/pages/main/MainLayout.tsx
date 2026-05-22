@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
+import { uploadFile, type FileKind, type FileMetadataResponse } from '../../api/files.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
@@ -31,6 +32,11 @@ export function MainLayout(): JSX.Element {
   const setSearchQuery = useChatStore((state) => state.setSearchQuery);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
+  const [uploadState, setUploadState] = useState<FileUploadState>({
+    isUploading: false,
+    notice: null,
+    error: null,
+  });
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const messages = useMemo(
@@ -97,6 +103,42 @@ export function MainLayout(): JSX.Element {
     const plaintext = messageDraft.trim();
     setMessageDraft('');
     await sendTextMessage(selectedConversationId, plaintext, user.id);
+  }
+
+  async function handleFileSelected(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = '';
+
+    if (!selectedConversationId || !file) {
+      return;
+    }
+
+    const kind = detectFileKind(file);
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setUploadState({ isUploading: false, notice: null, error: t('chat.fileTooLarge') });
+      return;
+    }
+
+    if (!kind) {
+      setUploadState({ isUploading: false, notice: null, error: t('chat.unsupportedFileType') });
+      return;
+    }
+
+    setUploadState({ isUploading: true, notice: null, error: null });
+    try {
+      const metadata = await uploadFile({
+        file,
+        conversationId: selectedConversationId,
+        kind,
+      });
+      setUploadState({
+        isUploading: false,
+        notice: formatUploadNotice(metadata),
+        error: null,
+      });
+    } catch {
+      setUploadState({ isUploading: false, notice: null, error: t('chat.uploadFailed') });
+    }
   }
 
   function handleDeleteLocalMessage(messageId: string): void {
@@ -235,6 +277,15 @@ export function MainLayout(): JSX.Element {
               forwardTargets={forwardTargets}
             />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
+              <label className={`file-upload-button ${uploadState.isUploading ? 'is-disabled' : ''}`}>
+                <input
+                  type="file"
+                  onChange={(event) => void handleFileSelected(event)}
+                  disabled={uploadState.isUploading}
+                  accept={SUPPORTED_UPLOAD_MIME_TYPES.join(',')}
+                />
+                <span>{uploadState.isUploading ? t('chat.uploading') : t('chat.chooseFile')}</span>
+              </label>
               <input
                 value={messageDraft}
                 onChange={(event) => setMessageDraft(event.target.value)}
@@ -244,6 +295,12 @@ export function MainLayout(): JSX.Element {
                 {t('chat.send')}
               </button>
             </form>
+            {uploadState.notice || uploadState.error ? (
+              <div className={`file-upload-status ${uploadState.error ? 'is-error' : ''}`}>
+                <span>{uploadState.error ?? t('chat.uploadSuccess')}</span>
+                {uploadState.notice ? <small>{uploadState.notice}</small> : null}
+              </div>
+            ) : null}
           </>
         ) : (
           <div className="empty-chat-state">
@@ -467,6 +524,55 @@ function canRecallMessage(message: ChatMessage): boolean {
 
 function canEditMessage(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000;
+}
+
+interface FileUploadState {
+  isUploading: boolean;
+  notice: string | null;
+  error: string | null;
+}
+
+const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
+const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const FILE_UPLOAD_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/csv',
+  'text/plain',
+]);
+const SUPPORTED_UPLOAD_MIME_TYPES = [
+  ...Array.from(IMAGE_UPLOAD_MIME_TYPES),
+  ...Array.from(FILE_UPLOAD_MIME_TYPES),
+];
+
+function detectFileKind(file: File): FileKind | null {
+  const mimeType = file.type.toLowerCase();
+  if (IMAGE_UPLOAD_MIME_TYPES.has(mimeType)) {
+    return 'IMAGE';
+  }
+  if (FILE_UPLOAD_MIME_TYPES.has(mimeType)) {
+    return 'FILE';
+  }
+
+  return null;
+}
+
+function formatUploadNotice(metadata: FileMetadataResponse): string {
+  return `${metadata.originalName} (${formatFileSize(Number(metadata.sizeBytes))})`;
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (sizeBytes >= 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${sizeBytes} B`;
 }
 
 interface ForwardTarget {
