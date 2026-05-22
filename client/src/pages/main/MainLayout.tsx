@@ -24,6 +24,7 @@ export function MainLayout(): JSX.Element {
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
+  const sendFileMessage = useChatStore((state) => state.sendFileMessage);
   const editMessage = useChatStore((state) => state.editMessage);
   const forwardMessage = useChatStore((state) => state.forwardMessage);
   const recallMessage = useChatStore((state) => state.recallMessage);
@@ -109,7 +110,7 @@ export function MainLayout(): JSX.Element {
     const file = event.target.files?.[0] ?? null;
     event.target.value = '';
 
-    if (!selectedConversationId || !file) {
+    if (!user || !selectedConversationId || !file) {
       return;
     }
 
@@ -131,6 +132,7 @@ export function MainLayout(): JSX.Element {
         conversationId: selectedConversationId,
         kind,
       });
+      await sendFileMessage(selectedConversationId, metadata, user.id);
       setUploadState({
         isUploading: false,
         notice: formatUploadNotice(metadata),
@@ -426,7 +428,7 @@ function MessageList({
               <p>
                 {message.status === 'recalled'
                   ? t('chat.messageRecalled')
-                  : renderHighlightedText(message.plaintext, searchQuery)}
+                  : renderMessageBody(message, searchQuery, t)}
               </p>
             )}
             <div className="message-meta">
@@ -524,6 +526,42 @@ function canRecallMessage(message: ChatMessage): boolean {
 
 function canEditMessage(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000;
+}
+
+function renderMessageBody(
+  message: ChatMessage,
+  searchQuery: string,
+  t: ReturnType<typeof useI18n>['t'],
+): Array<string | JSX.Element> | JSX.Element | string {
+  if (message.messageType === 'IMAGE' && message.file) {
+    return (
+      <span className="file-message-card">
+        <span className="file-message-icon">{t('chat.image')}</span>
+        <span>
+          <strong>{message.file.originalName}</strong>
+          <small>
+            {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
+          </small>
+        </span>
+      </span>
+    );
+  }
+
+  if (message.messageType === 'FILE' && message.file) {
+    return (
+      <span className="file-message-card">
+        <span className="file-message-icon">{t('chat.file')}</span>
+        <span>
+          <strong>{message.file.originalName}</strong>
+          <small>
+            {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
+          </small>
+        </span>
+      </span>
+    );
+  }
+
+  return renderHighlightedText(message.plaintext, searchQuery);
 }
 
 interface FileUploadState {

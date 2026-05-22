@@ -38,6 +38,7 @@ function messagePayload(): {
   encryptionVersion: string;
   replyToMessageId: null;
   status: MessageStatus;
+  file: null;
   createdAt: Date;
 } {
   return {
@@ -50,6 +51,7 @@ function messagePayload(): {
     encryptionVersion: 'mvp-v1',
     replyToMessageId: null,
     status: MessageStatus.SENT,
+    file: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),
   };
 }
@@ -195,12 +197,14 @@ describe('RealtimeGateway', () => {
       ciphertext: 'ciphertext-value',
       nonce: 'nonce-value',
       encryptionVersion: 'mvp-v1',
+      fileId: null,
     });
 
     expect(messagesService.sendTextMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         senderId: 'user-a',
         ciphertext: 'ciphertext-value',
+        fileId: null,
       }),
     );
     expect(receiver.emit).toHaveBeenCalledWith(

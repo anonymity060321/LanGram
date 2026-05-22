@@ -65,6 +65,10 @@ function fileAssetFixture(): unknown {
   };
 }
 
+function toLatin1Mojibake(value: string): string {
+  return Buffer.from(value, 'utf8').toString('latin1');
+}
+
 describe('FilesService', () => {
   it('sanitizes original names and removes path traversal segments', () => {
     const service = createService(createMockPrisma());
@@ -72,6 +76,27 @@ describe('FilesService', () => {
     expect(service.sanitizeOriginalName('..\\..\\report?.pdf')).toBe('report_.pdf');
     expect(service.sanitizeOriginalName('../')).toBe('file');
     expect(service.sanitizeOriginalName('  photo   one.jpg  ')).toBe('photo one.jpg');
+  });
+
+  it('recovers UTF-8 Chinese names decoded by multipart as latin1', () => {
+    const service = createService(createMockPrisma());
+
+    expect(service.normalizeUploadedOriginalName(toLatin1Mojibake('测试文档.docx'))).toBe(
+      '测试文档.docx',
+    );
+    expect(service.normalizeUploadedOriginalName(toLatin1Mojibake('图片文件.png'))).toBe(
+      '图片文件.png',
+    );
+    expect(service.sanitizeOriginalName(`..\\${toLatin1Mojibake('图片文件.png')}`)).toBe(
+      '图片文件.png',
+    );
+  });
+
+  it('keeps normal English and already-correct Chinese names unchanged', () => {
+    const service = createService(createMockPrisma());
+
+    expect(service.normalizeUploadedOriginalName('report.docx')).toBe('report.docx');
+    expect(service.sanitizeOriginalName('测试文档.docx')).toBe('测试文档.docx');
   });
 
   it('rejects files larger than 200MB or invalid sizes', () => {
@@ -139,6 +164,36 @@ describe('FilesService', () => {
     expect(createArgs.select).not.toHaveProperty('storagePath');
     expect(result).not.toHaveProperty('storagePath');
     expect(result.sizeBytes).toBe('1024');
+  });
+
+  it('creates metadata with recovered Chinese original names', async () => {
+    const prisma = createMockPrisma();
+    prisma.fileAsset.create.mockResolvedValue({
+      ...(fileAssetFixture() as Record<string, unknown>),
+      originalName: '测试文档.docx',
+      safeName: 'file-id.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    const service = createService(prisma);
+
+    const result = await service.createUploadedFileAsset({
+      uploaderId: 'user-a',
+      conversationId: 'conversation-id',
+      kind: FileKind.FILE,
+      originalName: toLatin1Mojibake('测试文档.docx'),
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sizeBytes: 1024,
+      sha256: 'a'.repeat(64),
+    });
+    const createArgs = prisma.fileAsset.create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+      select: Record<string, boolean>;
+    };
+
+    expect(createArgs.data.originalName).toBe('测试文档.docx');
+    expect(createArgs.data.safeName).toEqual(expect.stringMatching(/\.docx$/));
+    expect(createArgs.select).not.toHaveProperty('storagePath');
+    expect(result.originalName).toBe('测试文档.docx');
   });
 
   it('checks conversation membership before allowing file metadata access', async () => {
@@ -262,6 +317,64 @@ describe('FilesService', () => {
     expect(createArgs.select).not.toHaveProperty('storagePath');
     expect(result).not.toHaveProperty('storagePath');
     expect(result.originalName).toBe('secret_.pdf');
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('saves uploaded file metadata with recovered Chinese original names', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'langram-upload-test-'));
+    const tempFile = join(tempDir, 'upload.tmp');
+    await writeFile(tempFile, 'file-content');
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.fileAsset.create.mockImplementation(async (args: unknown) => {
+      const createArgs = args as {
+        data: {
+          id: string;
+          uploaderId: string;
+          conversationId: string;
+          kind: FileKind;
+          originalName: string;
+          safeName: string;
+          mimeType: string;
+          sizeBytes: bigint;
+          sha256: string;
+          width: number | null;
+          height: number | null;
+          status: FileStatus;
+        };
+      };
+
+      return {
+        ...createArgs.data,
+        messageId: null,
+        createdAt: new Date('2026-05-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-22T00:00:00.000Z'),
+        deletedAt: null,
+      };
+    });
+    const service = createService(prisma, join(tempDir, 'storage'));
+
+    const result = await service.saveUploadedFile({
+      userId: 'user-a',
+      conversationId: 'conversation-id',
+      kind: FileKind.IMAGE,
+      file: {
+        path: tempFile,
+        originalname: toLatin1Mojibake('图片文件.png'),
+        mimetype: 'image/png',
+        size: 12,
+      },
+    });
+    const createArgs = prisma.fileAsset.create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+      select: Record<string, boolean>;
+    };
+
+    expect(createArgs.data.originalName).toBe('图片文件.png');
+    expect(createArgs.data.safeName).toEqual(expect.stringMatching(/\.png$/));
+    expect(createArgs.select).not.toHaveProperty('storagePath');
+    expect(result.originalName).toBe('图片文件.png');
 
     await rm(tempDir, { recursive: true, force: true });
   });

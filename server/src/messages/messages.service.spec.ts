@@ -18,8 +18,13 @@ interface MockPrisma {
   message: {
     create: MockFunction<(args: unknown) => Promise<unknown>>;
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
+    findUniqueOrThrow: MockFunction<(args: unknown) => Promise<unknown>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
     updateMany: MockFunction<(args: unknown) => Promise<unknown>>;
+  };
+  fileAsset: {
+    findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
+    update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   messageDelivery: {
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
@@ -42,8 +47,13 @@ function createMockPrisma(): MockPrisma {
     message: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+    },
+    fileAsset: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
     },
     messageDelivery: {
       findFirst: jest.fn(),
@@ -83,6 +93,7 @@ function messageFixture(): unknown {
     nonce: 'nonce-value',
     replyToMessageId: null,
     status: MessageStatus.SENT,
+    fileAsset: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),
   };
 }
@@ -108,6 +119,7 @@ describe('MessagesService', () => {
       { userId: 'user-b' },
     ]);
     prisma.message.create.mockResolvedValue(messageFixture());
+    prisma.message.findUniqueOrThrow.mockResolvedValue(messageFixture());
     prisma.conversation.update.mockResolvedValue({});
     const service = createService(prisma);
 
@@ -133,17 +145,102 @@ describe('MessagesService', () => {
     expect(result.receiverIds).toEqual(['user-b']);
   });
 
-  it('rejects non-TEXT messages in Phase 4.2', async () => {
+  it('rejects file messages without fileId', async () => {
     const prisma = createMockPrisma();
     const service = createService(prisma);
 
     await expect(
       service.sendTextMessage({
         ...sendInput(),
-        messageType: 'IMAGE',
+        messageType: MessageType.IMAGE,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects TEXT messages with fileId', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(
+      service.sendTextMessage({
+        ...sendInput(),
+        fileId: 'file-id',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('attaches uploaded file metadata when sending IMAGE messages', async () => {
+    const prisma = createMockPrisma();
+    const fileAsset = {
+      id: 'file-id',
+      uploaderId: 'user-a',
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      kind: 'IMAGE',
+      originalName: 'photo.jpg',
+      safeName: 'file-id.jpg',
+      mimeType: 'image/jpeg',
+      sizeBytes: BigInt(1024),
+      sha256: 'a'.repeat(64),
+      width: 800,
+      height: 600,
+      status: 'ATTACHED',
+      createdAt: new Date('2026-05-19T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-19T00:00:00.000Z'),
+      deletedAt: null,
+    };
+    prisma.conversationMember.findMany.mockResolvedValue([
+      { userId: 'user-a' },
+      { userId: 'user-b' },
+    ]);
+    prisma.fileAsset.findFirst.mockResolvedValue({ id: 'file-id' });
+    prisma.message.create.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.IMAGE,
+      fileAsset: null,
+    });
+    prisma.fileAsset.update.mockResolvedValue({});
+    prisma.message.findUniqueOrThrow.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.IMAGE,
+      fileAsset,
+    });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.sendTextMessage({
+      ...sendInput(),
+      messageType: MessageType.IMAGE,
+      fileId: 'file-id',
+    });
+
+    expect(prisma.fileAsset.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'file-id',
+          conversationId: 'conversation-id',
+          status: 'UPLOADED',
+        }),
+      }),
+    );
+    expect(prisma.fileAsset.update).toHaveBeenCalledWith({
+      where: { id: 'file-id' },
+      data: {
+        messageId: 'message-id',
+        status: 'ATTACHED',
+      },
+    });
+    expect(result.message).toMatchObject({
+      messageType: MessageType.IMAGE,
+      file: {
+        id: 'file-id',
+        originalName: 'photo.jpg',
+        sizeBytes: '1024',
+      },
+    });
+    expect(JSON.stringify(result.message)).not.toContain('storagePath');
   });
 
   it('rejects sends from non-members', async () => {

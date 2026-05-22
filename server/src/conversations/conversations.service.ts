@@ -33,10 +33,30 @@ type MessageRecord = {
   nonce: string;
   replyToMessageId: string | null;
   status: MessageStatus;
+  fileAsset: MessageFileAssetRecord | null;
   editedAt: Date | null;
   recalledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type MessageFileAssetRecord = {
+  id: string;
+  uploaderId: string;
+  conversationId: string;
+  messageId: string | null;
+  kind: string;
+  originalName: string;
+  safeName: string;
+  mimeType: string;
+  sizeBytes: bigint;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
 };
 
 @Injectable()
@@ -243,10 +263,34 @@ export class ConversationsService {
       nonce: true,
       replyToMessageId: true,
       status: true,
+      fileAsset: {
+        select: this.fileMetadataSelect(),
+      },
       editedAt: true,
       recalledAt: true,
       createdAt: true,
       updatedAt: true,
+    };
+  }
+
+  private fileMetadataSelect(): Prisma.FileAssetSelect {
+    return {
+      id: true,
+      uploaderId: true,
+      conversationId: true,
+      messageId: true,
+      kind: true,
+      originalName: true,
+      safeName: true,
+      mimeType: true,
+      sizeBytes: true,
+      sha256: true,
+      width: true,
+      height: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      deletedAt: true,
     };
   }
 
@@ -274,10 +318,32 @@ export class ConversationsService {
       nonce: message.nonce,
       replyToMessageId: message.replyToMessageId,
       status: message.status,
+      file: message.fileAsset ? this.toFileMetadataDto(message.fileAsset) : null,
       editedAt: message.editedAt,
       recalledAt: message.recalledAt,
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
+    };
+  }
+
+  private toFileMetadataDto(file: MessageFileAssetRecord): unknown {
+    return {
+      id: file.id,
+      uploaderId: file.uploaderId,
+      conversationId: file.conversationId,
+      messageId: file.messageId,
+      kind: file.kind,
+      originalName: file.originalName,
+      safeName: file.safeName,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes.toString(),
+      sha256: file.sha256,
+      width: file.width,
+      height: file.height,
+      status: file.status,
+      createdAt: file.createdAt,
+      updatedAt: file.updatedAt,
+      deletedAt: file.deletedAt,
     };
   }
 

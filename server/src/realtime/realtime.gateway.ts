@@ -86,6 +86,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         ciphertext: payload.ciphertext,
         nonce: payload.nonce,
         encryptionVersion: payload.encryptionVersion,
+        fileId: payload.fileId ?? null,
         replyToMessageId: payload.replyToMessageId ?? null,
       });
 

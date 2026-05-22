@@ -14,10 +14,11 @@ export const REALTIME_EVENTS = {
 export interface MessageSendPayload {
   clientMessageId: string;
   conversationId: string;
-  messageType: 'TEXT';
+  messageType: 'TEXT' | 'IMAGE' | 'FILE';
   ciphertext: string;
   nonce: string;
   encryptionVersion: string;
+  fileId?: string | null;
   replyToMessageId?: string | null;
   createdAt?: string;
 }

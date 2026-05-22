@@ -579,6 +579,45 @@ button {
   padding: 0 2px;
 }
 
+.file-message-card {
+  min-width: min(280px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.file-message-card strong,
+.file-message-card small {
+  display: block;
+}
+
+.file-message-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #172033;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-message-card small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.file-message-icon {
+  min-width: 44px;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .message-input {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

@@ -1,7 +1,8 @@
 import { apiRequest } from './http';
+import type { FileMetadataResponse } from './files.api';
 
 export type ConversationType = 'DIRECT';
-export type MessageType = 'TEXT';
+export type MessageType = 'TEXT' | 'IMAGE' | 'FILE';
 export type ServerMessageStatus = 'SENT' | 'DELIVERED' | 'READ' | 'RECALLED';
 
 export interface ConversationUser {
@@ -30,6 +31,7 @@ export interface EncryptedMessage {
   nonce: string;
   replyToMessageId: string | null;
   status: ServerMessageStatus;
+  file: FileMetadataResponse | null;
   editedAt: string | null;
   recalledAt: string | null;
   createdAt: string;

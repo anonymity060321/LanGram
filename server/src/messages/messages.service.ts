@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { MessageStatus, MessageType, Prisma } from '@prisma/client';
+import { FileStatus, MessageStatus, MessageType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface SendTextMessageInput {
@@ -11,6 +11,26 @@ export interface SendTextMessageInput {
   nonce: string;
   encryptionVersion: string;
   replyToMessageId?: string | null;
+  fileId?: string | null;
+}
+
+export interface MessageFileMetadataPayload {
+  id: string;
+  uploaderId: string;
+  conversationId: string;
+  messageId: string | null;
+  kind: string;
+  originalName: string;
+  safeName: string;
+  mimeType: string;
+  sizeBytes: string;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
 }
 
 export interface MessageEventPayload {
@@ -24,6 +44,7 @@ export interface MessageEventPayload {
   encryptionVersion: string;
   replyToMessageId: string | null;
   status: MessageStatus;
+  file: MessageFileMetadataPayload | null;
   createdAt: Date;
 }
 
@@ -74,7 +95,27 @@ type MessageWithSender = {
   nonce: string;
   replyToMessageId: string | null;
   status: MessageStatus;
+  fileAsset: MessageFileAssetRecord | null;
   createdAt: Date;
+};
+
+type MessageFileAssetRecord = {
+  id: string;
+  uploaderId: string;
+  conversationId: string;
+  messageId: string | null;
+  kind: string;
+  originalName: string;
+  safeName: string;
+  mimeType: string;
+  sizeBytes: bigint;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
 };
 
 const MESSAGE_RECALL_WINDOW_MS = 2 * 60 * 1000;
@@ -88,7 +129,7 @@ export class MessagesService {
     message: MessageEventPayload;
     receiverIds: string[];
   }> {
-    this.assertTextMessageInput(input);
+    this.assertMessageInput(input);
 
     const members = await this.getConversationMembers(input.conversationId);
     if (!members.some((member) => member.userId === input.senderId)) {
@@ -108,11 +149,28 @@ export class MessagesService {
     }
 
     const message = await this.prisma.$transaction(async (tx) => {
+      let fileAsset: { id: string } | null = null;
+      if (input.messageType !== MessageType.TEXT) {
+        fileAsset = await tx.fileAsset.findFirst({
+          where: {
+            id: input.fileId ?? '',
+            conversationId: input.conversationId,
+            status: FileStatus.UPLOADED,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+
+        if (!fileAsset) {
+          throw new BadRequestException('File is not available for this conversation');
+        }
+      }
+
       const created = await tx.message.create({
         data: {
           conversationId: input.conversationId,
           senderId: input.senderId,
-          messageType: MessageType.TEXT,
+          messageType: input.messageType as MessageType,
           ciphertext: input.ciphertext,
           encryptionVersion: input.encryptionVersion,
           nonce: input.nonce,
@@ -125,12 +183,25 @@ export class MessagesService {
         select: this.messageSelect(),
       });
 
+      if (fileAsset) {
+        await tx.fileAsset.update({
+          where: { id: fileAsset.id },
+          data: {
+            messageId: created.id,
+            status: FileStatus.ATTACHED,
+          },
+        });
+      }
+
       await tx.conversation.update({
         where: { id: input.conversationId },
         data: { updatedAt: new Date() },
       });
 
-      return created;
+      return tx.message.findUniqueOrThrow({
+        where: { id: created.id },
+        select: this.messageSelect(),
+      });
     });
 
     return {
@@ -414,9 +485,21 @@ export class MessagesService {
       .filter((memberUserId) => memberUserId !== userId);
   }
 
-  private assertTextMessageInput(input: SendTextMessageInput): void {
-    if (input.messageType !== MessageType.TEXT) {
-      throw new BadRequestException('Only TEXT messages are supported');
+  private assertMessageInput(input: SendTextMessageInput): void {
+    if (
+      input.messageType !== MessageType.TEXT &&
+      input.messageType !== MessageType.IMAGE &&
+      input.messageType !== MessageType.FILE
+    ) {
+      throw new BadRequestException('Unsupported message type');
+    }
+
+    if (input.messageType === MessageType.TEXT && input.fileId) {
+      throw new BadRequestException('TEXT messages cannot include a file');
+    }
+
+    if (input.messageType !== MessageType.TEXT && !input.fileId?.trim()) {
+      throw new BadRequestException('File message requires fileId');
     }
 
     this.assertEncryptedPayload(input);
@@ -479,7 +562,31 @@ export class MessagesService {
       nonce: true,
       replyToMessageId: true,
       status: true,
+      fileAsset: {
+        select: this.fileMetadataSelect(),
+      },
       createdAt: true,
+    };
+  }
+
+  private fileMetadataSelect(): Prisma.FileAssetSelect {
+    return {
+      id: true,
+      uploaderId: true,
+      conversationId: true,
+      messageId: true,
+      kind: true,
+      originalName: true,
+      safeName: true,
+      mimeType: true,
+      sizeBytes: true,
+      sha256: true,
+      width: true,
+      height: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      deletedAt: true,
     };
   }
 
@@ -498,7 +605,29 @@ export class MessagesService {
       encryptionVersion: message.encryptionVersion,
       replyToMessageId: message.replyToMessageId,
       status: message.status,
+      file: message.fileAsset ? this.toFileMetadataPayload(message.fileAsset) : null,
       createdAt: message.createdAt,
+    };
+  }
+
+  private toFileMetadataPayload(file: MessageFileAssetRecord): MessageFileMetadataPayload {
+    return {
+      id: file.id,
+      uploaderId: file.uploaderId,
+      conversationId: file.conversationId,
+      messageId: file.messageId,
+      kind: file.kind,
+      originalName: file.originalName,
+      safeName: file.safeName,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes.toString(),
+      sha256: file.sha256,
+      width: file.width,
+      height: file.height,
+      status: file.status,
+      createdAt: file.createdAt,
+      updatedAt: file.updatedAt,
+      deletedAt: file.deletedAt,
     };
   }
 }

@@ -58,7 +58,8 @@ export class FilesService {
   ) {}
 
   sanitizeOriginalName(originalName: string): string {
-    const baseName = originalName.split(/[\\/]/).pop() ?? '';
+    const normalizedName = this.normalizeUploadedOriginalName(originalName);
+    const baseName = normalizedName.split(/[\\/]/).pop() ?? '';
     const cleaned = baseName
       .split('')
       .filter((character) => {
@@ -76,6 +77,15 @@ export class FilesService {
     }
 
     return safeName;
+  }
+
+  normalizeUploadedOriginalName(originalName: string): string {
+    const recovered = Buffer.from(originalName, 'latin1').toString('utf8');
+    if (!this.isRecoveredOriginalNameReasonable(originalName, recovered)) {
+      return originalName;
+    }
+
+    return recovered;
   }
 
   validateFileSize(sizeBytes: number): void {
@@ -317,6 +327,46 @@ export class FilesService {
         throw error;
       }
     }
+  }
+
+  private isRecoveredOriginalNameReasonable(originalName: string, recoveredName: string): boolean {
+    if (!recoveredName || recoveredName === originalName || recoveredName.includes('\uFFFD')) {
+      return false;
+    }
+
+    const originalCjkCount = this.countCjkCharacters(originalName);
+    const recoveredCjkCount = this.countCjkCharacters(recoveredName);
+    if (recoveredCjkCount > originalCjkCount) {
+      return true;
+    }
+
+    if (this.hasC1ControlCharacter(originalName) && !this.hasC1ControlCharacter(recoveredName)) {
+      return true;
+    }
+
+    return this.hasCommonMojibakeMarker(originalName) && !this.hasCommonMojibakeMarker(recoveredName);
+  }
+
+  private countCjkCharacters(value: string): number {
+    return Array.from(value).filter((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return (
+        (codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+        (codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+        (codePoint >= 0xf900 && codePoint <= 0xfaff)
+      );
+    }).length;
+  }
+
+  private hasC1ControlCharacter(value: string): boolean {
+    return Array.from(value).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint >= 0x80 && codePoint <= 0x9f;
+    });
+  }
+
+  private hasCommonMojibakeMarker(value: string): boolean {
+    return Array.from(value).some((character) => 'ÃÂãäåæçèéêëìíîïðñòóôõöùúûü'.includes(character));
   }
 
   private extractSafeExtension(originalName: string): string {

@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import type { MessageType, ServerMessageStatus } from '../api/conversations.api';
+import type { FileMetadataResponse } from '../api/files.api';
 
 export const REALTIME_EVENTS = {
   MESSAGE_SEND: 'message:send',
@@ -20,6 +21,7 @@ export interface MessageSendPayload {
   ciphertext: string;
   nonce: string;
   encryptionVersion: string;
+  fileId?: string | null;
   replyToMessageId: string | null;
   createdAt: string;
 }
@@ -35,6 +37,7 @@ export interface MessageNewPayload {
   encryptionVersion: string;
   replyToMessageId: string | null;
   status: ServerMessageStatus;
+  file: FileMetadataResponse | null;
   createdAt: string;
 }
 

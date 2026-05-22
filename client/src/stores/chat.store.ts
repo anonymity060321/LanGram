@@ -5,7 +5,9 @@ import {
   listMessages,
   type Conversation,
   type EncryptedMessage,
+  type MessageType,
 } from '../api/conversations.api';
+import type { FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
 import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
 import {
@@ -30,7 +32,9 @@ export interface ChatMessage {
   clientMessageId?: string;
   conversationId: string;
   senderId: string;
+  messageType: MessageType;
   plaintext: string;
+  file: FileMetadataResponse | null;
   status: LocalMessageStatus;
   createdAt: string;
   editedAt: string | null;
@@ -52,6 +56,11 @@ interface ChatState {
   connect: (accessToken: string) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
+  sendFileMessage: (
+    conversationId: string,
+    file: FileMetadataResponse,
+    senderId: string,
+  ) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, newPlaintext: string) => Promise<void>;
   forwardMessage: (
     sourceConversationId: string,
@@ -169,7 +178,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clientMessageId,
       conversationId,
       senderId,
+      messageType: 'TEXT',
       plaintext,
+      file: null,
       status: 'sending',
       createdAt,
       editedAt: null,
@@ -194,11 +205,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ciphertext: encrypted.ciphertext,
         nonce: encrypted.nonce,
         encryptionVersion: encrypted.encryptionVersion,
+        fileId: null,
         replyToMessageId: null,
         createdAt,
       });
     } catch {
       updateMessageStatus(conversationId, clientMessageId, 'failed', set);
+    }
+  },
+  sendFileMessage: async (conversationId, file, senderId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      set({ error: 'Conversation not found' });
+      return;
+    }
+
+    const clientMessageId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const plaintext = JSON.stringify({ caption: '', fileName: file.originalName });
+    const optimisticMessage: ChatMessage = {
+      id: clientMessageId,
+      clientMessageId,
+      conversationId,
+      senderId,
+      messageType: file.kind,
+      plaintext,
+      file,
+      status: 'sending',
+      createdAt,
+      editedAt: null,
+      recalledAt: null,
+      isOwn: true,
+    };
+
+    set((state) => ({
+      messagesByConversation: appendMessage(
+        state.messagesByConversation,
+        conversationId,
+        optimisticMessage,
+      ),
+    }));
+
+    try {
+      const encrypted = await encryptMessage(plaintext, conversation);
+      sendRealtimeMessage({
+        clientMessageId,
+        conversationId,
+        messageType: file.kind,
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce,
+        encryptionVersion: encrypted.encryptionVersion,
+        fileId: file.id,
+        replyToMessageId: null,
+        createdAt,
+      });
+    } catch {
+      updateMessageStatus(conversationId, clientMessageId, 'failed', set);
+      set({ error: 'File message failed' });
     }
   },
   editMessage: async (conversationId, messageId, newPlaintext) => {
@@ -262,7 +325,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clientMessageId,
       conversationId: targetConversationId,
       senderId,
+      messageType: 'TEXT',
       plaintext: sourceMessage.plaintext,
+      file: null,
       status: 'sending',
       createdAt,
       editedAt: null,
@@ -287,6 +352,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ciphertext: encrypted.ciphertext,
         nonce: encrypted.nonce,
         encryptionVersion: encrypted.encryptionVersion,
+        fileId: null,
         replyToMessageId: null,
         createdAt,
       });
@@ -334,7 +400,9 @@ async function toChatMessage(
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
+    messageType: message.messageType,
     plaintext: isRecalled ? '' : await decryptSafely(message.ciphertext, message.nonce, conversation),
+    file: message.file,
     status: toLocalStatus(message.status),
     createdAt: message.createdAt,
     editedAt: message.editedAt,
@@ -365,7 +433,9 @@ async function handleIncomingMessage(
     clientMessageId: payload.clientMessageId,
     conversationId: payload.conversationId,
     senderId: payload.senderId,
+    messageType: payload.messageType,
     plaintext,
+    file: payload.file,
     status: matched?.isOwn ? 'sent' : toLocalStatus(payload.status),
     createdAt: payload.createdAt,
     editedAt: null,
