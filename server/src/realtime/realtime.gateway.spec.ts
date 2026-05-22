@@ -69,6 +69,14 @@ function createGateway(): {
     recallMessage: jest.MockedFunction<
       (userId: string, conversationId: string, messageId: string) => Promise<unknown>
     >;
+    editMessage: jest.MockedFunction<
+      (
+        userId: string,
+        conversationId: string,
+        messageId: string,
+        encryptedPayload: unknown,
+      ) => Promise<unknown>
+    >;
     getConversationPeerIds: jest.MockedFunction<
       (conversationId: string, userId: string) => Promise<string[]>
     >;
@@ -83,6 +91,7 @@ function createGateway(): {
     sendTextMessage: jest.fn(),
     markRead: jest.fn(),
     recallMessage: jest.fn(),
+    editMessage: jest.fn(),
     getConversationPeerIds: jest.fn(),
   };
 
@@ -240,6 +249,56 @@ describe('RealtimeGateway', () => {
     expect(receiver.emit).toHaveBeenCalledWith(
       REALTIME_EVENTS.MESSAGE_RECALLED,
       expect.objectContaining({ messageId: 'message-id', recalledAt }),
+    );
+  });
+
+  it('handles message:edit and emits message:edited to both peers', async () => {
+    const { gateway, authService, messagesService } = createGateway();
+    const sender = createSocket('sender-socket');
+    const receiver = createSocket('receiver-socket');
+    const editedAt = new Date('2026-05-19T00:10:00.000Z');
+    authService.authenticate
+      .mockResolvedValueOnce({ id: 'user-a', sessionId: 'session-a', accountType: 'GUEST' })
+      .mockResolvedValueOnce({ id: 'user-b', sessionId: 'session-b', accountType: 'GUEST' });
+    messagesService.listUndeliveredMessages.mockResolvedValue([]);
+    messagesService.editMessage.mockResolvedValue({
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      senderId: 'user-a',
+      ciphertext: 'edited-ciphertext',
+      nonce: 'edited-nonce',
+      encryptionVersion: 'mvp-v1',
+      editedAt,
+    });
+    messagesService.getConversationPeerIds.mockResolvedValue(['user-b']);
+
+    await gateway.handleConnection(sender as never);
+    await gateway.handleConnection(receiver as never);
+    await gateway.handleMessageEdit(sender as never, {
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      ciphertext: 'edited-ciphertext',
+      nonce: 'edited-nonce',
+      encryptionVersion: 'mvp-v1',
+    });
+
+    expect(messagesService.editMessage).toHaveBeenCalledWith(
+      'user-a',
+      'conversation-id',
+      'message-id',
+      {
+        ciphertext: 'edited-ciphertext',
+        nonce: 'edited-nonce',
+        encryptionVersion: 'mvp-v1',
+      },
+    );
+    expect(sender.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_EDITED,
+      expect.objectContaining({ messageId: 'message-id', editedAt }),
+    );
+    expect(receiver.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_EDITED,
+      expect.objectContaining({ messageId: 'message-id', editedAt }),
     );
   });
 });

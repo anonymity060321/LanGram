@@ -11,6 +11,7 @@ import { AuthenticatedUser } from '../common/current-user';
 import { MessagesService } from '../messages/messages.service';
 import { RealtimeAuthService } from './realtime-auth.service';
 import {
+  MessageEditPayload,
   MessageRecallPayload,
   MessageReadPayload,
   MessageSendPayload,
@@ -163,6 +164,42 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
       for (const peerId of peerIds) {
         this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_RECALLED, recalled);
+      }
+    } catch (error) {
+      client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));
+    }
+  }
+
+  @SubscribeMessage(REALTIME_EVENTS.MESSAGE_EDIT)
+  async handleMessageEdit(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: MessageEditPayload,
+  ): Promise<void> {
+    const user = this.getSocketUser(client);
+    if (!user) {
+      client.emit(REALTIME_EVENTS.ERROR, {
+        code: 'WS_UNAUTHORIZED',
+        message: 'Unauthorized realtime event',
+      } satisfies RealtimeErrorPayload);
+      return;
+    }
+
+    try {
+      const edited = await this.messagesService.editMessage(
+        user.id,
+        payload.conversationId,
+        payload.messageId,
+        {
+          ciphertext: payload.ciphertext,
+          nonce: payload.nonce,
+          encryptionVersion: payload.encryptionVersion,
+        },
+      );
+      client.emit(REALTIME_EVENTS.MESSAGE_EDITED, edited);
+
+      const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
+      for (const peerId of peerIds) {
+        this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_EDITED, edited);
       }
     } catch (error) {
       client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));

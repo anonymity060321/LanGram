@@ -8,6 +8,8 @@ export const REALTIME_EVENTS = {
   MESSAGE_READ: 'message:read',
   MESSAGE_RECALL: 'message:recall',
   MESSAGE_RECALLED: 'message:recalled',
+  MESSAGE_EDIT: 'message:edit',
+  MESSAGE_EDITED: 'message:edited',
   ERROR: 'error',
 } as const;
 
@@ -57,6 +59,24 @@ export interface MessageRecalledPayload {
   recalledAt: string;
 }
 
+export interface MessageEditPayload {
+  conversationId: string;
+  messageId: string;
+  ciphertext: string;
+  nonce: string;
+  encryptionVersion: string;
+}
+
+export interface MessageEditedPayload {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  ciphertext: string;
+  nonce: string;
+  encryptionVersion: string;
+  editedAt: string;
+}
+
 export interface RealtimeErrorPayload {
   code: string;
   message: string;
@@ -67,6 +87,7 @@ interface RealtimeHandlers {
   onMessageDelivered: (payload: MessageDeliveredPayload) => void;
   onMessageRead: (payload: MessageReadPayload) => void;
   onMessageRecalled: (payload: MessageRecalledPayload) => void;
+  onMessageEdited: (payload: MessageEditedPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
 }
 
@@ -89,6 +110,7 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.MESSAGE_DELIVERED, handlers.onMessageDelivered);
   socket.on(REALTIME_EVENTS.MESSAGE_READ, handlers.onMessageRead);
   socket.on(REALTIME_EVENTS.MESSAGE_RECALLED, handlers.onMessageRecalled);
+  socket.on(REALTIME_EVENTS.MESSAGE_EDITED, handlers.onMessageEdited);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
   socket.on('connect_error', (error) => {
     handlers.onError({ code: 'WS_CONNECT_ERROR', message: error.message });
@@ -114,6 +136,10 @@ export function sendRealtimeRead(payload: { conversationId: string; messageId: s
 
 export function sendRealtimeRecall(payload: { conversationId: string; messageId: string }): void {
   socket?.emit(REALTIME_EVENTS.MESSAGE_RECALL, payload);
+}
+
+export function sendRealtimeEdit(payload: MessageEditPayload): void {
+  socket?.emit(REALTIME_EVENTS.MESSAGE_EDIT, payload);
 }
 
 function resolveSocketUrl(apiBaseUrl: string): string {

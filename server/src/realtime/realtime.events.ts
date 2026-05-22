@@ -5,6 +5,8 @@ export const REALTIME_EVENTS = {
   MESSAGE_READ: 'message:read',
   MESSAGE_RECALL: 'message:recall',
   MESSAGE_RECALLED: 'message:recalled',
+  MESSAGE_EDIT: 'message:edit',
+  MESSAGE_EDITED: 'message:edited',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
 } as const;
@@ -28,6 +30,14 @@ export interface MessageReadPayload {
 export interface MessageRecallPayload {
   conversationId: string;
   messageId: string;
+}
+
+export interface MessageEditPayload {
+  conversationId: string;
+  messageId: string;
+  ciphertext: string;
+  nonce: string;
+  encryptionVersion: string;
 }
 
 export interface RealtimeErrorPayload {

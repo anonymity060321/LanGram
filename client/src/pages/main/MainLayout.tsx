@@ -22,6 +22,7 @@ export function MainLayout(): JSX.Element {
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
+  const editMessage = useChatStore((state) => state.editMessage);
   const recallMessage = useChatStore((state) => state.recallMessage);
   const deleteLocalMessage = useChatStore((state) => state.deleteLocalMessage);
   const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
@@ -106,6 +107,14 @@ export function MainLayout(): JSX.Element {
     }
 
     recallMessage(selectedConversationId, messageId);
+  }
+
+  async function handleEditMessage(messageId: string, plaintext: string): Promise<void> {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    await editMessage(selectedConversationId, messageId, plaintext);
   }
 
   function handleClearLocalConversation(): void {
@@ -199,6 +208,7 @@ export function MainLayout(): JSX.Element {
               hasSearchQuery={searchQuery.trim().length > 0}
               onDeleteLocalMessage={handleDeleteLocalMessage}
               onRecallMessage={handleRecallMessage}
+              onEditMessage={handleEditMessage}
             />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <input
@@ -252,6 +262,7 @@ function MessageList({
   hasSearchQuery,
   onDeleteLocalMessage,
   onRecallMessage,
+  onEditMessage,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -259,8 +270,22 @@ function MessageList({
   hasSearchQuery: boolean;
   onDeleteLocalMessage: (messageId: string) => void;
   onRecallMessage: (messageId: string) => void;
+  onEditMessage: (messageId: string, plaintext: string) => Promise<void>;
 }): JSX.Element {
   const { t } = useI18n();
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+
+  async function handleSaveEdit(event: FormEvent<HTMLFormElement>, message: ChatMessage): Promise<void> {
+    event.preventDefault();
+    if (!editDraft.trim()) {
+      return;
+    }
+
+    await onEditMessage(message.id, editDraft.trim());
+    setEditingMessageId(null);
+    setEditDraft('');
+  }
 
   if (isLoading) {
     return (
@@ -283,17 +308,57 @@ function MessageList({
       {messages.map((message) => (
         <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
           <div className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}>
-            <p>
-              {message.status === 'recalled'
-                ? t('chat.messageRecalled')
-                : renderHighlightedText(message.plaintext, searchQuery)}
-            </p>
+            {editingMessageId === message.id ? (
+              <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
+                <input
+                  value={editDraft}
+                  onChange={(event) => setEditDraft(event.target.value)}
+                  autoFocus
+                />
+                <div className="message-edit-actions">
+                  <button type="submit" className="message-action" disabled={!editDraft.trim()}>
+                    {t('chat.saveEdit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="message-action"
+                    onClick={() => {
+                      setEditingMessageId(null);
+                      setEditDraft('');
+                    }}
+                  >
+                    {t('chat.cancel')}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <p>
+                {message.status === 'recalled'
+                  ? t('chat.messageRecalled')
+                  : renderHighlightedText(message.plaintext, searchQuery)}
+              </p>
+            )}
             <div className="message-meta">
               <span>
                 {message.isOwn && message.status !== 'recalled'
                   ? t(`chat.status.${message.status}`)
                   : formatTime(message.recalledAt ?? message.createdAt)}
               </span>
+              {message.editedAt && message.status !== 'recalled' ? (
+                <span>{t('chat.edited')}</span>
+              ) : null}
+              {message.isOwn && message.status !== 'recalled' && canEditMessage(message) ? (
+                <button
+                  type="button"
+                  className="message-action"
+                  onClick={() => {
+                    setEditingMessageId(message.id);
+                    setEditDraft(message.plaintext);
+                  }}
+                >
+                  {t('chat.edit')}
+                </button>
+              ) : null}
               {message.isOwn && message.status !== 'recalled' && canRecallMessage(message) ? (
                 <button
                   type="button"
@@ -324,6 +389,10 @@ function formatTime(value: string): string {
 
 function canRecallMessage(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 2 * 60 * 1000;
+}
+
+function canEditMessage(message: ChatMessage): boolean {
+  return Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000;
 }
 
 function filterMessages(messages: ChatMessage[], query: string): ChatMessage[] {

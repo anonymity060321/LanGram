@@ -48,6 +48,22 @@ export interface RecallEventPayload {
   recalledAt: Date;
 }
 
+export interface EditMessageInput {
+  ciphertext: string;
+  nonce: string;
+  encryptionVersion: string;
+}
+
+export interface EditedEventPayload {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  ciphertext: string;
+  nonce: string;
+  encryptionVersion: string;
+  editedAt: Date;
+}
+
 type MessageWithSender = {
   id: string;
   conversationId: string;
@@ -62,6 +78,7 @@ type MessageWithSender = {
 };
 
 const MESSAGE_RECALL_WINDOW_MS = 2 * 60 * 1000;
+const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class MessagesService {
@@ -299,6 +316,76 @@ export class MessagesService {
     };
   }
 
+  async editMessage(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+    encryptedPayload: EditMessageInput,
+  ): Promise<EditedEventPayload> {
+    this.assertEncryptedPayload(encryptedPayload);
+    await this.assertConversationMember(userId, conversationId);
+
+    const message = await this.prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId,
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        senderId: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    if (!message) {
+      throw new BadRequestException('Message does not belong to this conversation');
+    }
+
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('Only the sender can edit this message');
+    }
+
+    if (message.status === MessageStatus.RECALLED) {
+      throw new BadRequestException('Recalled messages cannot be edited');
+    }
+
+    if (Date.now() - message.createdAt.getTime() > MESSAGE_EDIT_WINDOW_MS) {
+      throw new BadRequestException('Message edit window has expired');
+    }
+
+    const editedAt = new Date();
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        ciphertext: encryptedPayload.ciphertext,
+        nonce: encryptedPayload.nonce,
+        encryptionVersion: encryptedPayload.encryptionVersion,
+        editedAt,
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        senderId: true,
+        ciphertext: true,
+        nonce: true,
+        encryptionVersion: true,
+        editedAt: true,
+      },
+    });
+
+    return {
+      conversationId: updated.conversationId,
+      messageId: updated.id,
+      senderId: updated.senderId,
+      ciphertext: updated.ciphertext,
+      nonce: updated.nonce,
+      encryptionVersion: updated.encryptionVersion,
+      editedAt: updated.editedAt ?? editedAt,
+    };
+  }
+
   async listUndeliveredMessages(userId: string): Promise<MessageEventPayload[]> {
     const deliveries = await this.prisma.messageDelivery.findMany({
       where: {
@@ -332,6 +419,10 @@ export class MessagesService {
       throw new BadRequestException('Only TEXT messages are supported');
     }
 
+    this.assertEncryptedPayload(input);
+  }
+
+  private assertEncryptedPayload(input: EditMessageInput): void {
     if (!input.ciphertext.trim() || !input.nonce.trim() || !input.encryptionVersion.trim()) {
       throw new BadRequestException('Encrypted message payload is required');
     }

@@ -321,4 +321,152 @@ describe('MessagesService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
+
+  it('allows the sender to edit a message within fifteen minutes', async () => {
+    const prisma = createMockPrisma();
+    const editedAt = new Date('2026-05-19T00:10:00.000Z');
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(),
+    });
+    prisma.message.update.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      ciphertext: 'edited-ciphertext',
+      nonce: 'edited-nonce',
+      encryptionVersion: 'mvp-v1',
+      editedAt,
+    });
+    const service = createService(prisma);
+
+    const result = await service.editMessage('user-a', 'conversation-id', 'message-id', {
+      ciphertext: 'edited-ciphertext',
+      nonce: 'edited-nonce',
+      encryptionVersion: 'mvp-v1',
+    });
+
+    expect(result).toMatchObject({
+      conversationId: 'conversation-id',
+      messageId: 'message-id',
+      senderId: 'user-a',
+      ciphertext: 'edited-ciphertext',
+      nonce: 'edited-nonce',
+      encryptionVersion: 'mvp-v1',
+      editedAt,
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith({
+      where: { id: 'message-id' },
+      data: {
+        ciphertext: 'edited-ciphertext',
+        nonce: 'edited-nonce',
+        encryptionVersion: 'mvp-v1',
+        editedAt: expect.any(Date),
+      },
+      select: expect.objectContaining({
+        ciphertext: true,
+        nonce: true,
+        encryptionVersion: true,
+        editedAt: true,
+      }),
+    });
+  });
+
+  it('rejects edit from a non-sender', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.editMessage('user-b', 'conversation-id', 'message-id', {
+        ciphertext: 'edited-ciphertext',
+        nonce: 'edited-nonce',
+        encryptionVersion: 'mvp-v1',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects edit after fifteen minutes', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(Date.now() - 901000),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.editMessage('user-a', 'conversation-id', 'message-id', {
+        ciphertext: 'edited-ciphertext',
+        nonce: 'edited-nonce',
+        encryptionVersion: 'mvp-v1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects editing recalled messages', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.RECALLED,
+      createdAt: new Date(),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.editMessage('user-a', 'conversation-id', 'message-id', {
+        ciphertext: 'edited-ciphertext',
+        nonce: 'edited-nonce',
+        encryptionVersion: 'mvp-v1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects edit with empty encrypted payload fields', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(
+      service.editMessage('user-a', 'conversation-id', 'message-id', {
+        ciphertext: '',
+        nonce: 'edited-nonce',
+        encryptionVersion: 'mvp-v1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.editMessage('user-a', 'conversation-id', 'message-id', {
+        ciphertext: 'edited-ciphertext',
+        nonce: ' ',
+        encryptionVersion: 'mvp-v1',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.editMessage('user-a', 'conversation-id', 'message-id', {
+        ciphertext: 'edited-ciphertext',
+        nonce: 'edited-nonce',
+        encryptionVersion: '',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
 });

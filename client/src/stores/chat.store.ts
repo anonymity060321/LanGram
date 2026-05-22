@@ -11,10 +11,12 @@ import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
 import {
   connectRealtime,
   disconnectRealtime,
+  sendRealtimeEdit,
   sendRealtimeMessage,
   sendRealtimeRead,
   sendRealtimeRecall,
   type MessageDeliveredPayload,
+  type MessageEditedPayload,
   type MessageNewPayload,
   type MessageReadPayload,
   type MessageRecalledPayload,
@@ -31,6 +33,7 @@ export interface ChatMessage {
   plaintext: string;
   status: LocalMessageStatus;
   createdAt: string;
+  editedAt: string | null;
   recalledAt: string | null;
   isOwn: boolean;
 }
@@ -49,6 +52,7 @@ interface ChatState {
   connect: (accessToken: string) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
+  editMessage: (conversationId: string, messageId: string, newPlaintext: string) => Promise<void>;
   recallMessage: (conversationId: string, messageId: string) => void;
   markRead: (conversationId: string, messageId: string) => void;
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
@@ -133,6 +137,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onMessageRecalled: (payload) => {
         handleRecalled(payload, set);
       },
+      onMessageEdited: (payload) => {
+        void handleEdited(payload, get, set);
+      },
       onError: (payload) => {
         handleRealtimeError(payload, set);
       },
@@ -158,6 +165,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       plaintext,
       status: 'sending',
       createdAt,
+      editedAt: null,
       recalledAt: null,
       isOwn: true,
     };
@@ -184,6 +192,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } catch {
       updateMessageStatus(conversationId, clientMessageId, 'failed', set);
+    }
+  },
+  editMessage: async (conversationId, messageId, newPlaintext) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      set({ error: 'Conversation not found' });
+      return;
+    }
+
+    const existing = get().messagesByConversation[conversationId]?.find(
+      (message) => message.id === messageId || message.clientMessageId === messageId,
+    );
+    if (!existing || existing.status === 'recalled') {
+      set({ error: 'Edit failed' });
+      return;
+    }
+
+    try {
+      const encrypted = await encryptMessage(newPlaintext, conversation);
+      sendRealtimeEdit({
+        conversationId,
+        messageId: existing.id,
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce,
+        encryptionVersion: encrypted.encryptionVersion,
+      });
+    } catch {
+      set({ error: 'Edit failed' });
     }
   },
   markRead: (conversationId, messageId) => {
@@ -228,6 +264,7 @@ async function toChatMessage(
     plaintext: isRecalled ? '' : await decryptSafely(message.ciphertext, message.nonce, conversation),
     status: toLocalStatus(message.status),
     createdAt: message.createdAt,
+    editedAt: message.editedAt,
     recalledAt: message.recalledAt,
     isOwn: message.senderId === currentUserId,
   };
@@ -258,6 +295,7 @@ async function handleIncomingMessage(
     plaintext,
     status: matched?.isOwn ? 'sent' : toLocalStatus(payload.status),
     createdAt: payload.createdAt,
+    editedAt: null,
     recalledAt: null,
     isOwn: matched?.isOwn ?? false,
   };
@@ -304,6 +342,38 @@ function handleRecalled(
                 plaintext: '',
                 status: 'recalled',
                 recalledAt: payload.recalledAt,
+              }
+            : message,
+      ),
+    },
+  }));
+}
+
+async function handleEdited(
+  payload: MessageEditedPayload,
+  get: () => ChatState,
+  set: ChatSet,
+): Promise<void> {
+  const state = get();
+  const conversation = state.conversations.find((item) => item.id === payload.conversationId);
+  if (!conversation) {
+    await state.loadConversations();
+    return;
+  }
+
+  const plaintext = await decryptSafely(payload.ciphertext, payload.nonce, conversation);
+  set((currentState: ChatState) => ({
+    messagesByConversation: {
+      ...currentState.messagesByConversation,
+      [payload.conversationId]: (currentState.messagesByConversation[payload.conversationId] ?? []).map(
+        (message) =>
+          message.id === payload.messageId || message.clientMessageId === payload.messageId
+            ? {
+                ...message,
+                id: payload.messageId,
+                senderId: payload.senderId,
+                plaintext,
+                editedAt: payload.editedAt,
               }
             : message,
       ),

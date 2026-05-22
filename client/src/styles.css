@@ -474,6 +474,27 @@ button {
   gap: 10px;
 }
 
+.message-edit-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.message-edit-form input {
+  min-height: 34px;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  padding: 7px 9px;
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .message-action {
   border: 0;
   background: transparent;
