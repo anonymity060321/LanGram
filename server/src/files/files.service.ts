@@ -1,5 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, rename, unlink } from 'node:fs/promises';
+import { dirname, join, relative, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { FileKind, FileStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { FileMetadataResponse } from './dto/file-metadata.dto';
@@ -12,6 +17,22 @@ export interface CreateUploadedFileAssetInput {
   mimeType: string;
   sizeBytes: number;
   sha256: string;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface UploadedDiskFile {
+  path: string;
+  originalname: string;
+  mimetype: string;
+  size: number;
+}
+
+export interface SaveUploadedFileInput {
+  userId: string;
+  conversationId: string;
+  kind: FileKind;
+  file: UploadedDiskFile;
   width?: number | null;
   height?: number | null;
 }
@@ -31,7 +52,10 @@ const FILE_MIME_TYPES = new Set([
 
 @Injectable()
 export class FilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   sanitizeOriginalName(originalName: string): string {
     const baseName = originalName.split(/[\\/]/).pop() ?? '';
@@ -123,6 +147,53 @@ export class FilesService {
     return this.toFileMetadataResponse(file);
   }
 
+  async saveUploadedFile(input: SaveUploadedFileInput): Promise<FileMetadataResponse> {
+    let finalPath: string | null = null;
+    let tempPath: string | null = input.file.path;
+
+    try {
+      await this.assertConversationMember(input.userId, input.conversationId);
+      this.validateFileSize(input.file.size);
+      this.validateMimeType(input.kind, input.file.mimetype);
+
+      const id = randomUUID();
+      const originalName = this.sanitizeOriginalName(input.file.originalname);
+      const storagePath = this.buildStoragePath(id, originalName);
+      const safeName = storagePath.split('/').at(-1) ?? id;
+      finalPath = this.toAbsoluteStoragePath(storagePath);
+      await mkdir(dirname(finalPath), { recursive: true });
+      const sha256 = await this.calculateSha256(input.file.path);
+      await this.moveFile(input.file.path, finalPath);
+      tempPath = null;
+
+      const file = await this.createFileAssetRecord({
+        id,
+        uploaderId: input.userId,
+        conversationId: input.conversationId,
+        kind: input.kind,
+        originalName,
+        safeName,
+        mimeType: input.file.mimetype.trim().toLowerCase(),
+        sizeBytes: input.file.size,
+        sha256,
+        storagePath,
+        width: input.width ?? null,
+        height: input.height ?? null,
+      });
+
+      return file;
+    } catch (error) {
+      if (tempPath) {
+        await this.removeFileIfExists(tempPath);
+      }
+      if (finalPath) {
+        await this.removeFileIfExists(finalPath);
+      }
+
+      throw error;
+    }
+  }
+
   async assertFileConversationAccess(userId: string, fileId: string): Promise<void> {
     const file = await this.prisma.fileAsset.findFirst({
       where: {
@@ -150,6 +221,102 @@ export class FilesService {
     });
 
     return this.toFileMetadataResponse(file);
+  }
+
+  private async assertConversationMember(userId: string, conversationId: string): Promise<void> {
+    const member = await this.prisma.conversationMember.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!member) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+  }
+
+  private async createFileAssetRecord(input: {
+    id: string;
+    uploaderId: string;
+    conversationId: string;
+    kind: FileKind;
+    originalName: string;
+    safeName: string;
+    mimeType: string;
+    sizeBytes: number;
+    sha256: string;
+    storagePath: string;
+    width?: number | null;
+    height?: number | null;
+  }): Promise<FileMetadataResponse> {
+    const file = await this.prisma.fileAsset.create({
+      data: {
+        id: input.id,
+        uploaderId: input.uploaderId,
+        conversationId: input.conversationId,
+        kind: input.kind,
+        originalName: input.originalName,
+        safeName: input.safeName,
+        mimeType: input.mimeType,
+        sizeBytes: BigInt(input.sizeBytes),
+        sha256: input.sha256.toLowerCase(),
+        storagePath: input.storagePath,
+        width: input.width ?? null,
+        height: input.height ?? null,
+        status: FileStatus.UPLOADED,
+      },
+      select: this.fileMetadataSelect(),
+    });
+
+    return this.toFileMetadataResponse(file);
+  }
+
+  private getStorageRoot(): string {
+    return resolve(this.configService.get<string>('FILE_STORAGE_DIR') ?? join(process.cwd(), 'storage', 'files'));
+  }
+
+  private toAbsoluteStoragePath(storagePath: string): string {
+    const storageRoot = this.getStorageRoot();
+    const absolutePath = resolve(storageRoot, ...storagePath.split('/'));
+    const relativePath = relative(storageRoot, absolutePath);
+    if (relativePath.startsWith('..') || resolve(relativePath) === relativePath) {
+      throw new BadRequestException('Invalid storage path');
+    }
+
+    return absolutePath;
+  }
+
+  private async calculateSha256(path: string): Promise<string> {
+    const hash = createHash('sha256');
+    await pipeline(createReadStream(path), hash);
+    return hash.digest('hex');
+  }
+
+  private async moveFile(source: string, destination: string): Promise<void> {
+    try {
+      await rename(source, destination);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') {
+        throw error;
+      }
+
+      await pipeline(createReadStream(source), createWriteStream(destination));
+      await unlink(source);
+    }
+  }
+
+  private async removeFileIfExists(path: string): Promise<void> {
+    try {
+      await unlink(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
   }
 
   private extractSafeExtension(originalName: string): string {

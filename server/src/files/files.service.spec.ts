@@ -1,4 +1,8 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { FileKind, FileStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { FilesService } from './files.service';
@@ -6,6 +10,9 @@ import { FilesService } from './files.service';
 type MockFunction<T extends (...args: never[]) => unknown> = jest.MockedFunction<T>;
 
 interface MockPrisma {
+  conversationMember: {
+    findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
+  };
   fileAsset: {
     create: MockFunction<(args: unknown) => Promise<unknown>>;
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
@@ -15,6 +22,9 @@ interface MockPrisma {
 
 function createMockPrisma(): MockPrisma {
   return {
+    conversationMember: {
+      findUnique: jest.fn(),
+    },
     fileAsset: {
       create: jest.fn(),
       findFirst: jest.fn(),
@@ -23,8 +33,15 @@ function createMockPrisma(): MockPrisma {
   };
 }
 
-function createService(prisma: MockPrisma): FilesService {
-  return new FilesService(prisma as unknown as PrismaService);
+function createService(prisma: MockPrisma, storageDir = join(tmpdir(), 'langram-test-files')): FilesService {
+  const configService = {
+    get: jest.fn((key: string) => (key === 'FILE_STORAGE_DIR' ? storageDir : undefined)),
+  };
+
+  return new FilesService(
+    prisma as unknown as PrismaService,
+    configService as unknown as ConfigService,
+  );
 }
 
 function fileAssetFixture(): unknown {
@@ -152,5 +169,100 @@ describe('FilesService', () => {
     await expect(service.assertFileConversationAccess('user-b', 'file-id')).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  it('rejects upload from non-conversation members', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'langram-upload-test-'));
+    const tempFile = join(tempDir, 'upload.tmp');
+    await writeFile(tempFile, 'file-content');
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue(null);
+    const service = createService(prisma, join(tempDir, 'storage'));
+
+    await expect(
+      service.saveUploadedFile({
+        userId: 'user-b',
+        conversationId: 'conversation-id',
+        kind: FileKind.FILE,
+        file: {
+          path: tempFile,
+          originalname: 'report.pdf',
+          mimetype: 'application/pdf',
+          size: 12,
+        },
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.fileAsset.create).not.toHaveBeenCalled();
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('saves uploaded files to local storage and creates metadata without exposing paths', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'langram-upload-test-'));
+    const tempFile = join(tempDir, 'upload.tmp');
+    await writeFile(tempFile, 'file-content');
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.fileAsset.create.mockImplementation(async (args: unknown) => {
+      const createArgs = args as {
+        data: {
+          id: string;
+          uploaderId: string;
+          conversationId: string;
+          kind: FileKind;
+          originalName: string;
+          safeName: string;
+          mimeType: string;
+          sizeBytes: bigint;
+          sha256: string;
+          width: number | null;
+          height: number | null;
+          status: FileStatus;
+        };
+      };
+
+      return {
+        ...createArgs.data,
+        messageId: null,
+        createdAt: new Date('2026-05-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-22T00:00:00.000Z'),
+        deletedAt: null,
+      };
+    });
+    const service = createService(prisma, join(tempDir, 'storage'));
+
+    const result = await service.saveUploadedFile({
+      userId: 'user-a',
+      conversationId: 'conversation-id',
+      kind: FileKind.FILE,
+      file: {
+        path: tempFile,
+        originalname: '..\\secret?.pdf',
+        mimetype: 'application/pdf',
+        size: 12,
+      },
+    });
+    const createArgs = prisma.fileAsset.create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+      select: Record<string, boolean>;
+    };
+
+    expect(createArgs.data).toMatchObject({
+      uploaderId: 'user-a',
+      conversationId: 'conversation-id',
+      kind: FileKind.FILE,
+      originalName: 'secret_.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: BigInt(12),
+      status: FileStatus.UPLOADED,
+    });
+    expect(createArgs.data.sha256).toBe(
+      '2239ce4df9ee8db012834642ec801b55ba2c92b28bdd11f4d73d9c55d39f3b0a',
+    );
+    expect(createArgs.select).not.toHaveProperty('storagePath');
+    expect(result).not.toHaveProperty('storagePath');
+    expect(result.originalName).toBe('secret_.pdf');
+
+    await rm(tempDir, { recursive: true, force: true });
   });
 });

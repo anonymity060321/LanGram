@@ -57,6 +57,11 @@ class EnvironmentVariables {
   @IsNotEmpty()
   SMTP_FROM!: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  FILE_STORAGE_DIR?: string;
+
   @IsInt()
   @Min(1)
   EMAIL_CODE_TTL_MINUTES!: number;
