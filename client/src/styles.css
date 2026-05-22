@@ -495,6 +495,71 @@ button {
   gap: 10px;
 }
 
+.forward-picker {
+  display: grid;
+  gap: 8px;
+  min-width: min(260px, 100%);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(100, 116, 139, 0.22);
+}
+
+.forward-picker p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.forward-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.forward-picker-header strong {
+  font-size: 12px;
+}
+
+.forward-target-list {
+  display: grid;
+  gap: 6px;
+}
+
+.forward-target {
+  width: 100%;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.forward-target:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.forward-target span {
+  min-width: 0;
+  overflow: hidden;
+  color: #172033;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forward-target small {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .message-action {
   border: 0;
   background: transparent;

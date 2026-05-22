@@ -48,11 +48,16 @@ interface ChatState {
   isLoadingMessages: boolean;
   loadConversations: () => Promise<void>;
   selectConversation: (conversationId: string, currentUserId: string) => Promise<void>;
-  openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<void>;
+  openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<string | null>;
   connect: (accessToken: string) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, newPlaintext: string) => Promise<void>;
+  forwardMessage: (
+    sourceConversationId: string,
+    sourceMessageId: string,
+    targetConversationId: string,
+  ) => Promise<void>;
   recallMessage: (conversationId: string, messageId: string) => void;
   markRead: (conversationId: string, messageId: string) => void;
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
@@ -119,8 +124,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversations: upsertConversation(state.conversations, conversation),
       }));
       await get().selectConversation(conversation.id, currentUserId);
+      return conversation.id;
     } catch {
       set({ error: 'Failed to open conversation' });
+      return null;
     }
   },
   connect: (accessToken) => {
@@ -220,6 +227,72 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } catch {
       set({ error: 'Edit failed' });
+    }
+  },
+  forwardMessage: async (sourceConversationId, sourceMessageId, targetConversationId) => {
+    const sourceMessage = get().messagesByConversation[sourceConversationId]?.find(
+      (message) => message.id === sourceMessageId || message.clientMessageId === sourceMessageId,
+    );
+    if (!sourceMessage) {
+      set({ error: 'Forward failed' });
+      return;
+    }
+
+    if (sourceMessage.status === 'recalled') {
+      set({ error: 'Cannot forward recalled messages' });
+      return;
+    }
+
+    const targetConversation = get().conversations.find((item) => item.id === targetConversationId);
+    if (!targetConversation) {
+      set({ error: 'Forward failed' });
+      return;
+    }
+
+    const senderId = getCurrentUserId(targetConversation);
+    if (!senderId) {
+      set({ error: 'Forward failed' });
+      return;
+    }
+
+    const clientMessageId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const optimisticMessage: ChatMessage = {
+      id: clientMessageId,
+      clientMessageId,
+      conversationId: targetConversationId,
+      senderId,
+      plaintext: sourceMessage.plaintext,
+      status: 'sending',
+      createdAt,
+      editedAt: null,
+      recalledAt: null,
+      isOwn: true,
+    };
+
+    set((state) => ({
+      messagesByConversation: appendMessage(
+        state.messagesByConversation,
+        targetConversationId,
+        optimisticMessage,
+      ),
+    }));
+
+    try {
+      const encrypted = await encryptMessage(sourceMessage.plaintext, targetConversation);
+      sendRealtimeMessage({
+        clientMessageId,
+        conversationId: targetConversationId,
+        messageType: 'TEXT',
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce,
+        encryptionVersion: encrypted.encryptionVersion,
+        replyToMessageId: null,
+        createdAt,
+      });
+    } catch {
+      updateMessageStatus(targetConversationId, clientMessageId, 'failed', set);
+      set({ error: 'Forward failed' });
     }
   },
   markRead: (conversationId, messageId) => {
@@ -462,6 +535,11 @@ function upsertMessage(
     ...messagesByConversation,
     [conversationId]: next,
   };
+}
+
+function getCurrentUserId(conversation: Conversation): string | null {
+  const peerId = conversation.peer?.id;
+  return conversation.members.find((member) => member.id !== peerId)?.id ?? null;
 }
 
 function updateMessageStatus(

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import type { Conversation } from '../../api/conversations.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
@@ -23,6 +24,7 @@ export function MainLayout(): JSX.Element {
   const disconnect = useChatStore((state) => state.disconnect);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
   const editMessage = useChatStore((state) => state.editMessage);
+  const forwardMessage = useChatStore((state) => state.forwardMessage);
   const recallMessage = useChatStore((state) => state.recallMessage);
   const deleteLocalMessage = useChatStore((state) => state.deleteLocalMessage);
   const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
@@ -63,6 +65,10 @@ export function MainLayout(): JSX.Element {
         (friend) => !conversations.some((conversation) => conversation.peer?.id === friend.friend.id),
       ),
     [conversations, friends],
+  );
+  const forwardTargets = useMemo(
+    () => buildForwardTargets(conversations, visibleFriends, t('chat.unknownPeer')),
+    [conversations, t, visibleFriends],
   );
 
   async function handleSelectConversation(conversationId: string): Promise<void> {
@@ -115,6 +121,22 @@ export function MainLayout(): JSX.Element {
     }
 
     await editMessage(selectedConversationId, messageId, plaintext);
+  }
+
+  async function handleForwardMessage(messageId: string, target: ForwardTarget): Promise<void> {
+    if (!user || !selectedConversationId) {
+      return;
+    }
+
+    const targetConversationId =
+      target.type === 'conversation'
+        ? target.conversationId
+        : await openDirectConversation(target.friendUserId, user.id);
+    if (!targetConversationId) {
+      return;
+    }
+
+    await forwardMessage(selectedConversationId, messageId, targetConversationId);
   }
 
   function handleClearLocalConversation(): void {
@@ -209,6 +231,8 @@ export function MainLayout(): JSX.Element {
               onDeleteLocalMessage={handleDeleteLocalMessage}
               onRecallMessage={handleRecallMessage}
               onEditMessage={handleEditMessage}
+              onForwardMessage={handleForwardMessage}
+              forwardTargets={forwardTargets}
             />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <input
@@ -263,6 +287,8 @@ function MessageList({
   onDeleteLocalMessage,
   onRecallMessage,
   onEditMessage,
+  onForwardMessage,
+  forwardTargets,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -271,10 +297,13 @@ function MessageList({
   onDeleteLocalMessage: (messageId: string) => void;
   onRecallMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, plaintext: string) => Promise<void>;
+  onForwardMessage: (messageId: string, target: ForwardTarget) => Promise<void>;
+  forwardTargets: ForwardTarget[];
 }): JSX.Element {
   const { t } = useI18n();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null);
 
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>, message: ChatMessage): Promise<void> {
     event.preventDefault();
@@ -285,6 +314,11 @@ function MessageList({
     await onEditMessage(message.id, editDraft.trim());
     setEditingMessageId(null);
     setEditDraft('');
+  }
+
+  async function handleForward(message: ChatMessage, target: ForwardTarget): Promise<void> {
+    await onForwardMessage(message.id, target);
+    setForwardingMessageId(null);
   }
 
   if (isLoading) {
@@ -368,6 +402,15 @@ function MessageList({
                   {t('chat.recall')}
                 </button>
               ) : null}
+              {message.status !== 'recalled' ? (
+                <button
+                  type="button"
+                  className="message-action"
+                  onClick={() => setForwardingMessageId(message.id)}
+                >
+                  {t('chat.forward')}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="message-action"
@@ -376,6 +419,37 @@ function MessageList({
                 {t('chat.deleteLocal')}
               </button>
             </div>
+            {forwardingMessageId === message.id ? (
+              <div className="forward-picker">
+                <div className="forward-picker-header">
+                  <strong>{t('chat.forwardTo')}</strong>
+                  <button
+                    type="button"
+                    className="message-action"
+                    onClick={() => setForwardingMessageId(null)}
+                  >
+                    {t('chat.cancel')}
+                  </button>
+                </div>
+                {forwardTargets.length === 0 ? (
+                  <p>{t('chat.selectForwardTarget')}</p>
+                ) : (
+                  <div className="forward-target-list">
+                    {forwardTargets.map((target) => (
+                      <button
+                        type="button"
+                        className="forward-target"
+                        key={target.id}
+                        onClick={() => void handleForward(message, target)}
+                      >
+                        <span>{target.label}</span>
+                        <small>{t('chat.direct')}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </article>
       ))}
@@ -393,6 +467,37 @@ function canRecallMessage(message: ChatMessage): boolean {
 
 function canEditMessage(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000;
+}
+
+interface ForwardTarget {
+  id: string;
+  type: 'conversation' | 'friend';
+  label: string;
+  conversationId: string;
+  friendUserId: string;
+}
+
+function buildForwardTargets(
+  conversations: Conversation[],
+  friendsWithoutConversation: FriendItem[],
+  unknownPeerLabel: string,
+): ForwardTarget[] {
+  return [
+    ...conversations.map((conversation) => ({
+      id: `conversation:${conversation.id}`,
+      type: 'conversation' as const,
+      label: conversation.peer?.displayName ?? unknownPeerLabel,
+      conversationId: conversation.id,
+      friendUserId: '',
+    })),
+    ...friendsWithoutConversation.map((friend) => ({
+      id: `friend:${friend.friend.id}`,
+      type: 'friend' as const,
+      label: friend.friend.displayName,
+      conversationId: '',
+      friendUserId: friend.friend.id,
+    })),
+  ];
 }
 
 function filterMessages(messages: ChatMessage[], query: string): ChatMessage[] {
