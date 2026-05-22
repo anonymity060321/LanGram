@@ -43,8 +43,25 @@ enum ConversationType {
 
 enum MessageType {
   TEXT
+  IMAGE
+  FILE
 
   @@map("message_type")
+}
+
+enum FileKind {
+  IMAGE
+  FILE
+
+  @@map("file_kind")
+}
+
+enum FileStatus {
+  UPLOADED
+  ATTACHED
+  DELETED
+
+  @@map("file_status")
 }
 
 enum MessageStatus {
@@ -68,6 +85,7 @@ model User {
 
   devices                Device[]
   sessions               Session[]
+  uploadedFiles          FileAsset[]          @relation("FileAssetUploader")
   loginLogs              LoginLog[]
   pairingCodes           FriendPairingCode[]  @relation("PairingCodeOwner")
   sentFriendRequests     FriendRequest[]      @relation("FriendRequestRequester")
@@ -208,6 +226,7 @@ model Conversation {
 
   members  ConversationMember[]
   messages Message[]
+  files    FileAsset[]
 
   @@unique([type, directUserAId, directUserBId])
   @@map("conversations")
@@ -247,10 +266,40 @@ model Message {
   conversation Conversation      @relation(fields: [conversationId], references: [id])
   sender       User              @relation("MessageSender", fields: [senderId], references: [id])
   deliveries   MessageDelivery[]
+  fileAsset    FileAsset?
 
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
   @@map("messages")
+}
+
+model FileAsset {
+  id             String     @id @default(uuid()) @db.Uuid
+  uploaderId     String     @map("uploader_id") @db.Uuid
+  conversationId String     @map("conversation_id") @db.Uuid
+  messageId      String?    @unique @map("message_id") @db.Uuid
+  kind           FileKind
+  originalName   String     @map("original_name")
+  safeName       String     @map("safe_name")
+  mimeType       String     @map("mime_type")
+  sizeBytes      BigInt     @map("size_bytes")
+  sha256         String
+  storagePath    String     @map("storage_path")
+  width          Int?
+  height         Int?
+  status         FileStatus @default(UPLOADED)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+  deletedAt      DateTime?  @map("deleted_at")
+
+  uploader     User         @relation("FileAssetUploader", fields: [uploaderId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  message      Message?     @relation(fields: [messageId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@index([uploaderId, createdAt])
+  @@index([status, createdAt])
+  @@map("file_assets")
 }
 
 model MessageDelivery {

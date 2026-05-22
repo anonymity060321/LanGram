@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { validateEnv } from './config/env.validation';
 import { ConversationsModule } from './conversations/conversations.module';
+import { FilesModule } from './files/files.module';
 import { FriendsModule } from './friends/friends.module';
 import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -20,6 +21,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     FriendsModule,
     ConversationsModule,
+    FilesModule,
     MessagesModule,
     RealtimeModule,
   ],
