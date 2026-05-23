@@ -11,6 +11,7 @@ import { listFriends, type FriendItem } from '../../api/friends.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
+import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
 
 export function MainLayout(): JSX.Element {
   const { t } = useI18n();
@@ -43,6 +44,7 @@ export function MainLayout(): JSX.Element {
     notice: null,
     error: null,
   });
+  const [sendOriginalImage, setSendOriginalImage] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
@@ -132,11 +134,33 @@ export function MainLayout(): JSX.Element {
     }
 
     setUploadState({ isUploading: true, notice: null, error: null });
+    let uploadImage: Awaited<ReturnType<typeof prepareImageUploadFile>> | null = null;
+    if (kind === 'IMAGE') {
+      try {
+        uploadImage = await prepareImageUploadFile(file, sendOriginalImage);
+      } catch {
+        setUploadState({
+          isUploading: false,
+          notice: null,
+          error: isCompressibleImage(file) ? t('chat.imageCompressionFailed') : t('chat.uploadFailed'),
+        });
+        return;
+      }
+    }
+
     try {
+      const uploadSource = uploadImage?.file ?? file;
+      if (uploadSource.size > MAX_UPLOAD_SIZE_BYTES) {
+        setUploadState({ isUploading: false, notice: null, error: t('chat.fileTooLarge') });
+        return;
+      }
+
       const metadata = await uploadFile({
-        file,
+        file: uploadSource,
         conversationId: selectedConversationId,
         kind,
+        width: uploadImage?.width,
+        height: uploadImage?.height,
       });
       await sendFileMessage(selectedConversationId, metadata, user.id);
       setUploadState({
@@ -303,15 +327,25 @@ export function MainLayout(): JSX.Element {
               downloadStates={downloadStates}
             />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
-              <label className={`file-upload-button ${uploadState.isUploading ? 'is-disabled' : ''}`}>
-                <input
-                  type="file"
-                  onChange={(event) => void handleFileSelected(event)}
-                  disabled={uploadState.isUploading}
-                  accept={SUPPORTED_UPLOAD_MIME_TYPES.join(',')}
-                />
-                <span>{uploadState.isUploading ? t('chat.uploading') : t('chat.chooseFile')}</span>
-              </label>
+              <div className="file-input-tools">
+                <label className={`file-upload-button ${uploadState.isUploading ? 'is-disabled' : ''}`}>
+                  <input
+                    type="file"
+                    onChange={(event) => void handleFileSelected(event)}
+                    disabled={uploadState.isUploading}
+                    accept={SUPPORTED_UPLOAD_MIME_TYPES.join(',')}
+                  />
+                  <span>{uploadState.isUploading ? t('chat.uploading') : t('chat.chooseFile')}</span>
+                </label>
+                <label className="original-image-toggle">
+                  <input
+                    type="checkbox"
+                    checked={sendOriginalImage}
+                    onChange={(event) => setSendOriginalImage(event.target.checked)}
+                  />
+                  <span>{t('chat.sendOriginalImage')}</span>
+                </label>
+              </div>
               <input
                 value={messageDraft}
                 onChange={(event) => setMessageDraft(event.target.value)}
