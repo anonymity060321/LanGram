@@ -30,6 +30,8 @@ interface AuthResult extends TokenPair {
     id: string;
     email: string | null;
     displayName: string;
+    statusMessage: string | null;
+    avatarUrl: string | null;
     accountType: string;
   };
 }
@@ -278,7 +280,14 @@ export class AuthService {
   }
 
   private async issueSession(
-    user: { id: string; email: string | null; displayName: string; accountType: string },
+    user: {
+      id: string;
+      email: string | null;
+      displayName: string;
+      statusMessage?: string | null;
+      avatarStoragePath?: string | null;
+      accountType: string;
+    },
     device: DeviceInput,
   ): Promise<AuthResult> {
     const refreshSecret = this.createTokenSecret();
@@ -331,6 +340,8 @@ export class AuthService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        statusMessage: user.statusMessage ?? null,
+        avatarUrl: user.avatarStoragePath ? `/api/users/${user.id}/avatar` : null,
         accountType: user.accountType,
       },
       accessToken,

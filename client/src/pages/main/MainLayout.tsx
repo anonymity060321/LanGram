@@ -9,6 +9,7 @@ import {
 } from '../../api/files.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
 import { AppLogo } from '../../components/AppLogo';
+import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
@@ -264,9 +265,11 @@ export function MainLayout(): JSX.Element {
                 key={conversation.id}
                 onClick={() => void handleSelectConversation(conversation.id)}
               >
-                <span className="conversation-avatar">
-                  {conversation.peer?.displayName.slice(0, 1).toUpperCase() ?? 'L'}
-                </span>
+                <UserAvatar
+                  userId={conversation.peer?.id}
+                  displayName={conversation.peer?.displayName}
+                  avatarUrl={conversation.peer?.avatarUrl}
+                />
                 <span>
                   <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
                   <small>{t('chat.direct')}</small>
@@ -373,9 +376,14 @@ export function MainLayout(): JSX.Element {
       </section>
 
       <aside className="profile-panel">
-        <div className="profile-avatar">{user?.displayName?.slice(0, 1).toUpperCase() ?? 'L'}</div>
+        <UserAvatar
+          userId={user?.id}
+          displayName={user?.displayName}
+          avatarUrl={user?.avatarUrl}
+          size="lg"
+        />
         <strong>{user?.displayName ?? t('app.name')}</strong>
-        <span>{user?.email ?? user?.accountType ?? 'MVP'}</span>
+        <span>{user?.statusMessage || user?.email || user?.accountType || 'MVP'}</span>
         <section className="profile-section">
           <h2>{t('chat.startChat')}</h2>
           {visibleFriends.length === 0 ? <p>{t('chat.noFriendsToStart')}</p> : null}
@@ -387,7 +395,13 @@ export function MainLayout(): JSX.Element {
                 key={friend.id}
                 onClick={() => void handleOpenFriend(friend.friend.id)}
               >
-                {friend.friend.displayName}
+                <UserAvatar
+                  userId={friend.friend.id}
+                  displayName={friend.friend.displayName}
+                  avatarUrl={friend.friend.avatarUrl}
+                  size="sm"
+                />
+                <span>{friend.friend.displayName}</span>
               </button>
             ))}
           </div>

@@ -1,16 +1,15 @@
 import { apiRequest } from './http';
 import type { FileMetadataResponse } from './files.api';
+import type { UserProfile } from './users.api';
 
 export type ConversationType = 'DIRECT';
 export type MessageType = 'TEXT' | 'IMAGE' | 'FILE';
 export type ServerMessageStatus = 'SENT' | 'DELIVERED' | 'READ' | 'RECALLED';
 
-export interface ConversationUser {
-  id: string;
-  email: string | null;
-  displayName: string;
-  accountType: string;
-}
+export type ConversationUser = Pick<
+  UserProfile,
+  'id' | 'email' | 'displayName' | 'statusMessage' | 'avatarUrl' | 'accountType'
+>;
 
 export interface Conversation {
   id: string;

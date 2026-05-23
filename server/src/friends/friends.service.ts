@@ -16,6 +16,8 @@ type UserSummary = {
   id: string;
   email: string | null;
   displayName: string;
+  statusMessage: string | null;
+  avatarStoragePath: string | null;
   accountType: string;
 };
 
@@ -194,7 +196,7 @@ export class FriendsService {
         const friend = friendship.userA.id === userId ? friendship.userB : friendship.userA;
         return {
           id: friendship.id,
-          friend,
+          friend: this.toUserDto(friend),
           createdAt: friendship.createdAt,
         };
       }),
@@ -266,6 +268,8 @@ export class FriendsService {
       id: true,
       email: true,
       displayName: true,
+      statusMessage: true,
+      avatarStoragePath: true,
       accountType: true,
     };
   }
@@ -276,8 +280,19 @@ export class FriendsService {
       status: request.status,
       createdAt: request.createdAt,
       respondedAt: request.respondedAt,
-      requester: request.requester,
-      addressee: request.addressee,
+      requester: this.toUserDto(request.requester),
+      addressee: this.toUserDto(request.addressee),
+    };
+  }
+
+  private toUserDto(user: UserSummary): unknown {
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      statusMessage: user.statusMessage,
+      avatarUrl: user.avatarStoragePath ? `/api/users/${user.id}/avatar` : null,
+      accountType: user.accountType,
     };
   }
 

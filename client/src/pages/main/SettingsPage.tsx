@@ -1,7 +1,14 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  getCurrentUserProfile,
+  updateCurrentUserProfile,
+  uploadCurrentUserAvatar,
+} from '../../api/users.api';
 import { AppLogo } from '../../components/AppLogo';
+import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
+import { useAuthStore } from '../../stores/auth.store';
 import {
   useSettingsStore,
   type LanguagePreference,
@@ -13,10 +20,17 @@ export function SettingsPage(): JSX.Element {
   const config = useSettingsStore((state) => state.config);
   const load = useSettingsStore((state) => state.load);
   const updateConfig = useSettingsStore((state) => state.updateConfig);
+  const user = useAuthStore((state) => state.user);
+  const updateUser = useAuthStore((state) => state.updateUser);
   const [serverUrl, setServerUrl] = useState('');
   const [theme, setTheme] = useState<ThemePreference>('system');
   const [language, setLanguage] = useState<LanguagePreference>('system');
+  const [displayName, setDisplayName] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [saved, setSaved] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isAvatarUploading, setIsAvatarUploading] = useState(false);
 
   useEffect(() => {
     void load();
@@ -32,10 +46,68 @@ export function SettingsPage(): JSX.Element {
     setLanguage(config.language);
   }, [config]);
 
+  useEffect(() => {
+    setDisplayName(user?.displayName ?? '');
+    setStatusMessage(user?.statusMessage ?? '');
+  }, [user?.displayName, user?.statusMessage]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    void getCurrentUserProfile()
+      .then((profile) => {
+        updateUser(profile);
+        setDisplayName(profile.displayName);
+        setStatusMessage(profile.statusMessage ?? '');
+      })
+      .catch(() => undefined);
+  }, [updateUser, user?.id]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     await updateConfig({ serverUrl, theme, language });
     setSaved(true);
+  }
+
+  async function handleProfileSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setProfileError(null);
+    setProfileSaved(false);
+    try {
+      const profile = await updateCurrentUserProfile({
+        displayName,
+        statusMessage,
+      });
+      updateUser(profile);
+      setProfileSaved(true);
+    } catch {
+      setProfileError(t('settings.profileSaveFailed'));
+    }
+  }
+
+  async function handleAvatarSelected(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    setProfileError(null);
+    setProfileSaved(false);
+    setIsAvatarUploading(true);
+    try {
+      const profile = await uploadCurrentUserAvatar(file);
+      updateUser(profile);
+      setDisplayName(profile.displayName);
+      setStatusMessage(profile.statusMessage ?? '');
+      setProfileSaved(true);
+    } catch {
+      setProfileError(t('settings.avatarUploadFailed'));
+    } finally {
+      setIsAvatarUploading(false);
+    }
   }
 
   return (
@@ -84,6 +156,45 @@ export function SettingsPage(): JSX.Element {
           </button>
           {saved ? <p className="form-success">{t('settings.saved')}</p> : null}
         </form>
+        <section className="profile-editor">
+          <h2>{t('settings.profileTitle')}</h2>
+          <div className="profile-editor-header">
+            <UserAvatar
+              userId={user?.id}
+              displayName={user?.displayName}
+              avatarUrl={user?.avatarUrl}
+              size="lg"
+            />
+            <label className={`file-upload-button ${isAvatarUploading ? 'is-disabled' : ''}`}>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={isAvatarUploading}
+                onChange={(event) => void handleAvatarSelected(event)}
+              />
+              <span>{isAvatarUploading ? t('settings.avatarUploading') : t('settings.avatarUpload')}</span>
+            </label>
+          </div>
+          <form className="form-stack" onSubmit={(event) => void handleProfileSubmit(event)}>
+            <label>
+              <span>{t('settings.displayName')}</span>
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </label>
+            <label>
+              <span>{t('settings.statusMessage')}</span>
+              <input
+                value={statusMessage}
+                maxLength={160}
+                onChange={(event) => setStatusMessage(event.target.value)}
+              />
+            </label>
+            <button type="submit" className="primary-button" disabled={!displayName.trim()}>
+              {t('settings.saveProfile')}
+            </button>
+            {profileError ? <p className="form-error">{profileError}</p> : null}
+            {profileSaved ? <p className="form-success">{t('settings.profileSaved')}</p> : null}
+          </form>
+        </section>
       </section>
     </main>
   );

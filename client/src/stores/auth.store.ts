@@ -9,6 +9,7 @@ interface AuthState {
   expiresAt: number | null;
   isAuthenticated: boolean;
   setSession: (result: AuthResult) => void;
+  updateUser: (user: AuthUser) => void;
   clearSession: () => void;
 }
 
@@ -28,6 +29,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       expiresAt,
       isAuthenticated: true,
     });
+  },
+  updateUser: (user) => {
+    set({ user });
   },
   clearSession: () => {
     setAccessToken(null);

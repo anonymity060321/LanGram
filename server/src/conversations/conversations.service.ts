@@ -12,6 +12,8 @@ type UserSummary = {
   id: string;
   email: string | null;
   displayName: string;
+  statusMessage: string | null;
+  avatarStoragePath: string | null;
   accountType: string;
 };
 
@@ -248,6 +250,8 @@ export class ConversationsService {
       id: true,
       email: true,
       displayName: true,
+      statusMessage: true,
+      avatarStoragePath: true,
       accountType: true,
     };
   }
@@ -300,10 +304,21 @@ export class ConversationsService {
     return {
       id: conversation.id,
       type: conversation.type,
-      peer,
-      members: conversation.members.map((member) => member.user),
+      peer: peer ? this.toUserDto(peer) : null,
+      members: conversation.members.map((member) => this.toUserDto(member.user)),
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
+    };
+  }
+
+  private toUserDto(user: UserSummary): unknown {
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      statusMessage: user.statusMessage,
+      avatarUrl: user.avatarStoragePath ? `/api/users/${user.id}/avatar` : null,
+      accountType: user.accountType,
     };
   }
 

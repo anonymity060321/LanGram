@@ -1,11 +1,10 @@
 import { apiRequest } from './http';
+import type { UserProfile } from './users.api';
 
-export interface FriendUser {
-  id: string;
-  email: string | null;
-  displayName: string;
-  accountType: string;
-}
+export type FriendUser = Pick<
+  UserProfile,
+  'id' | 'email' | 'displayName' | 'statusMessage' | 'avatarUrl' | 'accountType'
+>;
 
 export type FriendRequestStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';
 

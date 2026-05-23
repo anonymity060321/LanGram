@@ -10,6 +10,7 @@ import {
   type FriendItem,
   type FriendRequest,
 } from '../../api/friends.api';
+import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 
 export function FriendsPage(): JSX.Element {
@@ -148,9 +149,17 @@ export function FriendsPage(): JSX.Element {
           <div className="request-list">
             {incoming.map((request) => (
               <article className="friend-row" key={request.id}>
-                <div>
-                  <strong>{request.requester.displayName}</strong>
-                  <span>{request.status}</span>
+                <div className="friend-user-summary">
+                  <UserAvatar
+                    userId={request.requester.id}
+                    displayName={request.requester.displayName}
+                    avatarUrl={request.requester.avatarUrl}
+                    size="sm"
+                  />
+                  <span>
+                    <strong>{request.requester.displayName}</strong>
+                    <span>{request.status}</span>
+                  </span>
                 </div>
                 {request.status === 'PENDING' ? (
                   <div className="row-actions">
@@ -176,10 +185,18 @@ export function FriendsPage(): JSX.Element {
             ))}
             {outgoing.map((request) => (
               <article className="friend-row" key={request.id}>
-                <div>
-                  <strong>{request.addressee.displayName}</strong>
+                <div className="friend-user-summary">
+                  <UserAvatar
+                    userId={request.addressee.id}
+                    displayName={request.addressee.displayName}
+                    avatarUrl={request.addressee.avatarUrl}
+                    size="sm"
+                  />
                   <span>
+                    <strong>{request.addressee.displayName}</strong>
+                    <span>
                     {t('friends.outgoing')}: {request.status}
+                    </span>
                   </span>
                 </div>
               </article>
@@ -193,9 +210,17 @@ export function FriendsPage(): JSX.Element {
           <div className="request-list">
             {friends.map((item) => (
               <article className="friend-row" key={item.id}>
-                <div>
-                  <strong>{item.friend.displayName}</strong>
-                  <span>{item.friend.email ?? item.friend.accountType}</span>
+                <div className="friend-user-summary">
+                  <UserAvatar
+                    userId={item.friend.id}
+                    displayName={item.friend.displayName}
+                    avatarUrl={item.friend.avatarUrl}
+                    size="sm"
+                  />
+                  <span>
+                    <strong>{item.friend.displayName}</strong>
+                    <span>{item.friend.statusMessage || item.friend.email || item.friend.accountType}</span>
+                  </span>
                 </div>
               </article>
             ))}

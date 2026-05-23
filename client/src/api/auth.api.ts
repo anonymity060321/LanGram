@@ -1,4 +1,5 @@
 import { apiRequest } from './http';
+import type { UserProfile } from './users.api';
 import type { DeviceIdentity } from '../utils/device';
 
 export type EmailCodePurpose = 'REGISTER' | 'LOGIN';
@@ -8,12 +9,10 @@ export interface SendEmailCodeRequest {
   purpose: EmailCodePurpose;
 }
 
-export interface AuthUser {
-  id: string;
-  email: string | null;
-  displayName: string;
-  accountType: string;
-}
+export type AuthUser = Pick<
+  UserProfile,
+  'id' | 'email' | 'displayName' | 'statusMessage' | 'avatarUrl' | 'accountType'
+>;
 
 export interface AuthResult {
   accessToken: string;
