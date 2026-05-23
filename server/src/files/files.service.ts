@@ -1,9 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, rename, unlink } from 'node:fs/promises';
+import { createReadStream, createWriteStream, type ReadStream } from 'node:fs';
+import { mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileKind, FileStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -35,6 +40,19 @@ export interface SaveUploadedFileInput {
   file: UploadedDiskFile;
   width?: number | null;
   height?: number | null;
+}
+
+export interface DownloadFileResult {
+  stream: ReadStream;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface ForwardFileAssetInput {
+  userId: string;
+  sourceFileId: string;
+  targetConversationId: string;
 }
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
@@ -209,6 +227,7 @@ export class FilesService {
       where: {
         id: fileId,
         deletedAt: null,
+        status: { not: FileStatus.DELETED },
         conversation: {
           members: {
             some: { userId },
@@ -231,6 +250,105 @@ export class FilesService {
     });
 
     return this.toFileMetadataResponse(file);
+  }
+
+  async getDownloadFile(userId: string, fileId: string): Promise<DownloadFileResult> {
+    const file = await this.prisma.fileAsset.findFirst({
+      where: {
+        id: fileId,
+        deletedAt: null,
+        status: { not: FileStatus.DELETED },
+      },
+      select: {
+        conversationId: true,
+        originalName: true,
+        mimeType: true,
+        sizeBytes: true,
+        storagePath: true,
+      },
+    });
+
+    if (!file) {
+      throw new NotFoundException('File is not available');
+    }
+
+    await this.assertConversationMember(userId, file.conversationId);
+
+    const absolutePath = this.toAbsoluteStoragePath(file.storagePath);
+    let fileStat: { isFile: () => boolean; size: number };
+    try {
+      fileStat = await stat(absolutePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new NotFoundException('File content is missing');
+      }
+
+      throw error;
+    }
+
+    if (!fileStat.isFile()) {
+      throw new NotFoundException('File content is missing');
+    }
+
+    return {
+      stream: createReadStream(absolutePath),
+      originalName: file.originalName,
+      mimeType: this.toSafeDownloadMimeType(file.mimeType),
+      sizeBytes: fileStat.size,
+    };
+  }
+
+  async forwardFileAsset(input: ForwardFileAssetInput): Promise<FileMetadataResponse> {
+    const sourceFile = await this.prisma.fileAsset.findFirst({
+      where: {
+        id: input.sourceFileId,
+        deletedAt: null,
+        status: { in: [FileStatus.UPLOADED, FileStatus.ATTACHED] },
+        conversation: {
+          members: {
+            some: { userId: input.userId },
+          },
+        },
+      },
+      select: {
+        kind: true,
+        originalName: true,
+        safeName: true,
+        mimeType: true,
+        sizeBytes: true,
+        sha256: true,
+        width: true,
+        height: true,
+        storagePath: true,
+      },
+    });
+
+    if (!sourceFile) {
+      throw new ForbiddenException('File is not accessible');
+    }
+
+    await this.assertConversationMember(input.userId, input.targetConversationId);
+
+    const clonedFile = await this.prisma.fileAsset.create({
+      data: {
+        id: randomUUID(),
+        uploaderId: input.userId,
+        conversationId: input.targetConversationId,
+        kind: sourceFile.kind,
+        originalName: sourceFile.originalName,
+        safeName: sourceFile.safeName,
+        mimeType: sourceFile.mimeType,
+        sizeBytes: sourceFile.sizeBytes,
+        sha256: sourceFile.sha256,
+        storagePath: sourceFile.storagePath,
+        width: sourceFile.width,
+        height: sourceFile.height,
+        status: FileStatus.UPLOADED,
+      },
+      select: this.fileMetadataSelect(),
+    });
+
+    return this.toFileMetadataResponse(clonedFile);
   }
 
   private async assertConversationMember(userId: string, conversationId: string): Promise<void> {
@@ -298,6 +416,15 @@ export class FilesService {
     }
 
     return absolutePath;
+  }
+
+  private toSafeDownloadMimeType(mimeType: string): string {
+    const normalizedMimeType = mimeType.trim().toLowerCase();
+    if (/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/.test(normalizedMimeType)) {
+      return normalizedMimeType;
+    }
+
+    return 'application/octet-stream';
   }
 
   private async calculateSha256(path: string): Promise<string> {

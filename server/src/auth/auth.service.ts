@@ -9,8 +9,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcryptjs';
 import { randomBytes, randomInt } from 'crypto';
+import { compareAuthSecret, hashAuthSecret } from './auth-hash';
 import { EmailService } from './email.service';
 import { GuestLoginDto } from './dto/guest-login.dto';
 import { LoginDto } from './dto/login.dto';
@@ -18,8 +18,6 @@ import { RegisterDto } from './dto/register.dto';
 import { EmailCodePurposeDto, SendEmailCodeDto } from './dto/send-email-code.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
-
-const HASH_ROUNDS = 12;
 
 interface TokenPair {
   accessToken: string;
@@ -74,7 +72,7 @@ export class AuthService {
     }
 
     const code = String(randomInt(100000, 1000000));
-    const codeHash = await bcrypt.hash(code, HASH_ROUNDS);
+    const codeHash = await hashAuthSecret(code);
     const ttlMinutes = this.getNumberConfig('EMAIL_CODE_TTL_MINUTES');
 
     await this.prisma.emailVerificationCode.create({
@@ -97,7 +95,7 @@ export class AuthService {
     }
 
     await this.consumeEmailCode(email, EmailCodePurposeDto.REGISTER, dto.code);
-    const passwordHash = await bcrypt.hash(dto.password, HASH_ROUNDS);
+    const passwordHash = await hashAuthSecret(dto.password);
     const displayName = dto.displayName?.trim() || email.split('@')[0];
 
     const user = await this.prisma.user.create({
@@ -135,7 +133,7 @@ export class AuthService {
     if (dto.code) {
       await this.consumeEmailCode(email, EmailCodePurposeDto.LOGIN, dto.code);
     } else if (dto.password && user.passwordHash) {
-      const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+      const passwordMatches = await compareAuthSecret(dto.password, user.passwordHash);
       if (!passwordMatches) {
         await this.writeLoginLog(false, {
           userId: user.id,
@@ -205,13 +203,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const tokenMatches = await bcrypt.compare(parsed.secret, session.refreshTokenHash);
+    const tokenMatches = await compareAuthSecret(parsed.secret, session.refreshTokenHash);
     if (!tokenMatches) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     const newSecret = this.createTokenSecret();
-    const refreshTokenHash = await bcrypt.hash(newSecret, HASH_ROUNDS);
+    const refreshTokenHash = await hashAuthSecret(newSecret);
     await this.prisma.session.update({
       where: { id: session.id },
       data: {
@@ -268,7 +266,7 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired verification code');
     }
 
-    const matches = await bcrypt.compare(code, verification.codeHash);
+    const matches = await compareAuthSecret(code, verification.codeHash);
     if (!matches) {
       throw new BadRequestException('Invalid or expired verification code');
     }
@@ -284,7 +282,7 @@ export class AuthService {
     device: DeviceInput,
   ): Promise<AuthResult> {
     const refreshSecret = this.createTokenSecret();
-    const refreshTokenHash = await bcrypt.hash(refreshSecret, HASH_ROUNDS);
+    const refreshTokenHash = await hashAuthSecret(refreshSecret);
     const refreshTokenTtlDays = this.getNumberConfig('REFRESH_TOKEN_TTL_DAYS');
 
     await this.prisma.session.updateMany({

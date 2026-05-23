@@ -1,7 +1,12 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
-import { uploadFile, type FileKind, type FileMetadataResponse } from '../../api/files.api';
+import {
+  downloadFile,
+  uploadFile,
+  type FileKind,
+  type FileMetadataResponse,
+} from '../../api/files.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
@@ -38,6 +43,7 @@ export function MainLayout(): JSX.Element {
     notice: null,
     error: null,
   });
+  const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const messages = useMemo(
@@ -183,6 +189,22 @@ export function MainLayout(): JSX.Element {
     await forwardMessage(selectedConversationId, messageId, targetConversationId);
   }
 
+  async function handleDownloadFile(file: FileMetadataResponse): Promise<void> {
+    setDownloadStates((current) => ({ ...current, [file.id]: 'downloading' }));
+
+    try {
+      const blob = await downloadFile(file.id);
+      triggerBrowserDownload(blob, file.originalName);
+      setDownloadStates((current) => {
+        const next = { ...current };
+        delete next[file.id];
+        return next;
+      });
+    } catch {
+      setDownloadStates((current) => ({ ...current, [file.id]: 'failed' }));
+    }
+  }
+
   function handleClearLocalConversation(): void {
     if (!selectedConversationId) {
       return;
@@ -276,7 +298,9 @@ export function MainLayout(): JSX.Element {
               onRecallMessage={handleRecallMessage}
               onEditMessage={handleEditMessage}
               onForwardMessage={handleForwardMessage}
+              onDownloadFile={handleDownloadFile}
               forwardTargets={forwardTargets}
+              downloadStates={downloadStates}
             />
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <label className={`file-upload-button ${uploadState.isUploading ? 'is-disabled' : ''}`}>
@@ -347,7 +371,9 @@ function MessageList({
   onRecallMessage,
   onEditMessage,
   onForwardMessage,
+  onDownloadFile,
   forwardTargets,
+  downloadStates,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -357,7 +383,9 @@ function MessageList({
   onRecallMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, plaintext: string) => Promise<void>;
   onForwardMessage: (messageId: string, target: ForwardTarget) => Promise<void>;
+  onDownloadFile: (file: FileMetadataResponse) => Promise<void>;
   forwardTargets: ForwardTarget[];
+  downloadStates: Record<string, FileDownloadStatus>;
 }): JSX.Element {
   const { t } = useI18n();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -428,7 +456,7 @@ function MessageList({
               <p>
                 {message.status === 'recalled'
                   ? t('chat.messageRecalled')
-                  : renderMessageBody(message, searchQuery, t)}
+                  : renderMessageBody(message, searchQuery, t, onDownloadFile, downloadStates)}
               </p>
             )}
             <div className="message-meta">
@@ -532,13 +560,23 @@ function renderMessageBody(
   message: ChatMessage,
   searchQuery: string,
   t: ReturnType<typeof useI18n>['t'],
+  onDownloadFile: (file: FileMetadataResponse) => Promise<void>,
+  downloadStates: Record<string, FileDownloadStatus>,
 ): Array<string | JSX.Element> | JSX.Element | string {
   if (message.messageType === 'IMAGE' && message.file) {
+    const downloadStatus = downloadStates[message.file.id];
+
     return (
       <span className="file-message-card">
         <span className="file-message-icon">{t('chat.image')}</span>
         <span>
           <strong>{message.file.originalName}</strong>
+          <FileDownloadButton
+            file={message.file}
+            status={downloadStatus}
+            onDownloadFile={onDownloadFile}
+            t={t}
+          />
           <small>
             {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
           </small>
@@ -548,11 +586,19 @@ function renderMessageBody(
   }
 
   if (message.messageType === 'FILE' && message.file) {
+    const downloadStatus = downloadStates[message.file.id];
+
     return (
       <span className="file-message-card">
         <span className="file-message-icon">{t('chat.file')}</span>
         <span>
           <strong>{message.file.originalName}</strong>
+          <FileDownloadButton
+            file={message.file}
+            status={downloadStatus}
+            onDownloadFile={onDownloadFile}
+            t={t}
+          />
           <small>
             {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
           </small>
@@ -564,11 +610,43 @@ function renderMessageBody(
   return renderHighlightedText(message.plaintext, searchQuery);
 }
 
+function FileDownloadButton({
+  file,
+  status,
+  onDownloadFile,
+  t,
+}: {
+  file: FileMetadataResponse;
+  status?: FileDownloadStatus;
+  onDownloadFile: (file: FileMetadataResponse) => Promise<void>;
+  t: ReturnType<typeof useI18n>['t'];
+}): JSX.Element {
+  const isDownloading = status === 'downloading';
+
+  return (
+    <span className="file-message-actions">
+      <button
+        type="button"
+        className="message-action file-download-button"
+        onClick={() => void onDownloadFile(file)}
+        disabled={isDownloading}
+      >
+        {isDownloading ? t('chat.downloading') : t('chat.download')}
+      </button>
+      {status === 'failed' ? (
+        <small className="file-download-error">{t('chat.downloadFailed')}</small>
+      ) : null}
+    </span>
+  );
+}
+
 interface FileUploadState {
   isUploading: boolean;
   notice: string | null;
   error: string | null;
 }
+
+type FileDownloadStatus = 'downloading' | 'failed';
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -611,6 +689,27 @@ function formatFileSize(sizeBytes: number): string {
   }
 
   return `${sizeBytes} B`;
+}
+
+function triggerBrowserDownload(blob: Blob, originalName: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = sanitizeDownloadName(originalName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function sanitizeDownloadName(originalName: string): string {
+  const name = originalName
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/[\r\n]/g, '')
+    .trim();
+
+  return name || 'file';
 }
 
 interface ForwardTarget {

@@ -1,4 +1,4 @@
-import { apiRequest } from './http';
+import { apiBlobRequest, apiRequest } from './http';
 
 export type FileKind = 'IMAGE' | 'FILE';
 export type FileStatus = 'UPLOADED' | 'ATTACHED' | 'DELETED';
@@ -46,5 +46,19 @@ export function uploadFile(params: UploadFileParams): Promise<FileMetadataRespon
   return apiRequest('/files/upload', {
     method: 'POST',
     body: formData,
+  });
+}
+
+export function downloadFile(fileId: string): Promise<Blob> {
+  return apiBlobRequest(`/files/${encodeURIComponent(fileId)}/download`);
+}
+
+export function forwardFile(
+  fileId: string,
+  targetConversationId: string,
+): Promise<FileMetadataResponse> {
+  return apiRequest(`/files/${encodeURIComponent(fileId)}/forward`, {
+    method: 'POST',
+    body: JSON.stringify({ targetConversationId }),
   });
 }

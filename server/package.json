@@ -7,7 +7,8 @@
     "start:dev": "nest start --watch",
     "lint": "eslint \"src/**/*.ts\"",
     "build": "nest build",
-    "test": "jest --passWithNoTests"
+    "test": "jest --passWithNoTests",
+    "seed:test-users": "ts-node prisma/seed-test-users.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

@@ -7,7 +7,7 @@ import {
   type EncryptedMessage,
   type MessageType,
 } from '../api/conversations.api';
-import type { FileMetadataResponse } from '../api/files.api';
+import { forwardFile, type FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
 import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
 import {
@@ -318,46 +318,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    const clientMessageId = crypto.randomUUID();
-    const createdAt = new Date().toISOString();
-    const optimisticMessage: ChatMessage = {
-      id: clientMessageId,
-      clientMessageId,
-      conversationId: targetConversationId,
-      senderId,
-      messageType: 'TEXT',
-      plaintext: sourceMessage.plaintext,
-      file: null,
-      status: 'sending',
-      createdAt,
-      editedAt: null,
-      recalledAt: null,
-      isOwn: true,
-    };
-
-    set((state) => ({
-      messagesByConversation: appendMessage(
-        state.messagesByConversation,
-        targetConversationId,
-        optimisticMessage,
-      ),
-    }));
-
     try {
-      const encrypted = await encryptMessage(sourceMessage.plaintext, targetConversation);
-      sendRealtimeMessage({
-        clientMessageId,
-        conversationId: targetConversationId,
-        messageType: 'TEXT',
-        ciphertext: encrypted.ciphertext,
-        nonce: encrypted.nonce,
-        encryptionVersion: encrypted.encryptionVersion,
-        fileId: null,
-        replyToMessageId: null,
-        createdAt,
-      });
+      if (sourceMessage.messageType === 'TEXT') {
+        await forwardTextMessage(sourceMessage, targetConversation, targetConversationId, senderId, set);
+        return;
+      }
+
+      if (!sourceMessage.file) {
+        set({ error: 'Forward failed' });
+        return;
+      }
+
+      const clonedFile = await forwardFile(sourceMessage.file.id, targetConversationId);
+      await forwardFileMessage(clonedFile, targetConversation, targetConversationId, senderId, set);
     } catch {
-      updateMessageStatus(targetConversationId, clientMessageId, 'failed', set);
       set({ error: 'Forward failed' });
     }
   },
@@ -389,6 +363,109 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ searchQuery: query });
   },
 }));
+
+async function forwardTextMessage(
+  sourceMessage: ChatMessage,
+  targetConversation: Conversation,
+  targetConversationId: string,
+  senderId: string,
+  set: ChatSet,
+): Promise<void> {
+  const clientMessageId = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const optimisticMessage: ChatMessage = {
+    id: clientMessageId,
+    clientMessageId,
+    conversationId: targetConversationId,
+    senderId,
+    messageType: 'TEXT',
+    plaintext: sourceMessage.plaintext,
+    file: null,
+    status: 'sending',
+    createdAt,
+    editedAt: null,
+    recalledAt: null,
+    isOwn: true,
+  };
+
+  set((state) => ({
+    messagesByConversation: appendMessage(
+      state.messagesByConversation,
+      targetConversationId,
+      optimisticMessage,
+    ),
+  }));
+
+  try {
+    const encrypted = await encryptMessage(sourceMessage.plaintext, targetConversation);
+    sendRealtimeMessage({
+      clientMessageId,
+      conversationId: targetConversationId,
+      messageType: 'TEXT',
+      ciphertext: encrypted.ciphertext,
+      nonce: encrypted.nonce,
+      encryptionVersion: encrypted.encryptionVersion,
+      fileId: null,
+      replyToMessageId: null,
+      createdAt,
+    });
+  } catch (error) {
+    updateMessageStatus(targetConversationId, clientMessageId, 'failed', set);
+    throw error;
+  }
+}
+
+async function forwardFileMessage(
+  file: FileMetadataResponse,
+  targetConversation: Conversation,
+  targetConversationId: string,
+  senderId: string,
+  set: ChatSet,
+): Promise<void> {
+  const clientMessageId = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const plaintext = JSON.stringify({ caption: '', fileName: file.originalName });
+  const optimisticMessage: ChatMessage = {
+    id: clientMessageId,
+    clientMessageId,
+    conversationId: targetConversationId,
+    senderId,
+    messageType: file.kind,
+    plaintext,
+    file,
+    status: 'sending',
+    createdAt,
+    editedAt: null,
+    recalledAt: null,
+    isOwn: true,
+  };
+
+  set((state) => ({
+    messagesByConversation: appendMessage(
+      state.messagesByConversation,
+      targetConversationId,
+      optimisticMessage,
+    ),
+  }));
+
+  try {
+    const encrypted = await encryptMessage(plaintext, targetConversation);
+    sendRealtimeMessage({
+      clientMessageId,
+      conversationId: targetConversationId,
+      messageType: file.kind,
+      ciphertext: encrypted.ciphertext,
+      nonce: encrypted.nonce,
+      encryptionVersion: encrypted.encryptionVersion,
+      fileId: file.id,
+      replyToMessageId: null,
+      createdAt,
+    });
+  } catch (error) {
+    updateMessageStatus(targetConversationId, clientMessageId, 'failed', set);
+    throw error;
+  }
+}
 
 async function toChatMessage(
   message: EncryptedMessage,

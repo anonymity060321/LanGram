@@ -64,6 +64,25 @@ export async function apiRequest<TResponse>(
   return (await response.json()) as TResponse;
 }
 
+export async function apiBlobRequest(path: string, options: RequestInit = {}): Promise<Blob> {
+  const headers = new Headers(options.headers);
+
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(`${baseUrl}${normalizePath(path)}`, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new ApiClientError(response.status, await parseErrorPayload(response));
+  }
+
+  return response.blob();
+}
+
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '');
 }
