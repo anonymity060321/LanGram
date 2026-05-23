@@ -261,9 +261,85 @@ button {
   height: 100vh;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(240px, 320px) minmax(360px, 1fr) minmax(220px, 280px);
+  grid-template-columns: 86px minmax(240px, 320px) minmax(360px, 1fr) minmax(220px, 280px);
   overflow: hidden;
   background: #eef3f8;
+}
+
+.app-nav {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  border-right: 1px solid #d6deea;
+  background: #ffffff;
+  padding: 14px 10px;
+}
+
+.app-nav .app-logo {
+  justify-content: center;
+}
+
+.app-nav .app-logo span {
+  display: none;
+}
+
+.app-nav-links {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.app-nav-link {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #4b5b70;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+.app-nav-link span {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.app-nav-link strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-nav-link:hover,
+.app-nav-link.is-active {
+  border-color: #bfdbfe;
+  background: #eef4ff;
+  color: #172033;
+}
+
+.app-nav-logout {
+  cursor: pointer;
+}
+
+.app-nav-logout span {
+  background: #fff1f2;
+  color: #b42318;
 }
 
 .conversation-panel,
@@ -1132,7 +1208,7 @@ button {
 
 @media (max-width: 960px) {
   .main-layout {
-    grid-template-columns: minmax(220px, 300px) 1fr;
+    grid-template-columns: 78px minmax(220px, 300px) 1fr;
   }
 
   .profile-panel {
@@ -1142,7 +1218,7 @@ button {
 
 @media (max-width: 720px) {
   .main-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: 72px 1fr;
   }
 
   .conversation-panel {

@@ -54,6 +54,7 @@ interface ChatState {
   isLoadingMessages: boolean;
   loadConversations: () => Promise<void>;
   selectConversation: (conversationId: string, currentUserId: string) => Promise<void>;
+  closeConversation: () => void;
   openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<string | null>;
   connect: (accessToken: string) => void;
   disconnect: () => void;
@@ -128,6 +129,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch {
       set({ error: 'Failed to load messages', isLoadingMessages: false });
     }
+  },
+  closeConversation: () => {
+    set({ selectedConversationId: null, isLoadingMessages: false, searchQuery: '' });
   },
   openDirectConversation: async (friendUserId, currentUserId) => {
     set({ error: null });

@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
 import {
   downloadFile,
@@ -7,6 +7,7 @@ import {
   type FileKind,
   type FileMetadataResponse,
 } from '../../api/files.api';
+import { logout as requestLogout } from '../../api/auth.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
 import { AppLogo } from '../../components/AppLogo';
 import { UserAvatar } from '../../components/UserAvatar';
@@ -17,8 +18,10 @@ import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCo
 
 export function MainLayout(): JSX.Element {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const accessToken = useAuthStore((state) => state.accessToken);
+  const clearSession = useAuthStore((state) => state.clearSession);
   const conversations = useChatStore((state) => state.conversations);
   const selectedConversationId = useChatStore((state) => state.selectedConversationId);
   const messagesByConversation = useChatStore((state) => state.messagesByConversation);
@@ -29,6 +32,7 @@ export function MainLayout(): JSX.Element {
   const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
   const selectConversation = useChatStore((state) => state.selectConversation);
+  const closeConversation = useChatStore((state) => state.closeConversation);
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
@@ -107,7 +111,28 @@ export function MainLayout(): JSX.Element {
     }
 
     setSearchQuery('');
+    if (selectedConversationId === conversationId) {
+      closeConversation();
+      return;
+    }
+
     await selectConversation(conversationId, user.id);
+  }
+
+  async function handleLogout(): Promise<void> {
+    if (!window.confirm(t('auth.logoutConfirm'))) {
+      return;
+    }
+
+    try {
+      await requestLogout();
+    } catch {
+      // Local session cleanup still needs to happen if the server is unreachable.
+    } finally {
+      disconnect();
+      clearSession();
+      navigate('/auth/login', { replace: true });
+    }
   }
 
   async function handleOpenFriend(friendUserId: string): Promise<void> {
@@ -260,13 +285,30 @@ export function MainLayout(): JSX.Element {
 
   return (
     <main className="main-layout">
+      <aside className="app-nav">
+        <AppLogo label={t('app.name')} size="sm" />
+        <nav className="app-nav-links" aria-label={t('main.navigation')}>
+          <Link className="app-nav-link is-active" to="/">
+            <span>M</span>
+            <strong>{t('main.navMessages')}</strong>
+          </Link>
+          <Link className="app-nav-link" to="/friends">
+            <span>C</span>
+            <strong>{t('main.navContacts')}</strong>
+          </Link>
+          <Link className="app-nav-link" to="/settings">
+            <span>S</span>
+            <strong>{t('main.navSettings')}</strong>
+          </Link>
+        </nav>
+        <button type="button" className="app-nav-link app-nav-logout" onClick={() => void handleLogout()}>
+          <span>Q</span>
+          <strong>{t('auth.logout')}</strong>
+        </button>
+      </aside>
       <aside className="conversation-panel">
         <div className="sidebar-header">
-          <AppLogo label={t('app.name')} size="sm" />
-          <div className="sidebar-actions">
-            <Link to="/friends">{t('main.friends')}</Link>
-            <Link to="/settings">{t('main.settings')}</Link>
-          </div>
+          <strong>{t('main.sidebarChats')}</strong>
         </div>
         <section className="sidebar-section">
           <h2>{t('main.sidebarChats')}</h2>

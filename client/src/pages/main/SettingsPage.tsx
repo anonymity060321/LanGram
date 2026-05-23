@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { logout as requestLogout } from '../../api/auth.api';
 import {
   getCurrentUserProfile,
   updateCurrentUserProfile,
@@ -9,6 +10,7 @@ import { AppLogo } from '../../components/AppLogo';
 import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
+import { useChatStore } from '../../stores/chat.store';
 import {
   useSettingsStore,
   type LanguagePreference,
@@ -17,11 +19,14 @@ import {
 
 export function SettingsPage(): JSX.Element {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const config = useSettingsStore((state) => state.config);
   const load = useSettingsStore((state) => state.load);
   const updateConfig = useSettingsStore((state) => state.updateConfig);
   const user = useAuthStore((state) => state.user);
   const updateUser = useAuthStore((state) => state.updateUser);
+  const clearSession = useAuthStore((state) => state.clearSession);
+  const disconnect = useChatStore((state) => state.disconnect);
   const [serverUrl, setServerUrl] = useState('');
   const [theme, setTheme] = useState<ThemePreference>('system');
   const [language, setLanguage] = useState<LanguagePreference>('system');
@@ -110,6 +115,22 @@ export function SettingsPage(): JSX.Element {
     }
   }
 
+  async function handleLogout(): Promise<void> {
+    if (!window.confirm(t('auth.logoutConfirm'))) {
+      return;
+    }
+
+    try {
+      await requestLogout();
+    } catch {
+      // Keep logout usable when the server cannot be reached.
+    } finally {
+      disconnect();
+      clearSession();
+      navigate('/auth/login', { replace: true });
+    }
+  }
+
   return (
     <main className="settings-page">
       <section className="settings-panel">
@@ -194,6 +215,12 @@ export function SettingsPage(): JSX.Element {
             {profileError ? <p className="form-error">{profileError}</p> : null}
             {profileSaved ? <p className="form-success">{t('settings.profileSaved')}</p> : null}
           </form>
+        </section>
+        <section className="profile-editor">
+          <h2>{t('settings.accountTitle')}</h2>
+          <button type="button" className="secondary-button danger-button" onClick={() => void handleLogout()}>
+            {t('auth.logout')}
+          </button>
         </section>
       </section>
     </main>
