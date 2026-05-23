@@ -27,6 +27,12 @@ enum EmailVerificationPurpose {
   @@map("email_verification_purpose")
 }
 
+enum AuthCaptchaPurpose {
+  LOGIN
+
+  @@map("auth_captcha_purpose")
+}
+
 enum FriendRequestStatus {
   PENDING
   ACCEPTED
@@ -149,6 +155,20 @@ model EmailVerificationCode {
 
   @@index([email, purpose, createdAt])
   @@map("email_verification_codes")
+}
+
+model AuthCaptchaChallenge {
+  id           String             @id @default(uuid()) @db.Uuid
+  answerHash   String             @map("answer_hash")
+  purpose      AuthCaptchaPurpose
+  expiresAt    DateTime           @map("expires_at")
+  consumedAt   DateTime?          @map("consumed_at")
+  attemptCount Int                @default(0) @map("attempt_count")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  @@index([purpose, createdAt])
+  @@index([expiresAt, consumedAt])
+  @@map("auth_captcha_challenges")
 }
 
 model LoginLog {

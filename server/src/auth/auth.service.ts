@@ -12,10 +12,13 @@ import { JwtService } from '@nestjs/jwt';
 import { randomBytes, randomInt } from 'crypto';
 import { compareAuthSecret, hashAuthSecret } from './auth-hash';
 import { EmailService } from './email.service';
+import { EmailCodeLoginDto } from './dto/email-code-login.dto';
 import { GuestLoginDto } from './dto/guest-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { PasswordLoginDto } from './dto/password-login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { EmailCodePurposeDto, SendEmailCodeDto } from './dto/send-email-code.dto';
+import { TextCaptchaResponseDto } from './dto/text-captcha.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 
@@ -47,6 +50,10 @@ interface JwtPayload {
   sessionId: string;
   accountType: string;
 }
+
+const TEXT_CAPTCHA_TTL_SECONDS = 120;
+const TEXT_CAPTCHA_MAX_ATTEMPTS = 3;
+const TEXT_CAPTCHA_PURPOSE_LOGIN = 'LOGIN';
 
 @Injectable()
 export class AuthService {
@@ -89,6 +96,25 @@ export class AuthService {
     await this.emailService.sendVerificationCode(email, code);
   }
 
+  async createTextCaptcha(): Promise<TextCaptchaResponseDto> {
+    const left = randomInt(10, 50);
+    const right = randomInt(10, 50);
+    const answer = String(left + right);
+    const challenge = await this.prisma.authCaptchaChallenge.create({
+      data: {
+        answerHash: await hashAuthSecret(answer),
+        purpose: TEXT_CAPTCHA_PURPOSE_LOGIN,
+        expiresAt: new Date(Date.now() + TEXT_CAPTCHA_TTL_SECONDS * 1000),
+      },
+    });
+
+    return {
+      captchaId: challenge.id,
+      prompt: `${left} + ${right} = ?`,
+      expiresInSeconds: TEXT_CAPTCHA_TTL_SECONDS,
+    };
+  }
+
   async register(dto: RegisterDto): Promise<AuthResult> {
     const email = dto.email.toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
@@ -112,6 +138,75 @@ export class AuthService {
     return this.issueSession(user, dto.device);
   }
 
+  async loginWithPassword(
+    dto: PasswordLoginDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<AuthResult> {
+    const email = this.normalizePasswordLoginIdentifier(dto);
+
+    await this.consumeTextCaptcha(dto.captchaId, dto.captchaAnswer);
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.accountType !== 'EMAIL' || user.status !== 'ACTIVE' || !user.passwordHash) {
+      await this.writeLoginLog(false, { email, reason: 'INVALID_CREDENTIALS', ipAddress, userAgent });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordMatches = await compareAuthSecret(dto.password, user.passwordHash);
+    if (!passwordMatches) {
+      await this.writeLoginLog(false, {
+        userId: user.id,
+        email,
+        reason: 'INVALID_CREDENTIALS',
+        ipAddress,
+        userAgent,
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const result = await this.issueSession(user, dto.device);
+    await this.writeLoginLog(true, {
+      userId: user.id,
+      email,
+      deviceIdentifier: dto.device.deviceIdentifier,
+      ipAddress,
+      userAgent,
+    });
+
+    return result;
+  }
+
+  async loginWithEmailCode(
+    dto: EmailCodeLoginDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<AuthResult> {
+    const email = dto.email.toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!user || user.accountType !== 'EMAIL' || user.status !== 'ACTIVE') {
+      await this.writeLoginLog(false, { email, reason: 'INVALID_CREDENTIALS', ipAddress, userAgent });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    await this.consumeEmailCode(email, EmailCodePurposeDto.LOGIN, dto.code);
+
+    const result = await this.issueSession(user, dto.device);
+    await this.writeLoginLog(true, {
+      userId: user.id,
+      email,
+      deviceIdentifier: dto.device.deviceIdentifier,
+      ipAddress,
+      userAgent,
+    });
+
+    return result;
+  }
+
+  /**
+   * Deprecated compatibility path. New clients should call loginWithPassword or loginWithEmailCode.
+   */
   async login(dto: LoginDto, ipAddress?: string, userAgent?: string): Promise<AuthResult> {
     const email = dto.email.toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
@@ -249,6 +344,15 @@ export class AuthService {
     return { user };
   }
 
+  private normalizePasswordLoginIdentifier(dto: PasswordLoginDto): string {
+    const rawIdentifier = dto.email ?? dto.identifier;
+    if (!rawIdentifier || !rawIdentifier.includes('@')) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    return rawIdentifier.toLowerCase();
+  }
+
   private async consumeEmailCode(
     email: string,
     purpose: EmailCodePurposeDto,
@@ -276,6 +380,40 @@ export class AuthService {
     await this.prisma.emailVerificationCode.update({
       where: { id: verification.id },
       data: { consumedAt: new Date() },
+    });
+  }
+
+  private async consumeTextCaptcha(captchaId: string, answer: string): Promise<void> {
+    const challenge = await this.prisma.authCaptchaChallenge.findUnique({
+      where: { id: captchaId },
+    });
+
+    if (
+      !challenge ||
+      challenge.purpose !== TEXT_CAPTCHA_PURPOSE_LOGIN ||
+      challenge.consumedAt ||
+      challenge.expiresAt <= new Date() ||
+      challenge.attemptCount >= TEXT_CAPTCHA_MAX_ATTEMPTS
+    ) {
+      throw new BadRequestException('Invalid or expired captcha');
+    }
+
+    const nextAttemptCount = challenge.attemptCount + 1;
+    const matches = await compareAuthSecret(answer.trim(), challenge.answerHash);
+    if (!matches) {
+      await this.prisma.authCaptchaChallenge.update({
+        where: { id: challenge.id },
+        data: { attemptCount: nextAttemptCount },
+      });
+      throw new BadRequestException('Invalid or expired captcha');
+    }
+
+    await this.prisma.authCaptchaChallenge.update({
+      where: { id: challenge.id },
+      data: {
+        attemptCount: nextAttemptCount,
+        consumedAt: new Date(),
+      },
     });
   }
 
