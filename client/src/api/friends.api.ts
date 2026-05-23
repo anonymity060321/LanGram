@@ -3,7 +3,14 @@ import type { UserProfile } from './users.api';
 
 export type FriendUser = Pick<
   UserProfile,
-  'id' | 'email' | 'displayName' | 'statusMessage' | 'avatarUrl' | 'accountType'
+  | 'id'
+  | 'email'
+  | 'displayName'
+  | 'statusMessage'
+  | 'avatarUrl'
+  | 'accountType'
+  | 'isOnline'
+  | 'lastSeenAt'
 >;
 
 export type FriendRequestStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';

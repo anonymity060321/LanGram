@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConversationType, MessageStatus, Prisma } from '@prisma/client';
+import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
 
@@ -15,6 +16,7 @@ type UserSummary = {
   statusMessage: string | null;
   avatarStoragePath: string | null;
   accountType: string;
+  lastSeenAt: Date | null;
 };
 
 type ConversationWithMembers = {
@@ -63,7 +65,10 @@ type MessageFileAssetRecord = {
 
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly presenceService: PresenceService,
+  ) {}
 
   async listConversations(userId: string): Promise<{ conversations: unknown[] }> {
     const conversations = await this.prisma.conversation.findMany({
@@ -253,6 +258,7 @@ export class ConversationsService {
       statusMessage: true,
       avatarStoragePath: true,
       accountType: true,
+      lastSeenAt: true,
     };
   }
 
@@ -312,6 +318,8 @@ export class ConversationsService {
   }
 
   private toUserDto(user: UserSummary): unknown {
+    const presence = this.presenceService.getPresence(user);
+
     return {
       id: user.id,
       email: user.email,
@@ -319,6 +327,8 @@ export class ConversationsService {
       statusMessage: user.statusMessage,
       avatarUrl: user.avatarStoragePath ? `/api/users/${user.id}/avatar` : null,
       accountType: user.accountType,
+      isOnline: presence.isOnline,
+      lastSeenAt: presence.lastSeenAt,
     };
   }
 

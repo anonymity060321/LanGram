@@ -1,5 +1,6 @@
 import { MessageStatus, MessageType } from '@prisma/client';
 import { MessagesService } from '../messages/messages.service';
+import { PresenceService } from '../presence/presence.service';
 import { RealtimeAuthService } from './realtime-auth.service';
 import { REALTIME_EVENTS } from './realtime.events';
 import { RealtimeGateway } from './realtime.gateway';
@@ -83,6 +84,15 @@ function createGateway(): {
       (conversationId: string, userId: string) => Promise<string[]>
     >;
   };
+  presenceService: {
+    markOnline: jest.MockedFunction<
+      (userId: string) => { isOnline: boolean; lastSeenAt: Date | null }
+    >;
+    markOffline: jest.MockedFunction<
+      (userId: string) => Promise<{ isOnline: boolean; lastSeenAt: Date | null }>
+    >;
+    listFriendUserIds: jest.MockedFunction<(userId: string) => Promise<string[]>>;
+  };
 } {
   const authService = {
     authenticate: jest.fn(),
@@ -96,14 +106,33 @@ function createGateway(): {
     editMessage: jest.fn(),
     getConversationPeerIds: jest.fn(),
   };
+  const presenceService = {
+    markOnline: jest.fn((userId: string) => {
+      void userId;
+      return { isOnline: true, lastSeenAt: null };
+    }),
+    markOffline: jest.fn(async (userId: string) => {
+      void userId;
+      return {
+        isOnline: false,
+        lastSeenAt: new Date('2026-05-19T00:00:02.000Z'),
+      };
+    }),
+    listFriendUserIds: jest.fn(async (userId: string) => {
+      void userId;
+      return [];
+    }),
+  };
 
   return {
     gateway: new RealtimeGateway(
       authService as unknown as RealtimeAuthService,
       messagesService as unknown as MessagesService,
+      presenceService as unknown as PresenceService,
     ),
     authService,
     messagesService,
+    presenceService,
   };
 }
 
@@ -167,6 +196,35 @@ describe('RealtimeGateway', () => {
       reason: 'new_realtime_connection',
     });
     expect(first.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('emits presence updates to online friends on connect and disconnect', async () => {
+    const { gateway, authService, messagesService, presenceService } = createGateway();
+    const user = createSocket('user-socket');
+    const friend = createSocket('friend-socket');
+    authService.authenticate
+      .mockResolvedValueOnce({ id: 'user-a', sessionId: 'session-a', accountType: 'GUEST' })
+      .mockResolvedValueOnce({ id: 'user-b', sessionId: 'session-b', accountType: 'GUEST' });
+    messagesService.listUndeliveredMessages.mockResolvedValue([]);
+    presenceService.listFriendUserIds
+      .mockResolvedValueOnce(['user-b'])
+      .mockResolvedValueOnce(['user-a'])
+      .mockResolvedValueOnce(['user-b']);
+
+    await gateway.handleConnection(user as never);
+    await gateway.handleConnection(friend as never);
+    await gateway.handleDisconnect(user as never);
+
+    expect(presenceService.markOnline).toHaveBeenCalledWith('user-a');
+    expect(presenceService.markOffline).toHaveBeenCalledWith('user-a');
+    expect(friend.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.PRESENCE_UPDATE,
+      {
+        userId: 'user-a',
+        isOnline: false,
+        lastSeenAt: '2026-05-19T00:00:02.000Z',
+      },
+    );
   });
 
   it('handles message:send and emits message:new plus delivered receipts', async () => {

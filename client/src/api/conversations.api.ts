@@ -8,7 +8,14 @@ export type ServerMessageStatus = 'SENT' | 'DELIVERED' | 'READ' | 'RECALLED';
 
 export type ConversationUser = Pick<
   UserProfile,
-  'id' | 'email' | 'displayName' | 'statusMessage' | 'avatarUrl' | 'accountType'
+  | 'id'
+  | 'email'
+  | 'displayName'
+  | 'statusMessage'
+  | 'avatarUrl'
+  | 'accountType'
+  | 'isOnline'
+  | 'lastSeenAt'
 >;
 
 export interface Conversation {

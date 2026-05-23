@@ -12,9 +12,15 @@ import {
 } from '../../api/friends.api';
 import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
+import { useAuthStore } from '../../stores/auth.store';
+import { useChatStore } from '../../stores/chat.store';
 
 export function FriendsPage(): JSX.Element {
   const { t } = useI18n();
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const connect = useChatStore((state) => state.connect);
+  const disconnect = useChatStore((state) => state.disconnect);
+  const presenceByUserId = useChatStore((state) => state.presenceByUserId);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState('');
@@ -28,6 +34,25 @@ export function FriendsPage(): JSX.Element {
   useEffect(() => {
     void refreshFriendsData().catch(() => setError(t('friends.actionFailed')));
   }, [t]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      disconnect();
+      return;
+    }
+
+    connect(accessToken);
+    return () => disconnect();
+  }, [accessToken, connect, disconnect]);
+
+  useEffect(() => {
+    setFriends((current) =>
+      current.map((item) => ({
+        ...item,
+        friend: applyPresence(item.friend, presenceByUserId),
+      })),
+    );
+  }, [presenceByUserId]);
 
   async function refreshFriendsData(): Promise<void> {
     const [requestsResult, friendsResult] = await Promise.all([
@@ -219,6 +244,7 @@ export function FriendsPage(): JSX.Element {
                   />
                   <span>
                     <strong>{item.friend.displayName}</strong>
+                    <span>{formatPresence(item.friend.isOnline, item.friend.lastSeenAt, t)}</span>
                     <span>{item.friend.statusMessage || item.friend.email || item.friend.accountType}</span>
                   </span>
                 </div>
@@ -237,4 +263,47 @@ function formatDateTime(value: string | null): string {
   }
 
   return new Date(value).toLocaleString();
+}
+
+function applyPresence(
+  friend: FriendItem['friend'],
+  presenceByUserId: ReturnType<typeof useChatStore.getState>['presenceByUserId'],
+): FriendItem['friend'] {
+  const presence = presenceByUserId[friend.id];
+  if (!presence) {
+    return friend;
+  }
+
+  return {
+    ...friend,
+    isOnline: presence.isOnline,
+    lastSeenAt: presence.lastSeenAt,
+  };
+}
+
+function formatPresence(
+  isOnline: boolean | undefined,
+  lastSeenAt: string | null | undefined,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (isOnline) {
+    return t('presence.online');
+  }
+
+  if (!lastSeenAt) {
+    return t('presence.offline');
+  }
+
+  const diffMinutes = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / 60000),
+  );
+  if (diffMinutes < 1) {
+    return t('presence.justNow');
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} ${t('presence.minutesAgo')}`;
+  }
+
+  return `${Math.floor(diffMinutes / 60)} ${t('presence.hoursAgo')}`;
 }

@@ -22,6 +22,7 @@ export function MainLayout(): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
   const selectedConversationId = useChatStore((state) => state.selectedConversationId);
   const messagesByConversation = useChatStore((state) => state.messagesByConversation);
+  const presenceByUserId = useChatStore((state) => state.presenceByUserId);
   const chatError = useChatStore((state) => state.error);
   const searchQuery = useChatStore((state) => state.searchQuery);
   const isLoadingConversations = useChatStore((state) => state.isLoadingConversations);
@@ -78,6 +79,15 @@ export function MainLayout(): JSX.Element {
     connect(accessToken);
     return () => disconnect();
   }, [accessToken, connect, disconnect]);
+
+  useEffect(() => {
+    setFriends((current) =>
+      current.map((item) => ({
+        ...item,
+        friend: applyKnownPresence(item.friend, conversations, presenceByUserId),
+      })),
+    );
+  }, [conversations, presenceByUserId]);
 
   const visibleFriends = useMemo(
     () =>
@@ -281,7 +291,11 @@ export function MainLayout(): JSX.Element {
                 />
                 <span>
                   <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
-                  <small>{t('chat.direct')}</small>
+                  <small>
+                    {conversation.peer
+                      ? formatPresence(conversation.peer.isOnline, conversation.peer.lastSeenAt, t)
+                      : t('chat.direct')}
+                  </small>
                 </span>
               </button>
             ))}
@@ -299,7 +313,11 @@ export function MainLayout(): JSX.Element {
             <strong>
               {selectedConversation?.peer?.displayName ?? user?.displayName ?? t('app.name')}
             </strong>
-            <span>{selectedConversation ? t('chat.direct') : (user?.accountType ?? 'MVP')}</span>
+            <span>
+              {selectedConversation?.peer
+                ? formatPresence(selectedConversation.peer.isOnline, selectedConversation.peer.lastSeenAt, t)
+                : t('presence.online')}
+            </span>
           </div>
           {selectedConversation ? (
             <button
@@ -427,6 +445,7 @@ export function MainLayout(): JSX.Element {
           size="lg"
         />
         <strong>{user?.displayName ?? t('app.name')}</strong>
+        <span className="presence-text">{t('presence.online')}</span>
         <span>{user?.statusMessage || user?.email || user?.accountType || 'MVP'}</span>
         <section className="profile-section">
           <h2>{t('chat.startChat')}</h2>
@@ -445,7 +464,12 @@ export function MainLayout(): JSX.Element {
                   avatarUrl={friend.friend.avatarUrl}
                   size="sm"
                 />
-                <span>{friend.friend.displayName}</span>
+                <span>
+                  <strong>{friend.friend.displayName}</strong>
+                  <small>
+                    {formatPresence(friend.friend.isOnline, friend.friend.lastSeenAt, t)}
+                  </small>
+                </span>
               </button>
             ))}
           </div>
@@ -453,6 +477,62 @@ export function MainLayout(): JSX.Element {
       </aside>
     </main>
   );
+}
+
+function applyKnownPresence(
+  friend: FriendItem['friend'],
+  conversations: Conversation[],
+  presenceByUserId: ReturnType<typeof useChatStore.getState>['presenceByUserId'],
+): FriendItem['friend'] {
+  const eventPresence = presenceByUserId[friend.id];
+  if (eventPresence) {
+    return {
+      ...friend,
+      isOnline: eventPresence.isOnline,
+      lastSeenAt: eventPresence.lastSeenAt,
+    };
+  }
+
+  const conversationPeer = conversations
+    .map((conversation) => conversation.peer)
+    .find((peer) => peer?.id === friend.id);
+
+  if (!conversationPeer) {
+    return friend;
+  }
+
+  return {
+    ...friend,
+    isOnline: conversationPeer.isOnline,
+    lastSeenAt: conversationPeer.lastSeenAt,
+  };
+}
+
+function formatPresence(
+  isOnline: boolean | undefined,
+  lastSeenAt: string | null | undefined,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (isOnline) {
+    return t('presence.online');
+  }
+
+  if (!lastSeenAt) {
+    return t('presence.offline');
+  }
+
+  const diffMinutes = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / 60000),
+  );
+  if (diffMinutes < 1) {
+    return t('presence.justNow');
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} ${t('presence.minutesAgo')}`;
+  }
+
+  return `${Math.floor(diffMinutes / 60)} ${t('presence.hoursAgo')}`;
 }
 
 function MessageList({

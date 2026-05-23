@@ -20,6 +20,7 @@ import {
   type MessageDeliveredPayload,
   type MessageEditedPayload,
   type MessageNewPayload,
+  type PresenceUpdatePayload,
   type MessageReadPayload,
   type MessageRecalledPayload,
   type RealtimeErrorPayload,
@@ -46,6 +47,7 @@ interface ChatState {
   conversations: Conversation[];
   selectedConversationId: string | null;
   messagesByConversation: Record<string, ChatMessage[]>;
+  presenceByUserId: Record<string, PresenceUpdatePayload>;
   error: string | null;
   searchQuery: string;
   isLoadingConversations: boolean;
@@ -72,6 +74,7 @@ interface ChatState {
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
   clearLocalConversation: (conversationId: string) => void;
   setSearchQuery: (query: string) => void;
+  updatePresence: (payload: PresenceUpdatePayload) => void;
 }
 
 type ChatSet = (
@@ -82,6 +85,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   selectedConversationId: null,
   messagesByConversation: {},
+  presenceByUserId: {},
   error: null,
   searchQuery: '',
   isLoadingConversations: false,
@@ -155,6 +159,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
       onMessageEdited: (payload) => {
         void handleEdited(payload, get, set);
+      },
+      onPresenceUpdate: (payload) => {
+        get().updatePresence(payload);
       },
       onError: (payload) => {
         handleRealtimeError(payload, set);
@@ -361,6 +368,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   setSearchQuery: (query) => {
     set({ searchQuery: query });
+  },
+  updatePresence: (payload) => {
+    set((state) => ({
+      presenceByUserId: {
+        ...state.presenceByUserId,
+        [payload.userId]: payload,
+      },
+      conversations: state.conversations.map((conversation) =>
+        updateConversationPresence(conversation, payload),
+      ),
+    }));
   },
 }));
 
@@ -657,6 +675,32 @@ function upsertConversation(
   const next = [...conversations];
   next[index] = conversation;
   return next;
+}
+
+function updateConversationPresence(
+  conversation: Conversation,
+  payload: PresenceUpdatePayload,
+): Conversation {
+  return {
+    ...conversation,
+    peer:
+      conversation.peer?.id === payload.userId
+        ? {
+            ...conversation.peer,
+            isOnline: payload.isOnline,
+            lastSeenAt: payload.lastSeenAt,
+          }
+        : conversation.peer,
+    members: conversation.members.map((member) =>
+      member.id === payload.userId
+        ? {
+            ...member,
+            isOnline: payload.isOnline,
+            lastSeenAt: payload.lastSeenAt,
+          }
+        : member,
+    ),
+  };
 }
 
 function upsertMessage(

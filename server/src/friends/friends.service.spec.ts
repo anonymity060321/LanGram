@@ -2,6 +2,7 @@ import * as bcrypt from 'bcryptjs';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { FriendRequestStatus } from '@prisma/client';
 import { FriendsService } from './friends.service';
+import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type MockFunction<T extends (...args: never[]) => unknown> = jest.MockedFunction<T>;
@@ -60,7 +61,17 @@ function createMockPrisma(): MockPrisma {
 }
 
 function createService(prisma: MockPrisma): FriendsService {
-  return new FriendsService(prisma as unknown as PrismaService);
+  const presenceService = {
+    getPresence: jest.fn((user: { lastSeenAt?: Date | null }) => ({
+      isOnline: false,
+      lastSeenAt: user.lastSeenAt ?? null,
+    })),
+  };
+
+  return new FriendsService(
+    prisma as unknown as PrismaService,
+    presenceService as unknown as PresenceService,
+  );
 }
 
 function requestFixture(status: FriendRequestStatus): unknown {

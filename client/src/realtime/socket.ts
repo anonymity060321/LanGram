@@ -11,6 +11,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_RECALLED: 'message:recalled',
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
+  PRESENCE_UPDATE: 'presence:update',
   ERROR: 'error',
 } as const;
 
@@ -85,12 +86,19 @@ export interface RealtimeErrorPayload {
   message: string;
 }
 
+export interface PresenceUpdatePayload {
+  userId: string;
+  isOnline: boolean;
+  lastSeenAt: string | null;
+}
+
 interface RealtimeHandlers {
   onMessageNew: (payload: MessageNewPayload) => void;
   onMessageDelivered: (payload: MessageDeliveredPayload) => void;
   onMessageRead: (payload: MessageReadPayload) => void;
   onMessageRecalled: (payload: MessageRecalledPayload) => void;
   onMessageEdited: (payload: MessageEditedPayload) => void;
+  onPresenceUpdate: (payload: PresenceUpdatePayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
 }
 
@@ -114,6 +122,7 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.MESSAGE_READ, handlers.onMessageRead);
   socket.on(REALTIME_EVENTS.MESSAGE_RECALLED, handlers.onMessageRecalled);
   socket.on(REALTIME_EVENTS.MESSAGE_EDITED, handlers.onMessageEdited);
+  socket.on(REALTIME_EVENTS.PRESENCE_UPDATE, handlers.onPresenceUpdate);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
   socket.on('connect_error', (error) => {
     handlers.onError({ code: 'WS_CONNECT_ERROR', message: error.message });

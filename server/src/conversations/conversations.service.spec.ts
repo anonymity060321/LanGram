@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { ConversationType, MessageStatus, MessageType } from '@prisma/client';
 import { ConversationsService } from './conversations.service';
+import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type MockFunction<T extends (...args: never[]) => unknown> = jest.MockedFunction<T>;
@@ -63,7 +64,17 @@ function createMockPrisma(): MockPrisma {
 }
 
 function createService(prisma: MockPrisma): ConversationsService {
-  return new ConversationsService(prisma as unknown as PrismaService);
+  const presenceService = {
+    getPresence: jest.fn((user: { lastSeenAt?: Date | null }) => ({
+      isOnline: false,
+      lastSeenAt: user.lastSeenAt ?? null,
+    })),
+  };
+
+  return new ConversationsService(
+    prisma as unknown as PrismaService,
+    presenceService as unknown as PresenceService,
+  );
 }
 
 function conversationFixture(): unknown {

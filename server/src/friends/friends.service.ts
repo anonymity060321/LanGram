@@ -7,6 +7,7 @@ import {
 import * as bcrypt from 'bcryptjs';
 import { randomInt } from 'crypto';
 import { FriendRequestStatus, Prisma } from '@prisma/client';
+import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
@@ -19,6 +20,7 @@ type UserSummary = {
   statusMessage: string | null;
   avatarStoragePath: string | null;
   accountType: string;
+  lastSeenAt: Date | null;
 };
 
 type RequestWithUsers = {
@@ -32,7 +34,10 @@ type RequestWithUsers = {
 
 @Injectable()
 export class FriendsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly presenceService: PresenceService,
+  ) {}
 
   async createPairingCode(userId: string): Promise<{ pairingCode: string; expiresAt: Date }> {
     const pairingCode = this.generateNumericCode();
@@ -271,6 +276,7 @@ export class FriendsService {
       statusMessage: true,
       avatarStoragePath: true,
       accountType: true,
+      lastSeenAt: true,
     };
   }
 
@@ -286,6 +292,8 @@ export class FriendsService {
   }
 
   private toUserDto(user: UserSummary): unknown {
+    const presence = this.presenceService.getPresence(user);
+
     return {
       id: user.id,
       email: user.email,
@@ -293,6 +301,8 @@ export class FriendsService {
       statusMessage: user.statusMessage,
       avatarUrl: user.avatarStoragePath ? `/api/users/${user.id}/avatar` : null,
       accountType: user.accountType,
+      isOnline: presence.isOnline,
+      lastSeenAt: presence.lastSeenAt,
     };
   }
 

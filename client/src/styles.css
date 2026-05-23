@@ -335,6 +335,11 @@ button {
   font-size: 13px;
 }
 
+.presence-text {
+  color: #047857;
+  font-size: 13px;
+}
+
 .empty-chat-state {
   display: grid;
   place-content: center;
@@ -965,6 +970,19 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.friend-start-button strong,
+.friend-start-button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-start-button small {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .friend-start-button:hover {

@@ -7,6 +7,8 @@ export interface UserProfile {
   statusMessage: string | null;
   avatarUrl: string | null;
   accountType: string;
+  isOnline?: boolean;
+  lastSeenAt?: string | null;
   status: string;
   createdAt: string;
 }

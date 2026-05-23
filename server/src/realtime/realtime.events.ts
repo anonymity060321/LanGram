@@ -7,6 +7,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_RECALLED: 'message:recalled',
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
+  PRESENCE_UPDATE: 'presence:update',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
 } as const;
@@ -44,4 +45,10 @@ export interface MessageEditPayload {
 export interface RealtimeErrorPayload {
   code: string;
   message: string;
+}
+
+export interface PresenceUpdatePayload {
+  userId: string;
+  isOnline: boolean;
+  lastSeenAt: string | null;
 }

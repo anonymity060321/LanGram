@@ -9,12 +9,14 @@ import {
 import { Socket } from 'socket.io';
 import { AuthenticatedUser } from '../common/current-user';
 import { MessagesService } from '../messages/messages.service';
+import { PresenceService, type PresenceState } from '../presence/presence.service';
 import { RealtimeAuthService } from './realtime-auth.service';
 import {
   MessageEditPayload,
   MessageRecallPayload,
   MessageReadPayload,
   MessageSendPayload,
+  PresenceUpdatePayload,
   REALTIME_EVENTS,
   RealtimeErrorPayload,
 } from './realtime.events';
@@ -35,6 +37,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     private readonly authService: RealtimeAuthService,
     private readonly messagesService: MessagesService,
+    private readonly presenceService: PresenceService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
@@ -42,6 +45,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       const user = await this.authService.authenticate(this.extractToken(client));
       client.data.user = user;
       this.registerSocket(user.id, client);
+      this.presenceService.markOnline(user.id);
+      await this.notifyFriendsPresence(user.id, { isOnline: true, lastSeenAt: null });
       await this.deliverOfflineMessages(user.id);
     } catch {
       client.emit(REALTIME_EVENTS.ERROR, {
@@ -52,7 +57,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
   }
 
-  handleDisconnect(client: AuthenticatedSocket): void {
+  async handleDisconnect(client: AuthenticatedSocket): Promise<void> {
     const userId = client.data.user?.id;
     if (!userId) {
       return;
@@ -60,6 +65,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     if (this.socketsByUserId.get(userId)?.id === client.id) {
       this.socketsByUserId.delete(userId);
+      const presence = await this.presenceService.markOffline(userId);
+      await this.notifyFriendsPresence(userId, presence);
     }
   }
 
@@ -233,6 +240,19 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       const senderSocket = this.socketsByUserId.get(message.senderId);
       senderSocket?.emit(REALTIME_EVENTS.MESSAGE_DELIVERED, delivered);
+    }
+  }
+
+  private async notifyFriendsPresence(userId: string, presence: PresenceState): Promise<void> {
+    const friendIds = await this.presenceService.listFriendUserIds(userId);
+    const payload: PresenceUpdatePayload = {
+      userId,
+      isOnline: presence.isOnline,
+      lastSeenAt: presence.lastSeenAt ? presence.lastSeenAt.toISOString() : null,
+    };
+
+    for (const friendId of friendIds) {
+      this.socketsByUserId.get(friendId)?.emit(REALTIME_EVENTS.PRESENCE_UPDATE, payload);
     }
   }
 

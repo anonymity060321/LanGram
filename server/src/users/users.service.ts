@@ -14,6 +14,7 @@ export interface PublicUser {
   avatarUrl: string | null;
   accountType: string;
   status: string;
+  lastSeenAt: Date | null;
   createdAt: Date;
 }
 
@@ -49,6 +50,7 @@ export class UsersService {
         avatarStoragePath: true,
         accountType: true,
         status: true,
+        lastSeenAt: true,
         createdAt: true,
       },
     });
@@ -168,6 +170,7 @@ export class UsersService {
       avatarStoragePath: true,
       accountType: true,
       status: true,
+      lastSeenAt: true,
       createdAt: true,
     } as const;
   }
@@ -180,6 +183,7 @@ export class UsersService {
     avatarStoragePath: string | null;
     accountType: string;
     status: string;
+    lastSeenAt: Date | null;
     createdAt: Date;
   }): PublicUser {
     return {
@@ -190,6 +194,7 @@ export class UsersService {
       avatarUrl: user.avatarStoragePath ? `/api/users/${user.id}/avatar` : null,
       accountType: user.accountType,
       status: user.status,
+      lastSeenAt: user.lastSeenAt,
       createdAt: user.createdAt,
     };
   }
