@@ -28,6 +28,26 @@ export interface LoginRequest {
   device: DeviceIdentity;
 }
 
+export interface TextCaptchaResponse {
+  captchaId: string;
+  prompt: string;
+  expiresInSeconds: number;
+}
+
+export interface PasswordLoginRequest {
+  identifier: string;
+  password: string;
+  captchaId: string;
+  captchaAnswer: string;
+  device: DeviceIdentity;
+}
+
+export interface EmailCodeLoginRequest {
+  email: string;
+  code: string;
+  device: DeviceIdentity;
+}
+
 export interface RegisterRequest {
   email: string;
   password: string;
@@ -48,8 +68,28 @@ export function sendEmailCode(request: SendEmailCodeRequest): Promise<{ sent: tr
   });
 }
 
+export function requestTextCaptcha(): Promise<TextCaptchaResponse> {
+  return apiRequest('/auth/captcha/text', {
+    method: 'POST',
+  });
+}
+
 export function login(request: LoginRequest): Promise<AuthResult> {
   return apiRequest('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function loginWithPassword(request: PasswordLoginRequest): Promise<AuthResult> {
+  return apiRequest('/auth/login/password', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function loginWithEmailCode(request: EmailCodeLoginRequest): Promise<AuthResult> {
+  return apiRequest('/auth/login/email-code', {
     method: 'POST',
     body: JSON.stringify(request),
   });

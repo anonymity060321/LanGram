@@ -121,6 +121,34 @@ button {
   gap: 14px;
 }
 
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 16px;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  background: #f1f5f9;
+  padding: 4px;
+}
+
+.auth-tabs button {
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4b5b70;
+  padding: 0 10px;
+  font-weight: 700;
+}
+
+.auth-tabs button.is-active {
+  background: #ffffff;
+  color: #172033;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .form-stack label {
   display: grid;
   gap: 6px;
@@ -143,6 +171,25 @@ button {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+.captcha-box {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 5px 5px 5px 11px;
+}
+
+.captcha-box strong {
+  min-width: 0;
+  color: #172033;
+  font-size: 15px;
+  letter-spacing: 0;
 }
 
 .primary-button,
@@ -952,6 +999,10 @@ button {
   }
 
   .inline-control {
+    grid-template-columns: 1fr;
+  }
+
+  .captcha-box {
     grid-template-columns: 1fr;
   }
 
