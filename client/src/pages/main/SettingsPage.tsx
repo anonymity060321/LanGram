@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { AppLogo } from '../../components/AppLogo';
 import { useI18n } from '../../i18n';
 import {
   useSettingsStore,
@@ -41,7 +42,10 @@ export function SettingsPage(): JSX.Element {
     <main className="settings-page">
       <section className="settings-panel">
         <div className="settings-header">
-          <h1>{t('settings.title')}</h1>
+          <div className="settings-title">
+            <AppLogo label={t('app.name')} size="sm" />
+            <h1>{t('settings.title')}</h1>
+          </div>
           <Link to="/">{t('common.back')}</Link>
         </div>
         <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>

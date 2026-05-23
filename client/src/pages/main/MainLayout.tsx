@@ -8,6 +8,7 @@ import {
   type FileMetadataResponse,
 } from '../../api/files.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
+import { AppLogo } from '../../components/AppLogo';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
@@ -241,7 +242,7 @@ export function MainLayout(): JSX.Element {
     <main className="main-layout">
       <aside className="conversation-panel">
         <div className="sidebar-header">
-          <strong>{t('app.name')}</strong>
+          <AppLogo label={t('app.name')} size="sm" />
           <div className="sidebar-actions">
             <Link to="/friends">{t('main.friends')}</Link>
             <Link to="/settings">{t('main.settings')}</Link>
@@ -603,7 +604,7 @@ function renderMessageBody(
     return (
       <span className="image-message-card">
         <ImageMessagePreview file={message.file} t={t} />
-        <span>
+        <span className="image-message-details">
           <strong>{message.file.originalName}</strong>
           <FileDownloadButton
             file={message.file}

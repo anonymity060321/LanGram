@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { AppLogo } from '../../components/AppLogo';
 import { useI18n } from '../../i18n';
 
 interface AuthShellProps {
@@ -12,7 +13,9 @@ export function AuthShell({ title, children }: AuthShellProps): JSX.Element {
   return (
     <main className="auth-page">
       <section className="auth-panel">
-        <div className="brand-mark">{t('app.name')}</div>
+        <div className="brand-mark">
+          <AppLogo label={t('app.name')} />
+        </div>
         <h1>{title}</h1>
         {children}
         <nav className="auth-links" aria-label="Auth navigation">
