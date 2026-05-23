@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -206,6 +207,25 @@ export class FriendsService {
         };
       }),
     };
+  }
+
+  async deleteFriend(userId: string, friendshipId: string): Promise<{ deleted: true; id: string }> {
+    const friendship = await this.prisma.friendship.findUnique({
+      where: { id: friendshipId },
+      select: { id: true, userAId: true, userBId: true },
+    });
+
+    if (!friendship) {
+      throw new NotFoundException('Friendship not found');
+    }
+
+    if (friendship.userAId !== userId && friendship.userBId !== userId) {
+      throw new ForbiddenException('You do not have access to this friendship');
+    }
+
+    await this.prisma.friendship.delete({ where: { id: friendship.id } });
+
+    return { deleted: true, id: friendship.id };
   }
 
   private async findMatchingPairingCode(pairingCode: string): Promise<{ id: string; userId: string } | null> {

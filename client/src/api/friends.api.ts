@@ -59,3 +59,7 @@ export function rejectFriendRequest(requestId: string): Promise<FriendRequest> {
 export function listFriends(): Promise<{ friends: FriendItem[] }> {
   return apiRequest('/friends');
 }
+
+export function deleteFriend(friendshipId: string): Promise<{ deleted: true; id: string }> {
+  return apiRequest(`/friends/${friendshipId}`, { method: 'DELETE' });
+}

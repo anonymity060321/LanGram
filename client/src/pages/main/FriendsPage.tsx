@@ -1,32 +1,41 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   acceptFriendRequest,
   createFriendRequest,
   createPairingCode,
+  deleteFriend,
   listFriendRequests,
   listFriends,
   rejectFriendRequest,
   type FriendItem,
   type FriendRequest,
+  type FriendUser,
 } from '../../api/friends.api';
 import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore } from '../../stores/chat.store';
 
+type FriendsTab = 'list' | 'add' | 'requests';
+
 export function FriendsPage(): JSX.Element {
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const accessToken = useAuthStore((state) => state.accessToken);
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
+  const openDirectConversation = useChatStore((state) => state.openDirectConversation);
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
+  const [activeTab, setActiveTab] = useState<FriendsTab>('list');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState('');
   const [incoming, setIncoming] = useState<FriendRequest[]>([]);
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [selectedFriendshipId, setSelectedFriendshipId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -53,6 +62,11 @@ export function FriendsPage(): JSX.Element {
       })),
     );
   }, [presenceByUserId]);
+
+  const selectedFriend = useMemo(
+    () => friends.find((item) => item.id === selectedFriendshipId) ?? friends[0] ?? null,
+    [friends, selectedFriendshipId],
+  );
 
   async function refreshFriendsData(): Promise<void> {
     const [requestsResult, friendsResult] = await Promise.all([
@@ -89,6 +103,7 @@ export function FriendsPage(): JSX.Element {
       setInputCode('');
       setNotice(t('friends.requestSent'));
       await refreshFriendsData();
+      setActiveTab('requests');
     } catch {
       setError(t('friends.actionFailed'));
     } finally {
@@ -116,6 +131,39 @@ export function FriendsPage(): JSX.Element {
     }
   }
 
+  async function handleOpenChat(friendUserId: string): Promise<void> {
+    if (!user) {
+      return;
+    }
+
+    const conversationId = await openDirectConversation(friendUserId, user.id);
+    if (conversationId) {
+      navigate('/');
+    }
+  }
+
+  async function handleDeleteFriend(item: FriendItem): Promise<void> {
+    if (!window.confirm(t('friends.deleteConfirm'))) {
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await deleteFriend(item.id);
+      setNotice(t('friends.deleteSuccess'));
+      if (selectedFriendshipId === item.id) {
+        setSelectedFriendshipId(null);
+      }
+      await refreshFriendsData();
+    } catch {
+      setError(t('friends.deleteFailed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <main className="friends-page">
       <section className="friends-shell">
@@ -124,136 +172,309 @@ export function FriendsPage(): JSX.Element {
           <Link to="/">{t('common.back')}</Link>
         </header>
 
-        <div className="friends-grid">
-          <section className="friends-panel">
-            <h2>{t('friends.generateTitle')}</h2>
+        <div className="friends-tabs" role="tablist" aria-label={t('friends.title')}>
+          {(['list', 'add', 'requests'] as const).map((tab) => (
             <button
               type="button"
-              className="primary-button"
-              onClick={() => void handleGenerateCode()}
-              disabled={isBusy}
+              role="tab"
+              aria-selected={activeTab === tab}
+              className={activeTab === tab ? 'is-active' : ''}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
             >
-              {t('friends.generateCode')}
+              {t(`friends.tab.${tab}`)}
             </button>
-            {pairingCode ? (
-              <div className="pairing-code-box">
-                <strong>{pairingCode}</strong>
-                <span>
-                  {t('friends.expiresAt')}: {formatDateTime(pairingCodeExpiresAt)}
-                </span>
-              </div>
-            ) : null}
-          </section>
-
-          <section className="friends-panel">
-            <h2>{t('friends.addTitle')}</h2>
-            <form className="form-stack" onSubmit={(event) => void handleSubmitRequest(event)}>
-              <label>
-                <span>{t('friends.pairingCode')}</span>
-                <input
-                  value={inputCode}
-                  inputMode="numeric"
-                  onChange={(event) => setInputCode(event.target.value)}
-                />
-              </label>
-              <button type="submit" className="primary-button" disabled={isBusy || !inputCode}>
-                {t('friends.sendRequest')}
-              </button>
-            </form>
-          </section>
+          ))}
         </div>
 
         {error ? <p className="form-error">{error}</p> : null}
         {notice ? <p className="form-success">{notice}</p> : null}
 
-        <section className="friends-panel">
-          <h2>{t('friends.requestsTitle')}</h2>
-          {incoming.length === 0 && outgoing.length === 0 ? (
-            <p className="empty-list">{t('friends.noRequests')}</p>
-          ) : null}
-          <div className="request-list">
-            {incoming.map((request) => (
-              <article className="friend-row" key={request.id}>
-                <div className="friend-user-summary">
-                  <UserAvatar
-                    userId={request.requester.id}
-                    displayName={request.requester.displayName}
-                    avatarUrl={request.requester.avatarUrl}
-                    size="sm"
-                  />
-                  <span>
-                    <strong>{request.requester.displayName}</strong>
-                    <span>{request.status}</span>
-                  </span>
-                </div>
-                {request.status === 'PENDING' ? (
-                  <div className="row-actions">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={isBusy}
-                      onClick={() => void handleRespond(request.id, 'reject')}
-                    >
-                      {t('friends.reject')}
-                    </button>
-                    <button
-                      type="button"
-                      className="primary-button"
-                      disabled={isBusy}
-                      onClick={() => void handleRespond(request.id, 'accept')}
-                    >
-                      {t('friends.accept')}
-                    </button>
-                  </div>
-                ) : null}
-              </article>
-            ))}
-            {outgoing.map((request) => (
-              <article className="friend-row" key={request.id}>
-                <div className="friend-user-summary">
-                  <UserAvatar
-                    userId={request.addressee.id}
-                    displayName={request.addressee.displayName}
-                    avatarUrl={request.addressee.avatarUrl}
-                    size="sm"
-                  />
-                  <span>
-                    <strong>{request.addressee.displayName}</strong>
-                    <span>
-                    {t('friends.outgoing')}: {request.status}
-                    </span>
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+        {activeTab === 'list' ? (
+          <FriendListSection
+            friends={friends}
+            selectedFriend={selectedFriend}
+            isBusy={isBusy}
+            t={t}
+            onSelectFriend={setSelectedFriendshipId}
+            onOpenChat={handleOpenChat}
+            onDeleteFriend={handleDeleteFriend}
+          />
+        ) : null}
 
-        <section className="friends-panel">
-          <h2>{t('friends.listTitle')}</h2>
-          {friends.length === 0 ? <p className="empty-list">{t('friends.noFriends')}</p> : null}
-          <div className="request-list">
-            {friends.map((item) => (
-              <article className="friend-row" key={item.id}>
-                <div className="friend-user-summary">
-                  <UserAvatar
-                    userId={item.friend.id}
-                    displayName={item.friend.displayName}
-                    avatarUrl={item.friend.avatarUrl}
-                    size="sm"
-                  />
-                  <span>
-                    <strong>{item.friend.displayName}</strong>
-                    <span>{formatPresence(item.friend.isOnline, item.friend.lastSeenAt, t)}</span>
-                    <span>{item.friend.statusMessage || item.friend.email || item.friend.accountType}</span>
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+        {activeTab === 'add' ? (
+          <AddFriendSection
+            pairingCode={pairingCode}
+            pairingCodeExpiresAt={pairingCodeExpiresAt}
+            inputCode={inputCode}
+            isBusy={isBusy}
+            t={t}
+            onInputCodeChange={setInputCode}
+            onGenerateCode={handleGenerateCode}
+            onSubmitRequest={handleSubmitRequest}
+          />
+        ) : null}
+
+        {activeTab === 'requests' ? (
+          <FriendRequestsSection
+            incoming={incoming}
+            outgoing={outgoing}
+            isBusy={isBusy}
+            t={t}
+            onRespond={handleRespond}
+          />
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function FriendListSection({
+  friends,
+  selectedFriend,
+  isBusy,
+  t,
+  onSelectFriend,
+  onOpenChat,
+  onDeleteFriend,
+}: {
+  friends: FriendItem[];
+  selectedFriend: FriendItem | null;
+  isBusy: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onSelectFriend: (friendshipId: string) => void;
+  onOpenChat: (friendUserId: string) => Promise<void>;
+  onDeleteFriend: (item: FriendItem) => Promise<void>;
+}): JSX.Element {
+  return (
+    <section className="friends-content-grid">
+      <div className="friends-panel">
+        <h2>{t('friends.listTitle')}</h2>
+        {friends.length === 0 ? <p className="empty-list">{t('friends.noFriends')}</p> : null}
+        <div className="request-list">
+          {friends.map((item) => (
+            <article
+              className={`friend-row ${selectedFriend?.id === item.id ? 'is-selected' : ''}`}
+              key={item.id}
+            >
+              <button
+                type="button"
+                className="friend-row-button"
+                onClick={() => onSelectFriend(item.id)}
+              >
+                <FriendSummary
+                  user={item.friend}
+                  presenceLabel={formatPresence(item.friend.isOnline, item.friend.lastSeenAt, t)}
+                />
+              </button>
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="secondary-button compact-button"
+                  disabled={isBusy}
+                  onClick={() => void onOpenChat(item.friend.id)}
+                >
+                  {t('friends.openChat')}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button compact-button danger-button"
+                  disabled={isBusy}
+                  onClick={() => void onDeleteFriend(item)}
+                >
+                  {t('friends.deleteFriend')}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <FriendProfileCard selectedFriend={selectedFriend} t={t} />
+    </section>
+  );
+}
+
+function FriendProfileCard({
+  selectedFriend,
+  t,
+}: {
+  selectedFriend: FriendItem | null;
+  t: ReturnType<typeof useI18n>['t'];
+}): JSX.Element {
+  if (!selectedFriend) {
+    return (
+      <aside className="friends-panel friend-profile-card">
+        <h2>{t('friends.profileTitle')}</h2>
+        <p className="empty-list">{t('friends.noProfileSelected')}</p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="friends-panel friend-profile-card">
+      <UserAvatar
+        userId={selectedFriend.friend.id}
+        displayName={selectedFriend.friend.displayName}
+        avatarUrl={selectedFriend.friend.avatarUrl}
+        size="lg"
+      />
+      <h2>{selectedFriend.friend.displayName}</h2>
+      <span>{formatPresence(selectedFriend.friend.isOnline, selectedFriend.friend.lastSeenAt, t)}</span>
+      <dl>
+        <div>
+          <dt>{t('friends.profileEmail')}</dt>
+          <dd>{selectedFriend.friend.email ?? t('friends.profileEmpty')}</dd>
+        </div>
+        <div>
+          <dt>{t('friends.profileStatus')}</dt>
+          <dd>{selectedFriend.friend.statusMessage || selectedFriend.friend.accountType}</dd>
+        </div>
+      </dl>
+    </aside>
+  );
+}
+
+function AddFriendSection({
+  pairingCode,
+  pairingCodeExpiresAt,
+  inputCode,
+  isBusy,
+  t,
+  onInputCodeChange,
+  onGenerateCode,
+  onSubmitRequest,
+}: {
+  pairingCode: string | null;
+  pairingCodeExpiresAt: string | null;
+  inputCode: string;
+  isBusy: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onInputCodeChange: (value: string) => void;
+  onGenerateCode: () => Promise<void>;
+  onSubmitRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+}): JSX.Element {
+  return (
+    <section className="friends-grid">
+      <div className="friends-panel">
+        <h2>{t('friends.generateTitle')}</h2>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => void onGenerateCode()}
+          disabled={isBusy}
+        >
+          {t('friends.generateCode')}
+        </button>
+        {pairingCode ? (
+          <div className="pairing-code-box">
+            <strong>{pairingCode}</strong>
+            <span>
+              {t('friends.expiresAt')}: {formatDateTime(pairingCodeExpiresAt)}
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="friends-panel">
+        <h2>{t('friends.addTitle')}</h2>
+        <form className="form-stack" onSubmit={(event) => void onSubmitRequest(event)}>
+          <label>
+            <span>{t('friends.pairingCode')}</span>
+            <input
+              value={inputCode}
+              inputMode="numeric"
+              onChange={(event) => onInputCodeChange(event.target.value)}
+            />
+          </label>
+          <button type="submit" className="primary-button" disabled={isBusy || !inputCode.trim()}>
+            {t('friends.sendRequest')}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function FriendRequestsSection({
+  incoming,
+  outgoing,
+  isBusy,
+  t,
+  onRespond,
+}: {
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+  isBusy: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onRespond: (requestId: string, action: 'accept' | 'reject') => Promise<void>;
+}): JSX.Element {
+  return (
+    <section className="friends-panel">
+      <h2>{t('friends.requestsTitle')}</h2>
+      {incoming.length === 0 && outgoing.length === 0 ? (
+        <p className="empty-list">{t('friends.noRequests')}</p>
+      ) : null}
+      <div className="request-list">
+        {incoming.map((request) => (
+          <article className="friend-row" key={request.id}>
+            <FriendSummary user={request.requester} presenceLabel={request.status} />
+            {request.status === 'PENDING' ? (
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="secondary-button compact-button"
+                  disabled={isBusy}
+                  onClick={() => void onRespond(request.id, 'reject')}
+                >
+                  {t('friends.reject')}
+                </button>
+                <button
+                  type="button"
+                  className="primary-button compact-button"
+                  disabled={isBusy}
+                  onClick={() => void onRespond(request.id, 'accept')}
+                >
+                  {t('friends.accept')}
+                </button>
+              </div>
+            ) : null}
+          </article>
+        ))}
+        {outgoing.map((request) => (
+          <article className="friend-row" key={request.id}>
+            <FriendSummary
+              user={request.addressee}
+              presenceLabel={`${t('friends.outgoing')}: ${request.status}`}
+            />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FriendSummary({
+  user,
+  presenceLabel,
+}: {
+  user: FriendUser;
+  presenceLabel: string;
+}): JSX.Element {
+  return (
+    <div className="friend-user-summary">
+      <UserAvatar
+        userId={user.id}
+        displayName={user.displayName}
+        avatarUrl={user.avatarUrl}
+        size="sm"
+      />
+      <span>
+        <strong>{user.displayName}</strong>
+        <span>{user.statusMessage || user.email || user.accountType}</span>
+        <span className="friend-presence-line">{presenceLabel}</span>
+      </span>
+    </div>
   );
 }
 

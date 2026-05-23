@@ -1,5 +1,5 @@
 import * as bcrypt from 'bcryptjs';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FriendRequestStatus } from '@prisma/client';
 import { FriendsService } from './friends.service';
 import { PresenceService } from '../presence/presence.service';
@@ -23,6 +23,7 @@ interface MockPrisma {
   friendship: {
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     create: MockFunction<(args: unknown) => Promise<unknown>>;
+    delete: MockFunction<(args: unknown) => Promise<unknown>>;
   };
 }
 
@@ -42,6 +43,7 @@ function createMockPrisma(): MockPrisma {
     friendship: {
       findUnique: jest.fn(),
       create: jest.fn(),
+      delete: jest.fn(),
     },
   } as unknown as MockPrisma;
 
@@ -183,5 +185,48 @@ describe('FriendsService', () => {
         createdFromRequestId: 'request-id',
       },
     });
+  });
+
+  it('deletes a friendship when the current user is a participant', async () => {
+    const prisma = createMockPrisma();
+    prisma.friendship.findUnique.mockResolvedValue({
+      id: 'friendship-id',
+      userAId: 'user-a',
+      userBId: 'user-b',
+    });
+    prisma.friendship.delete.mockResolvedValue({});
+    const service = createService(prisma);
+
+    await expect(service.deleteFriend('user-a', 'friendship-id')).resolves.toEqual({
+      deleted: true,
+      id: 'friendship-id',
+    });
+    expect(prisma.friendship.delete).toHaveBeenCalledWith({ where: { id: 'friendship-id' } });
+  });
+
+  it('rejects deleting a missing friendship', async () => {
+    const prisma = createMockPrisma();
+    prisma.friendship.findUnique.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.deleteFriend('user-a', 'missing-id')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(prisma.friendship.delete).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting a friendship owned by other users', async () => {
+    const prisma = createMockPrisma();
+    prisma.friendship.findUnique.mockResolvedValue({
+      id: 'friendship-id',
+      userAId: 'user-b',
+      userBId: 'user-c',
+    });
+    const service = createService(prisma);
+
+    await expect(service.deleteFriend('user-a', 'friendship-id')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.friendship.delete).not.toHaveBeenCalled();
   });
 });

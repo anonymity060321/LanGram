@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthenticatedUser } from '../common/current-user';
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
@@ -51,5 +51,13 @@ export class FriendsController {
   @Get()
   async listFriends(@Req() request: AuthenticatedRequest): Promise<unknown> {
     return this.friendsService.listFriends(request.user.id);
+  }
+
+  @Delete(':id')
+  async deleteFriend(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') friendshipId: string,
+  ): Promise<unknown> {
+    return this.friendsService.deleteFriend(request.user.id, friendshipId);
   }
 }
