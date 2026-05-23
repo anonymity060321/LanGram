@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
 import {
@@ -47,7 +47,10 @@ export function MainLayout(): JSX.Element {
     error: null,
   });
   const [sendOriginalImage, setSendOriginalImage] = useState(false);
+  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const messages = useMemo(
@@ -116,28 +119,31 @@ export function MainLayout(): JSX.Element {
     await sendTextMessage(selectedConversationId, plaintext, user.id);
   }
 
-  async function handleFileSelected(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+  async function handleFileSelected(
+    event: ChangeEvent<HTMLInputElement>,
+    requestedKind: FileKind,
+  ): Promise<void> {
     const file = event.target.files?.[0] ?? null;
     event.target.value = '';
+    setIsAttachmentMenuOpen(false);
 
     if (!user || !selectedConversationId || !file) {
       return;
     }
 
-    const kind = detectFileKind(file);
     if (file.size > MAX_UPLOAD_SIZE_BYTES) {
       setUploadState({ isUploading: false, notice: null, error: t('chat.fileTooLarge') });
       return;
     }
 
-    if (!kind) {
+    if (!isSupportedUpload(file, requestedKind)) {
       setUploadState({ isUploading: false, notice: null, error: t('chat.unsupportedFileType') });
       return;
     }
 
     setUploadState({ isUploading: true, notice: null, error: null });
     let uploadImage: Awaited<ReturnType<typeof prepareImageUploadFile>> | null = null;
-    if (kind === 'IMAGE') {
+    if (requestedKind === 'IMAGE') {
       try {
         uploadImage = await prepareImageUploadFile(file, sendOriginalImage);
       } catch {
@@ -160,7 +166,7 @@ export function MainLayout(): JSX.Element {
       const metadata = await uploadFile({
         file: uploadSource,
         conversationId: selectedConversationId,
-        kind,
+        kind: requestedKind,
         width: uploadImage?.width,
         height: uploadImage?.height,
       });
@@ -170,6 +176,9 @@ export function MainLayout(): JSX.Element {
         notice: formatUploadNotice(metadata),
         error: null,
       });
+      if (requestedKind === 'IMAGE') {
+        setSendOriginalImage(false);
+      }
     } catch {
       setUploadState({ isUploading: false, notice: null, error: t('chat.uploadFailed') });
     }
@@ -330,25 +339,66 @@ export function MainLayout(): JSX.Element {
               forwardTargets={forwardTargets}
               downloadStates={downloadStates}
             />
+            {uploadState.notice || uploadState.error ? (
+              <div className={`file-upload-status ${uploadState.error ? 'is-error' : ''}`}>
+                <span>{uploadState.error ?? t('chat.uploadSuccess')}</span>
+                {uploadState.notice ? <small>{uploadState.notice}</small> : null}
+              </div>
+            ) : null}
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
-              <div className="file-input-tools">
-                <label className={`file-upload-button ${uploadState.isUploading ? 'is-disabled' : ''}`}>
-                  <input
-                    type="file"
-                    onChange={(event) => void handleFileSelected(event)}
-                    disabled={uploadState.isUploading}
-                    accept={SUPPORTED_UPLOAD_MIME_TYPES.join(',')}
-                  />
-                  <span>{uploadState.isUploading ? t('chat.uploading') : t('chat.chooseFile')}</span>
-                </label>
-                <label className="original-image-toggle">
-                  <input
-                    type="checkbox"
-                    checked={sendOriginalImage}
-                    onChange={(event) => setSendOriginalImage(event.target.checked)}
-                  />
-                  <span>{t('chat.sendOriginalImage')}</span>
-                </label>
+              <div className="attachment-menu-wrap">
+                <button
+                  type="button"
+                  className="attachment-toggle"
+                  aria-label={t('chat.attachments')}
+                  aria-expanded={isAttachmentMenuOpen}
+                  disabled={uploadState.isUploading}
+                  onClick={() => setIsAttachmentMenuOpen((isOpen) => !isOpen)}
+                >
+                  +
+                </button>
+                {isAttachmentMenuOpen ? (
+                  <div className="attachment-menu">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadState.isUploading}
+                    >
+                      {t('chat.sendFile')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={uploadState.isUploading}
+                    >
+                      {t('chat.sendImage')}
+                    </button>
+                    <label className="original-image-toggle">
+                      <input
+                        type="checkbox"
+                        checked={sendOriginalImage}
+                        onChange={(event) => setSendOriginalImage(event.target.checked)}
+                      />
+                      <span>{t('chat.sendOriginalImage')}</span>
+                    </label>
+                  </div>
+                ) : null}
+                <input
+                  ref={fileInputRef}
+                  className="hidden-file-input"
+                  type="file"
+                  onChange={(event) => void handleFileSelected(event, 'FILE')}
+                  disabled={uploadState.isUploading}
+                  accept={FILE_UPLOAD_ACCEPT}
+                />
+                <input
+                  ref={imageInputRef}
+                  className="hidden-file-input"
+                  type="file"
+                  onChange={(event) => void handleFileSelected(event, 'IMAGE')}
+                  disabled={uploadState.isUploading}
+                  accept={IMAGE_UPLOAD_ACCEPT}
+                />
               </div>
               <input
                 value={messageDraft}
@@ -359,12 +409,6 @@ export function MainLayout(): JSX.Element {
                 {t('chat.send')}
               </button>
             </form>
-            {uploadState.notice || uploadState.error ? (
-              <div className={`file-upload-status ${uploadState.error ? 'is-error' : ''}`}>
-                <span>{uploadState.error ?? t('chat.uploadSuccess')}</span>
-                {uploadState.notice ? <small>{uploadState.notice}</small> : null}
-              </div>
-            ) : null}
           </>
         ) : (
           <div className="empty-chat-state">
@@ -772,21 +816,14 @@ const FILE_UPLOAD_MIME_TYPES = new Set([
   'text/csv',
   'text/plain',
 ]);
-const SUPPORTED_UPLOAD_MIME_TYPES = [
-  ...Array.from(IMAGE_UPLOAD_MIME_TYPES),
-  ...Array.from(FILE_UPLOAD_MIME_TYPES),
-];
+const IMAGE_UPLOAD_ACCEPT = Array.from(IMAGE_UPLOAD_MIME_TYPES).join(',');
+const FILE_UPLOAD_ACCEPT = Array.from(FILE_UPLOAD_MIME_TYPES).join(',');
 
-function detectFileKind(file: File): FileKind | null {
+function isSupportedUpload(file: File, requestedKind: FileKind): boolean {
   const mimeType = file.type.toLowerCase();
-  if (IMAGE_UPLOAD_MIME_TYPES.has(mimeType)) {
-    return 'IMAGE';
-  }
-  if (FILE_UPLOAD_MIME_TYPES.has(mimeType)) {
-    return 'FILE';
-  }
-
-  return null;
+  return requestedKind === 'IMAGE'
+    ? IMAGE_UPLOAD_MIME_TYPES.has(mimeType)
+    : FILE_UPLOAD_MIME_TYPES.has(mimeType);
 }
 
 function formatUploadNotice(metadata: FileMetadataResponse): string {

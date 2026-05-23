@@ -118,7 +118,7 @@ export function LoginPage(): JSX.Element {
   }
 
   return (
-    <AuthShell title={t('auth.loginTitle')}>
+    <AuthShell title={t('auth.loginTitle')} showLoginLink={false}>
       <div className="auth-tabs" role="tablist" aria-label={t('auth.loginTitle')}>
         <button
           type="button"

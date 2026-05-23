@@ -252,14 +252,18 @@ button {
 }
 
 .main-layout {
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(240px, 320px) minmax(360px, 1fr) minmax(220px, 280px);
+  overflow: hidden;
   background: #eef3f8;
 }
 
 .conversation-panel,
 .profile-panel {
+  min-height: 0;
+  overflow-y: auto;
   background: #ffffff;
   border-color: #d6deea;
   border-style: solid;
@@ -317,8 +321,10 @@ button {
 
 .chat-panel {
   min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
   background: #f8fafc;
   position: relative;
 }
@@ -810,6 +816,8 @@ button {
 }
 
 .message-input {
+  position: relative;
+  min-height: 67px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
@@ -826,42 +834,65 @@ button {
   padding: 9px 11px;
 }
 
-.file-input-tools {
-  display: flex;
+.attachment-menu-wrap {
+  position: relative;
+  display: grid;
   align-items: center;
-  gap: 10px;
 }
 
-.file-upload-button {
+.attachment-toggle {
+  width: 42px;
   min-height: 42px;
-  display: inline-grid;
-  place-items: center;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   background: #eef4ff;
   color: #1d4ed8;
-  padding: 0 12px;
-  font-size: 13px;
+  padding: 0;
+  font-size: 24px;
   font-weight: 700;
-  white-space: nowrap;
 }
 
-.file-upload-button input {
+.attachment-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  width: 190px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  padding: 8px;
+}
+
+.attachment-menu button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #172033;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.attachment-menu button:hover {
+  background: #f1f5f9;
+}
+
+.hidden-file-input {
   display: none;
 }
 
-.file-upload-button.is-disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 .original-image-toggle {
-  min-height: 42px;
+  min-height: 34px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: #4b5b70;
   font-size: 13px;
+  padding: 0 9px;
   white-space: nowrap;
 }
 
@@ -1020,12 +1051,11 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .file-input-tools {
-    align-items: stretch;
-    flex-direction: column;
+  .attachment-toggle {
+    width: 100%;
   }
 
-  .file-upload-button {
+  .attachment-menu {
     width: 100%;
   }
 }
