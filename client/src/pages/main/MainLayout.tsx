@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
 import {
@@ -606,6 +606,34 @@ function MessageList({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<MessageContextMenuState | null>(null);
+
+  useEffect(() => {
+    setContextMenu(null);
+  }, [messages]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return undefined;
+    }
+
+    function handlePointerDown(): void {
+      setContextMenu(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
 
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>, message: ChatMessage): Promise<void> {
     event.preventDefault();
@@ -621,6 +649,40 @@ function MessageList({
   async function handleForward(message: ChatMessage, target: ForwardTarget): Promise<void> {
     await onForwardMessage(message.id, target);
     setForwardingMessageId(null);
+  }
+
+  function handleContextMenu(event: MouseEvent, message: ChatMessage): void {
+    event.preventDefault();
+    setContextMenu({
+      message,
+      ...getContextMenuPosition(event.clientX, event.clientY),
+    });
+  }
+
+  function handleMenuAction(action: MessageMenuAction, message: ChatMessage): void {
+    setContextMenu(null);
+    switch (action) {
+      case 'download':
+        if (message.file) {
+          void onDownloadFile(message.file);
+        }
+        break;
+      case 'forward':
+        setForwardingMessageId(message.id);
+        break;
+      case 'edit':
+        setEditingMessageId(message.id);
+        setEditDraft(message.plaintext);
+        break;
+      case 'recall':
+        onRecallMessage(message.id);
+        break;
+      case 'deleteLocal':
+        onDeleteLocalMessage(message.id);
+        break;
+      default:
+        break;
+    }
   }
 
   if (isLoading) {
@@ -640,10 +702,13 @@ function MessageList({
   }
 
   return (
-    <div className="message-list">
+    <div className="message-list" onScroll={() => setContextMenu(null)}>
       {messages.map((message) => (
         <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
-          <div className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}>
+          <div
+            className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
+            onContextMenu={(event) => handleContextMenu(event, message)}
+          >
             {editingMessageId === message.id ? (
               <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
                 <input
@@ -671,7 +736,7 @@ function MessageList({
               <p>
                 {message.status === 'recalled'
                   ? t('chat.messageRecalled')
-                  : renderMessageBody(message, searchQuery, t, onDownloadFile, downloadStates)}
+                  : renderMessageBody(message, searchQuery, t, downloadStates)}
               </p>
             )}
             <div className="message-meta">
@@ -683,43 +748,6 @@ function MessageList({
               {message.editedAt && message.status !== 'recalled' ? (
                 <span>{t('chat.edited')}</span>
               ) : null}
-              {message.isOwn && message.status !== 'recalled' && canEditMessage(message) ? (
-                <button
-                  type="button"
-                  className="message-action"
-                  onClick={() => {
-                    setEditingMessageId(message.id);
-                    setEditDraft(message.plaintext);
-                  }}
-                >
-                  {t('chat.edit')}
-                </button>
-              ) : null}
-              {message.isOwn && message.status !== 'recalled' && canRecallMessage(message) ? (
-                <button
-                  type="button"
-                  className="message-action"
-                  onClick={() => onRecallMessage(message.id)}
-                >
-                  {t('chat.recall')}
-                </button>
-              ) : null}
-              {message.status !== 'recalled' ? (
-                <button
-                  type="button"
-                  className="message-action"
-                  onClick={() => setForwardingMessageId(message.id)}
-                >
-                  {t('chat.forward')}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="message-action"
-                onClick={() => onDeleteLocalMessage(message.id)}
-              >
-                {t('chat.deleteLocal')}
-              </button>
             </div>
             {forwardingMessageId === message.id ? (
               <div className="forward-picker">
@@ -755,12 +783,111 @@ function MessageList({
           </div>
         </article>
       ))}
+      {contextMenu ? (
+        <MessageContextMenu
+          message={contextMenu.message}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          t={t}
+          downloadStatus={contextMenu.message.file ? downloadStates[contextMenu.message.file.id] : undefined}
+          onAction={handleMenuAction}
+          onClose={() => setContextMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function MessageContextMenu({
+  message,
+  x,
+  y,
+  t,
+  downloadStatus,
+  onAction,
+  onClose,
+}: {
+  message: ChatMessage;
+  x: number;
+  y: number;
+  t: ReturnType<typeof useI18n>['t'];
+  downloadStatus?: FileDownloadStatus;
+  onAction: (action: MessageMenuAction, message: ChatMessage) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const actions = buildMessageMenuActions(message, downloadStatus);
+
+  return (
+    <div
+      className="message-context-menu"
+      style={{ left: x, top: y }}
+      role="menu"
+      onMouseDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {actions.map((item) => (
+        <button
+          type="button"
+          role="menuitem"
+          className={item.isDanger ? 'is-danger' : ''}
+          disabled={item.disabled}
+          key={item.action}
+          onClick={() => {
+            onAction(item.action, message);
+            onClose();
+          }}
+        >
+          {t(item.labelKey)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function buildMessageMenuActions(
+  message: ChatMessage,
+  downloadStatus?: FileDownloadStatus,
+): MessageMenuItem[] {
+  if (message.status === 'recalled') {
+    return [{ action: 'deleteLocal', labelKey: 'chat.deleteLocal', isDanger: true }];
+  }
+
+  const actions: MessageMenuItem[] = [];
+  if (message.file) {
+    actions.push({
+      action: 'download',
+      labelKey: downloadStatus === 'downloading' ? 'chat.downloading' : 'chat.download',
+      disabled: downloadStatus === 'downloading',
+    });
+  }
+
+  actions.push({ action: 'forward', labelKey: 'chat.forward' });
+
+  if (message.isOwn && message.messageType === 'TEXT' && canEditMessage(message)) {
+    actions.push({ action: 'edit', labelKey: 'chat.edit' });
+  }
+
+  if (message.isOwn && canRecallMessage(message)) {
+    actions.push({ action: 'recall', labelKey: 'chat.recall', isDanger: true });
+  }
+
+  actions.push({ action: 'deleteLocal', labelKey: 'chat.deleteLocal', isDanger: true });
+  return actions;
+}
+
+function getContextMenuPosition(clientX: number, clientY: number): { x: number; y: number } {
+  const menuWidth = 168;
+  const menuHeight = 190;
+  const padding = 8;
+
+  return {
+    x: Math.max(padding, Math.min(clientX, window.innerWidth - menuWidth - padding)),
+    y: Math.max(padding, Math.min(clientY, window.innerHeight - menuHeight - padding)),
+  };
 }
 
 function canRecallMessage(message: ChatMessage): boolean {
@@ -775,7 +902,6 @@ function renderMessageBody(
   message: ChatMessage,
   searchQuery: string,
   t: ReturnType<typeof useI18n>['t'],
-  onDownloadFile: (file: FileMetadataResponse) => Promise<void>,
   downloadStates: Record<string, FileDownloadStatus>,
 ): Array<string | JSX.Element> | JSX.Element | string {
   if (message.messageType === 'IMAGE' && message.file) {
@@ -786,15 +912,14 @@ function renderMessageBody(
         <ImageMessagePreview file={message.file} t={t} />
         <span className="image-message-details">
           <strong>{message.file.originalName}</strong>
-          <FileDownloadButton
-            file={message.file}
-            status={downloadStatus}
-            onDownloadFile={onDownloadFile}
-            t={t}
-          />
           <small>
             {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
           </small>
+          {downloadStatus ? (
+            <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
+              {downloadStatus === 'downloading' ? t('chat.downloading') : t('chat.downloadFailed')}
+            </small>
+          ) : null}
         </span>
       </span>
     );
@@ -808,15 +933,14 @@ function renderMessageBody(
         <span className="file-message-icon">{t('chat.file')}</span>
         <span>
           <strong>{message.file.originalName}</strong>
-          <FileDownloadButton
-            file={message.file}
-            status={downloadStatus}
-            onDownloadFile={onDownloadFile}
-            t={t}
-          />
           <small>
             {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
           </small>
+          {downloadStatus ? (
+            <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
+              {downloadStatus === 'downloading' ? t('chat.downloading') : t('chat.downloadFailed')}
+            </small>
+          ) : null}
         </span>
       </span>
     );
@@ -885,36 +1009,6 @@ function ImageMessagePreview({
   );
 }
 
-function FileDownloadButton({
-  file,
-  status,
-  onDownloadFile,
-  t,
-}: {
-  file: FileMetadataResponse;
-  status?: FileDownloadStatus;
-  onDownloadFile: (file: FileMetadataResponse) => Promise<void>;
-  t: ReturnType<typeof useI18n>['t'];
-}): JSX.Element {
-  const isDownloading = status === 'downloading';
-
-  return (
-    <span className="file-message-actions">
-      <button
-        type="button"
-        className="message-action file-download-button"
-        onClick={() => void onDownloadFile(file)}
-        disabled={isDownloading}
-      >
-        {isDownloading ? t('chat.downloading') : t('chat.download')}
-      </button>
-      {status === 'failed' ? (
-        <small className="file-download-error">{t('chat.downloadFailed')}</small>
-      ) : null}
-    </span>
-  );
-}
-
 interface FileUploadState {
   isUploading: boolean;
   notice: string | null;
@@ -922,6 +1016,18 @@ interface FileUploadState {
 }
 
 type FileDownloadStatus = 'downloading' | 'failed';
+type MessageMenuAction = 'download' | 'forward' | 'edit' | 'recall' | 'deleteLocal';
+type MessageContextMenuState = {
+  message: ChatMessage;
+  x: number;
+  y: number;
+};
+type MessageMenuItem = {
+  action: MessageMenuAction;
+  labelKey: Parameters<ReturnType<typeof useI18n>['t']>[0];
+  isDanger?: boolean;
+  disabled?: boolean;
+};
 type ImagePreviewState =
   | { status: 'loading'; objectUrl: null }
   | { status: 'failed'; objectUrl: null }
