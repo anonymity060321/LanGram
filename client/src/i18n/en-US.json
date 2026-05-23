@@ -36,6 +36,8 @@
   "chat.uploadSuccess": "Upload successful",
   "chat.uploadFailed": "Upload failed",
   "chat.imageCompressionFailed": "Image compression failed",
+  "chat.imagePreviewLoading": "Loading preview",
+  "chat.imagePreviewFailed": "Preview failed",
   "chat.download": "Download",
   "chat.downloading": "Downloading",
   "chat.downloadFailed": "Download failed",

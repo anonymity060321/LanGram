@@ -601,8 +601,8 @@ function renderMessageBody(
     const downloadStatus = downloadStates[message.file.id];
 
     return (
-      <span className="file-message-card">
-        <span className="file-message-icon">{t('chat.image')}</span>
+      <span className="image-message-card">
+        <ImageMessagePreview file={message.file} t={t} />
         <span>
           <strong>{message.file.originalName}</strong>
           <FileDownloadButton
@@ -644,6 +644,66 @@ function renderMessageBody(
   return renderHighlightedText(message.plaintext, searchQuery);
 }
 
+function ImageMessagePreview({
+  file,
+  t,
+}: {
+  file: FileMetadataResponse;
+  t: ReturnType<typeof useI18n>['t'];
+}): JSX.Element {
+  const [previewState, setPreviewState] = useState<ImagePreviewState>({
+    status: 'loading',
+    objectUrl: null,
+  });
+
+  useEffect(() => {
+    let isCancelled = false;
+    let objectUrl: string | null = null;
+
+    setPreviewState({ status: 'loading', objectUrl: null });
+    void downloadFile(file.id)
+      .then((blob) => {
+        if (!blob.type.toLowerCase().startsWith('image/')) {
+          throw new Error('Downloaded file is not an image');
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        if (isCancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        setPreviewState({ status: 'loaded', objectUrl });
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setPreviewState({ status: 'failed', objectUrl: null });
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [file.id]);
+
+  if (previewState.status === 'loaded' && previewState.objectUrl) {
+    return (
+      <span className="image-preview-frame">
+        <img src={previewState.objectUrl} alt={file.originalName} />
+      </span>
+    );
+  }
+
+  return (
+    <span className={`image-preview-placeholder ${previewState.status === 'failed' ? 'is-error' : ''}`}>
+      {previewState.status === 'failed' ? t('chat.imagePreviewFailed') : t('chat.imagePreviewLoading')}
+    </span>
+  );
+}
+
 function FileDownloadButton({
   file,
   status,
@@ -681,6 +741,10 @@ interface FileUploadState {
 }
 
 type FileDownloadStatus = 'downloading' | 'failed';
+type ImagePreviewState =
+  | { status: 'loading'; objectUrl: null }
+  | { status: 'failed'; objectUrl: null }
+  | { status: 'loaded'; objectUrl: string };
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
