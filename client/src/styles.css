@@ -826,6 +826,19 @@ button {
   line-height: 1;
 }
 
+.conversation-pin {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .conversation-presence {
   margin-top: 2px;
 }
@@ -941,7 +954,8 @@ button {
   gap: 10px;
 }
 
-.message-context-menu {
+.message-context-menu,
+.conversation-context-menu {
   position: fixed;
   z-index: 20;
   width: 168px;
@@ -954,7 +968,12 @@ button {
   padding: 6px;
 }
 
-.message-context-menu button {
+.conversation-context-menu {
+  width: 190px;
+}
+
+.message-context-menu button,
+.conversation-context-menu button {
   min-height: 34px;
   border: 0;
   border-radius: 6px;
@@ -964,15 +983,18 @@ button {
   text-align: left;
 }
 
-.message-context-menu button:hover {
+.message-context-menu button:hover,
+.conversation-context-menu button:hover {
   background: #f1f5f9;
 }
 
-.message-context-menu button.is-danger {
+.message-context-menu button.is-danger,
+.conversation-context-menu button.is-danger {
   color: #b42318;
 }
 
-.message-context-menu button:disabled {
+.message-context-menu button:disabled,
+.conversation-context-menu button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1253,6 +1275,29 @@ button {
   display: block;
 }
 
+.file-message-icon.has-image {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(248, 250, 252, 0.72);
+  padding: 4px;
+  box-shadow: none;
+}
+
+.file-message-icon.has-image::before {
+  display: none;
+}
+
+.file-message-icon.has-image img {
+  width: 42px;
+  height: 42px;
+  display: block;
+  object-fit: contain;
+  object-position: center;
+}
+
+.file-message-fallback-label {
+  display: none;
+}
+
 .file-kind-word {
   border-color: #93c5fd;
   background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
@@ -1394,6 +1439,42 @@ button {
   width: 15px;
   height: 15px;
   margin: 0;
+}
+
+.image-options-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  padding: 24px;
+}
+
+.image-options-panel {
+  width: 240px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
+  padding: 14px;
+}
+
+.image-options-panel strong {
+  color: #172033;
+  font-size: 15px;
+}
+
+.image-options-panel .original-image-toggle {
+  padding: 0;
+}
+
+.image-options-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .file-upload-status {
@@ -1649,14 +1730,20 @@ button {
   color: #e5edf7;
 }
 
+:root[data-theme='dark'] .conversation-context-menu {
+  border-color: #334155;
+  background: #1e293b;
+  color: #e5edf7;
+}
+
 :root[data-theme='dark'] .file-message-card {
-  border-color: #475569;
-  background: #0f172a;
+  border-color: #334155;
+  background: #111827;
   color: #e5edf7;
 }
 
 :root[data-theme='dark'] .message-row.is-own .file-message-card {
-  border-color: #3b82f6;
+  border-color: #2563eb;
   background: #172554;
   color: #f8fafc;
 }
@@ -1700,6 +1787,7 @@ button {
 :root[data-theme='dark'] .friend-start-button,
 :root[data-theme='dark'] .app-nav-menu-item,
 :root[data-theme='dark'] .message-context-menu button,
+:root[data-theme='dark'] .conversation-context-menu button,
 :root[data-theme='dark'] .friend-profile-card dd,
 :root[data-theme='dark'] .file-message-card strong,
 :root[data-theme='dark'] .image-message-card strong,
@@ -1775,6 +1863,11 @@ button {
   color: #f8fafc;
 }
 
+:root[data-theme='dark'] .conversation-pin {
+  background: #172554;
+  color: #dbeafe;
+}
+
 :root[data-theme='dark'] .sidebar-section p,
 :root[data-theme='dark'] .empty-chat-state p,
 :root[data-theme='dark'] .profile-panel > span:not(.user-avatar),
@@ -1816,32 +1909,38 @@ button {
   color: #fca5a5;
 }
 
-:root[data-theme='dark'] .message-context-menu {
+:root[data-theme='dark'] .message-context-menu,
+:root[data-theme='dark'] .conversation-context-menu {
   border-color: #475569;
   background: #111827;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.42);
 }
 
-:root[data-theme='dark'] .message-context-menu button {
+:root[data-theme='dark'] .message-context-menu button,
+:root[data-theme='dark'] .conversation-context-menu button {
   color: #e5edf7;
   opacity: 1;
 }
 
-:root[data-theme='dark'] .message-context-menu button:hover:not(:disabled) {
+:root[data-theme='dark'] .message-context-menu button:hover:not(:disabled),
+:root[data-theme='dark'] .conversation-context-menu button:hover:not(:disabled) {
   background: #334155;
   color: #f8fafc;
 }
 
-:root[data-theme='dark'] .message-context-menu button.is-danger {
+:root[data-theme='dark'] .message-context-menu button.is-danger,
+:root[data-theme='dark'] .conversation-context-menu button.is-danger {
   color: #fecaca;
 }
 
-:root[data-theme='dark'] .message-context-menu button.is-danger:hover:not(:disabled) {
+:root[data-theme='dark'] .message-context-menu button.is-danger:hover:not(:disabled),
+:root[data-theme='dark'] .conversation-context-menu button.is-danger:hover:not(:disabled) {
   background: #7f1d1d;
   color: #fee2e2;
 }
 
-:root[data-theme='dark'] .message-context-menu button:disabled {
+:root[data-theme='dark'] .message-context-menu button:disabled,
+:root[data-theme='dark'] .conversation-context-menu button:disabled {
   color: #64748b;
   opacity: 1;
 }
@@ -1929,6 +2028,19 @@ button {
   box-shadow: inset 0 -14px 0 rgba(191, 219, 254, 0.12);
 }
 
+:root[data-theme='dark'] .file-message-icon.has-image {
+  border-color: rgba(71, 85, 105, 0.72);
+  background: rgba(15, 23, 42, 0.24);
+  padding: 4px;
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .message-row.is-own .file-message-icon.has-image {
+  border-color: rgba(96, 165, 250, 0.34);
+  background: rgba(15, 23, 42, 0.18);
+  box-shadow: none;
+}
+
 :root[data-theme='dark'] .file-kind-word {
   border-color: #60a5fa;
   background: linear-gradient(180deg, #1d4ed8 0%, #172554 100%);
@@ -2012,6 +2124,20 @@ button {
 
 :root[data-theme='dark'] .original-image-toggle {
   color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .image-options-backdrop {
+  background: transparent;
+}
+
+:root[data-theme='dark'] .image-options-panel {
+  border-color: #334155;
+  background: #111827;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme='dark'] .image-options-panel strong {
+  color: #f8fafc;
 }
 
 :root[data-theme='dark'] .file-upload-status {

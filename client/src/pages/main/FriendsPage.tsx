@@ -17,6 +17,7 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore } from '../../stores/chat.store';
+import { unhideConversationInUiState } from '../../utils/conversationUiState';
 
 type FriendsTab = 'list' | 'add' | 'requests';
 
@@ -139,6 +140,7 @@ export function FriendsPage(): JSX.Element {
 
     const conversationId = await openDirectConversation(friendUserId, user.id);
     if (conversationId) {
+      unhideConversationInUiState(conversationId);
       navigate('/');
     }
   }

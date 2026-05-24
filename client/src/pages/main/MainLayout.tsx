@@ -14,6 +14,12 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
+import {
+  loadConversationUiState,
+  saveConversationUiState,
+  unhideConversationInUiState,
+  type ConversationUiState,
+} from '../../utils/conversationUiState';
 import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
 
 export function MainLayout(): JSX.Element {
@@ -36,6 +42,7 @@ export function MainLayout(): JSX.Element {
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
+  const markRead = useChatStore((state) => state.markRead);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
   const sendFileMessage = useChatStore((state) => state.sendFileMessage);
   const editMessage = useChatStore((state) => state.editMessage);
@@ -53,8 +60,15 @@ export function MainLayout(): JSX.Element {
   });
   const [sendOriginalImage, setSendOriginalImage] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isImageOptionsOpen, setIsImageOptionsOpen] = useState(false);
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
+  const [conversationUiState, setConversationUiState] = useState<ConversationUiState>(() =>
+    loadConversationUiState(),
+  );
+  const [readConversationOverrides, setReadConversationOverrides] = useState<Record<string, string>>({});
+  const [conversationContextMenu, setConversationContextMenu] =
+    useState<ConversationContextMenuState | null>(null);
   const appMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -71,6 +85,10 @@ export function MainLayout(): JSX.Element {
   const visibleMessages = useMemo(
     () => filterMessages(messages, searchQuery),
     [messages, searchQuery],
+  );
+  const displayedConversations = useMemo(
+    () => buildDisplayedConversations(conversations, conversationUiState),
+    [conversationUiState, conversations],
   );
 
   useEffect(() => {
@@ -120,6 +138,74 @@ export function MainLayout(): JSX.Element {
   }, [isAppMenuOpen]);
 
   useEffect(() => {
+    if (!conversationContextMenu) {
+      return undefined;
+    }
+
+    function handlePointerDown(): void {
+      setConversationContextMenu(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setConversationContextMenu(null);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [conversationContextMenu]);
+
+  useEffect(() => {
+    if (!isImageOptionsOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setIsImageOptionsOpen(false);
+        setSendOriginalImage(false);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isImageOptionsOpen]);
+
+  useEffect(() => {
+    setConversationUiState((current) => {
+      const nextHiddenConversations = { ...current.hiddenConversations };
+      let didChange = false;
+      for (const conversation of conversations) {
+        const hiddenAt = nextHiddenConversations[conversation.id];
+        if (hiddenAt && isConversationNewerThanHidden(conversation, hiddenAt)) {
+          delete nextHiddenConversations[conversation.id];
+          didChange = true;
+        }
+      }
+
+      if (!didChange) {
+        return current;
+      }
+
+      return saveConversationUiState({
+        ...current,
+        hiddenConversations: nextHiddenConversations,
+      });
+    });
+  }, [conversations]);
+
+  useEffect(() => {
+    if (selectedConversationId && conversationUiState.hiddenConversations[selectedConversationId]) {
+      closeConversation();
+    }
+  }, [closeConversation, conversationUiState.hiddenConversations, selectedConversationId]);
+
+  useEffect(() => {
     setFriends((current) =>
       current.map((item) => ({
         ...item,
@@ -145,7 +231,19 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
+    setConversationContextMenu(null);
     setSearchQuery('');
+    setConversationUiState((current) => {
+      if (!current.manualUnreadIds.includes(conversationId)) {
+        return current;
+      }
+
+      return saveConversationUiState({
+        ...current,
+        manualUnreadIds: current.manualUnreadIds.filter((id) => id !== conversationId),
+      });
+    });
+    setReadConversationOverrides((current) => ({ ...current, [conversationId]: new Date().toISOString() }));
     if (selectedConversationId === conversationId) {
       closeConversation();
       return;
@@ -175,7 +273,10 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
-    await openDirectConversation(friendUserId, user.id);
+    const conversationId = await openDirectConversation(friendUserId, user.id);
+    if (conversationId) {
+      unhideConversation(conversationId);
+    }
   }
 
   async function handleSend(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -254,6 +355,22 @@ export function MainLayout(): JSX.Element {
     }
   }
 
+  function handleOpenImageOptions(): void {
+    setIsAttachmentMenuOpen(false);
+    setSendOriginalImage(false);
+    setIsImageOptionsOpen(true);
+  }
+
+  function handleChooseImageFromOptions(): void {
+    setIsImageOptionsOpen(false);
+    imageInputRef.current?.click();
+  }
+
+  function handleCancelImageOptions(): void {
+    setIsImageOptionsOpen(false);
+    setSendOriginalImage(false);
+  }
+
   function handleDeleteLocalMessage(messageId: string): void {
     if (!selectedConversationId) {
       return;
@@ -318,6 +435,131 @@ export function MainLayout(): JSX.Element {
     clearLocalConversation(selectedConversationId);
   }
 
+  function handleConversationContextMenu(event: MouseEvent, conversation: Conversation): void {
+    event.preventDefault();
+    setConversationContextMenu({
+      conversation,
+      ...getContextMenuPosition(event.clientX, event.clientY),
+    });
+  }
+
+  function pinConversation(conversationId: string): void {
+    setConversationUiState((current) => {
+      if (current.pinnedIds.includes(conversationId)) {
+        return current;
+      }
+
+      return saveConversationUiState({
+        ...current,
+        pinnedIds: [...current.pinnedIds, conversationId],
+      });
+    });
+  }
+
+  function unpinConversation(conversationId: string): void {
+    setConversationUiState((current) =>
+      saveConversationUiState({
+        ...current,
+        pinnedIds: current.pinnedIds.filter((id) => id !== conversationId),
+      }),
+    );
+  }
+
+  function markConversationUnread(conversationId: string): void {
+    setReadConversationOverrides((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+    setConversationUiState((current) => {
+      if (current.manualUnreadIds.includes(conversationId)) {
+        return current;
+      }
+
+      return saveConversationUiState({
+        ...current,
+        manualUnreadIds: [...current.manualUnreadIds, conversationId],
+      });
+    });
+  }
+
+  function markConversationRead(conversation: Conversation): void {
+    setConversationUiState((current) =>
+      saveConversationUiState({
+        ...current,
+        manualUnreadIds: current.manualUnreadIds.filter((id) => id !== conversation.id),
+      }),
+    );
+    setReadConversationOverrides((current) => ({
+      ...current,
+      [conversation.id]: new Date().toISOString(),
+    }));
+    if (conversation.lastMessage) {
+      markRead(conversation.id, conversation.lastMessage.id);
+    }
+  }
+
+  function hideConversation(conversationId: string): void {
+    if (!window.confirm(t('conversation.removeFromListConfirm'))) {
+      return;
+    }
+
+    setConversationUiState((current) =>
+      saveConversationUiState({
+        pinnedIds: current.pinnedIds.filter((id) => id !== conversationId),
+        manualUnreadIds: current.manualUnreadIds.filter((id) => id !== conversationId),
+        hiddenConversations: {
+          ...current.hiddenConversations,
+          [conversationId]: new Date().toISOString(),
+        },
+      }),
+    );
+    setReadConversationOverrides((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+    if (selectedConversationId === conversationId) {
+      closeConversation();
+    }
+  }
+
+  function unhideConversation(conversationId: string): void {
+    unhideConversationInUiState(conversationId);
+    setConversationUiState((current) => {
+      if (!current.hiddenConversations[conversationId]) {
+        return current;
+      }
+
+      const hiddenConversations = { ...current.hiddenConversations };
+      delete hiddenConversations[conversationId];
+      return saveConversationUiState({ ...current, hiddenConversations });
+    });
+  }
+
+  function handleConversationMenuAction(action: ConversationMenuAction, conversation: Conversation): void {
+    setConversationContextMenu(null);
+    switch (action) {
+      case 'pin':
+        pinConversation(conversation.id);
+        break;
+      case 'unpin':
+        unpinConversation(conversation.id);
+        break;
+      case 'markUnread':
+        markConversationUnread(conversation.id);
+        break;
+      case 'markRead':
+        markConversationRead(conversation);
+        break;
+      case 'hide':
+        hideConversation(conversation.id);
+        break;
+      default:
+        break;
+    }
+  }
+
   return (
     <main className="main-layout">
       <aside className="app-nav">
@@ -375,49 +617,77 @@ export function MainLayout(): JSX.Element {
         <section className="sidebar-section">
           <h2>{t('main.sidebarChats')}</h2>
           {isLoadingConversations ? <p>{t('chat.loading')}</p> : null}
-          {!isLoadingConversations && conversations.length === 0 ? (
+          {!isLoadingConversations && displayedConversations.length === 0 ? (
             <p>{t('chat.noConversations')}</p>
           ) : null}
           <div className="conversation-list">
-            {conversations.map((conversation) => (
-              <button
-                type="button"
-                className={`conversation-item ${
-                  selectedConversationId === conversation.id ? 'is-active' : ''
-                }`}
-                key={conversation.id}
-                onClick={() => void handleSelectConversation(conversation.id)}
-              >
-                <UserAvatar
-                  userId={conversation.peer?.id}
-                  displayName={conversation.peer?.displayName}
-                  avatarUrl={conversation.peer?.avatarUrl}
-                />
-                <span className="conversation-item-body">
-                  <span className="conversation-item-header">
-                    <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
-                    <time dateTime={conversation.lastMessageAt ?? conversation.updatedAt}>
-                      {formatConversationTime(conversation.lastMessageAt ?? conversation.updatedAt, t)}
-                    </time>
+            {displayedConversations.map((conversation) => {
+              const unreadCount = getDisplayedUnreadCount(
+                conversation,
+                conversationUiState.manualUnreadIds,
+                readConversationOverrides,
+              );
+              const isPinned = conversationUiState.pinnedIds.includes(conversation.id);
+              return (
+                <button
+                  type="button"
+                  className={`conversation-item ${
+                    selectedConversationId === conversation.id ? 'is-active' : ''
+                  }`}
+                  key={conversation.id}
+                  onClick={() => void handleSelectConversation(conversation.id)}
+                  onContextMenu={(event) => handleConversationContextMenu(event, conversation)}
+                >
+                  <UserAvatar
+                    userId={conversation.peer?.id}
+                    displayName={conversation.peer?.displayName}
+                    avatarUrl={conversation.peer?.avatarUrl}
+                  />
+                  <span className="conversation-item-body">
+                    <span className="conversation-item-header">
+                      <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
+                      <time dateTime={conversation.lastMessageAt ?? conversation.updatedAt}>
+                        {formatConversationTime(conversation.lastMessageAt ?? conversation.updatedAt, t)}
+                      </time>
+                    </span>
+                    <span className="conversation-item-meta">
+                      <small>{formatConversationSummary(conversation, t)}</small>
+                      {isPinned ? <span className="conversation-pin">↑</span> : null}
+                      {unreadCount > 0 ? (
+                        <span className="conversation-unread">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      ) : null}
+                    </span>
+                    <small className="conversation-presence">
+                      {conversation.peer
+                        ? formatPresence(conversation.peer.isOnline, conversation.peer.lastSeenAt, t)
+                        : t('chat.direct')}
+                    </small>
                   </span>
-                  <span className="conversation-item-meta">
-                    <small>{formatConversationSummary(conversation, t)}</small>
-                    {conversation.unreadCount > 0 ? (
-                      <span className="conversation-unread">
-                        {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
-                      </span>
-                    ) : null}
-                  </span>
-                  <small className="conversation-presence">
-                    {conversation.peer
-                      ? formatPresence(conversation.peer.isOnline, conversation.peer.lastSeenAt, t)
-                      : t('chat.direct')}
-                  </small>
-                </span>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         </section>
+        {conversationContextMenu ? (
+          <ConversationContextMenu
+            conversation={conversationContextMenu.conversation}
+            isPinned={conversationUiState.pinnedIds.includes(conversationContextMenu.conversation.id)}
+            isUnread={
+              getDisplayedUnreadCount(
+                conversationContextMenu.conversation,
+                conversationUiState.manualUnreadIds,
+                readConversationOverrides,
+              ) > 0
+            }
+            x={conversationContextMenu.x}
+            y={conversationContextMenu.y}
+            t={t}
+            onAction={handleConversationMenuAction}
+            onClose={() => setConversationContextMenu(null)}
+          />
+        ) : null}
       </aside>
 
       <section className="chat-panel">
@@ -500,19 +770,51 @@ export function MainLayout(): JSX.Element {
                     </button>
                     <button
                       type="button"
-                      onClick={() => imageInputRef.current?.click()}
+                      onClick={handleOpenImageOptions}
                       disabled={uploadState.isUploading}
                     >
                       {t('chat.sendImage')}
                     </button>
-                    <label className="original-image-toggle">
-                      <input
-                        type="checkbox"
-                        checked={sendOriginalImage}
-                        onChange={(event) => setSendOriginalImage(event.target.checked)}
-                      />
-                      <span>{t('chat.sendOriginalImage')}</span>
-                    </label>
+                  </div>
+                ) : null}
+                {isImageOptionsOpen ? (
+                  <div
+                    className="image-options-backdrop"
+                    role="presentation"
+                    onMouseDown={(event) => {
+                      if (event.target === event.currentTarget) {
+                        handleCancelImageOptions();
+                      }
+                    }}
+                  >
+                    <section className="image-options-panel" role="dialog" aria-modal="true">
+                      <strong>{t('chat.imageOptionsTitle')}</strong>
+                      <label className="original-image-toggle">
+                        <input
+                          type="checkbox"
+                          checked={sendOriginalImage}
+                          onChange={(event) => setSendOriginalImage(event.target.checked)}
+                        />
+                        <span>{t('chat.sendOriginalImage')}</span>
+                      </label>
+                      <div className="image-options-actions">
+                        <button
+                          type="button"
+                          className="secondary-button compact-button"
+                          onClick={handleCancelImageOptions}
+                        >
+                          {t('chat.cancel')}
+                        </button>
+                        <button
+                          type="button"
+                          className="primary-button compact-button"
+                          disabled={uploadState.isUploading}
+                          onClick={handleChooseImageFromOptions}
+                        >
+                          {t('chat.chooseImage')}
+                        </button>
+                      </div>
+                    </section>
                   </div>
                 ) : null}
                 <input
@@ -675,6 +977,48 @@ function formatConversationSummary(
   }
 
   return conversation.lastMessagePlaintext?.trim() || t('chat.noMessages');
+}
+
+function buildDisplayedConversations(
+  conversations: Conversation[],
+  uiState: ConversationUiState,
+): Conversation[] {
+  return [...conversations]
+    .filter((conversation) => !uiState.hiddenConversations[conversation.id])
+    .sort((left, right) => {
+      const leftPinned = uiState.pinnedIds.includes(left.id);
+      const rightPinned = uiState.pinnedIds.includes(right.id);
+      if (leftPinned !== rightPinned) {
+        return leftPinned ? -1 : 1;
+      }
+
+      return getConversationSortTime(right) - getConversationSortTime(left);
+    });
+}
+
+function getConversationSortTime(conversation: Conversation): number {
+  return new Date(conversation.lastMessageAt ?? conversation.updatedAt).getTime();
+}
+
+function isConversationNewerThanHidden(conversation: Conversation, hiddenAt: string): boolean {
+  return getConversationSortTime(conversation) > new Date(hiddenAt).getTime();
+}
+
+function getDisplayedUnreadCount(
+  conversation: Conversation,
+  manualUnreadIds: string[],
+  readConversationOverrides: Record<string, string>,
+): number {
+  if (manualUnreadIds.includes(conversation.id)) {
+    return Math.max(1, conversation.unreadCount);
+  }
+
+  const readAt = readConversationOverrides[conversation.id];
+  if (readAt && getConversationSortTime(conversation) <= new Date(readAt).getTime()) {
+    return 0;
+  }
+
+  return conversation.unreadCount;
 }
 
 function formatConversationTime(
@@ -1114,6 +1458,63 @@ function MessageContextMenu({
   );
 }
 
+function ConversationContextMenu({
+  conversation,
+  isPinned,
+  isUnread,
+  x,
+  y,
+  t,
+  onAction,
+  onClose,
+}: {
+  conversation: Conversation;
+  isPinned: boolean;
+  isUnread: boolean;
+  x: number;
+  y: number;
+  t: ReturnType<typeof useI18n>['t'];
+  onAction: (action: ConversationMenuAction, conversation: Conversation) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const actions: ConversationMenuItem[] = [
+    {
+      action: isPinned ? 'unpin' : 'pin',
+      labelKey: isPinned ? 'conversation.unpin' : 'conversation.pin',
+    },
+    isUnread
+      ? { action: 'markRead', labelKey: 'conversation.markRead' }
+      : { action: 'markUnread', labelKey: 'conversation.markUnread' },
+    { action: 'hide', labelKey: 'conversation.removeFromList', isDanger: true },
+  ];
+
+  return (
+    <div
+      className="conversation-context-menu"
+      style={{ left: x, top: y }}
+      role="menu"
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {actions.map((item) => (
+        <button
+          type="button"
+          role="menuitem"
+          className={item.isDanger ? 'is-danger' : ''}
+          key={item.action}
+          onClick={() => {
+            onAction(item.action, conversation);
+            onClose();
+          }}
+        >
+          {t(item.labelKey)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function buildMessageMenuActions(
   message: ChatMessage,
   downloadStatus?: FileDownloadStatus,
@@ -1204,9 +1605,15 @@ function renderMessageBody(
             </small>
           ) : null}
         </span>
-        <span className={`file-message-icon file-kind-${fileBadge.kind}`}>
-          <span className="file-message-icon-label">{fileBadge.label}</span>
-        </span>
+        {fileBadge.iconSrc ? (
+          <span className={`file-message-icon has-image file-kind-${fileBadge.kind}`}>
+            <img className="file-message-real-icon" src={fileBadge.iconSrc} alt={fileBadge.label} />
+          </span>
+        ) : (
+          <span className={`file-message-icon file-kind-${fileBadge.kind}`}>
+            <span className="file-message-icon-label">{fileBadge.label}</span>
+          </span>
+        )}
       </span>
     );
   }
@@ -1287,11 +1694,22 @@ type MessageContextMenuState = {
   x: number;
   y: number;
 };
+type ConversationContextMenuState = {
+  conversation: Conversation;
+  x: number;
+  y: number;
+};
 type MessageMenuItem = {
   action: MessageMenuAction;
   labelKey: Parameters<ReturnType<typeof useI18n>['t']>[0];
   isDanger?: boolean;
   disabled?: boolean;
+};
+type ConversationMenuAction = 'pin' | 'unpin' | 'markUnread' | 'markRead' | 'hide';
+type ConversationMenuItem = {
+  action: ConversationMenuAction;
+  labelKey: Parameters<ReturnType<typeof useI18n>['t']>[0];
+  isDanger?: boolean;
 };
 type ImagePreviewState =
   | { status: 'loading'; objectUrl: null }
@@ -1301,6 +1719,7 @@ type FileBadgeKind = 'word' | 'sheet' | 'slide' | 'pdf' | 'text' | 'archive' | '
 type FileBadge = {
   label: string;
   kind: FileBadgeKind;
+  iconSrc: string | null;
 };
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
@@ -1316,6 +1735,16 @@ const FILE_UPLOAD_MIME_TYPES = new Set([
 ]);
 const IMAGE_UPLOAD_ACCEPT = Array.from(IMAGE_UPLOAD_MIME_TYPES).join(',');
 const FILE_UPLOAD_ACCEPT = Array.from(FILE_UPLOAD_MIME_TYPES).join(',');
+const FILE_ICON_SOURCES: Record<FileBadgeKind, string | null> = {
+  word: '/microsoft_word_macos_bigsur_icon_189948.png',
+  sheet: '/microsoft_excel_macos_bigsur_icon_189980.png',
+  slide: '/microsoft_powerpoint_macos_bigsur_icon_189966.png',
+  pdf: null,
+  text: '/txt_filetype_icon_177515.png',
+  archive: null,
+  image: null,
+  generic: null,
+};
 
 function isSupportedUpload(file: File, requestedKind: FileKind): boolean {
   const mimeType = file.type.toLowerCase();
@@ -1342,26 +1771,26 @@ function formatFileSize(sizeBytes: number): string {
 function formatFileBadge(originalName: string): FileBadge {
   const extension = originalName.split('.').pop()?.trim().toLocaleLowerCase();
   if (!extension || extension === originalName) {
-    return { label: 'FILE', kind: 'generic' };
+    return { label: 'FILE', kind: 'generic', iconSrc: FILE_ICON_SOURCES.generic };
   }
 
   const fileBadgeByExtension: Record<string, FileBadge> = {
-    doc: { label: 'DOC', kind: 'word' },
-    docx: { label: 'DOCX', kind: 'word' },
-    xls: { label: 'XLS', kind: 'sheet' },
-    xlsx: { label: 'XLSX', kind: 'sheet' },
-    ppt: { label: 'PPT', kind: 'slide' },
-    pptx: { label: 'PPTX', kind: 'slide' },
-    pdf: { label: 'PDF', kind: 'pdf' },
-    txt: { label: 'TXT', kind: 'text' },
-    zip: { label: 'ZIP', kind: 'archive' },
-    png: { label: 'PNG', kind: 'image' },
-    jpg: { label: 'JPG', kind: 'image' },
-    jpeg: { label: 'JPG', kind: 'image' },
-    webp: { label: 'WEBP', kind: 'image' },
+    doc: { label: 'DOC', kind: 'word', iconSrc: FILE_ICON_SOURCES.word },
+    docx: { label: 'DOCX', kind: 'word', iconSrc: FILE_ICON_SOURCES.word },
+    xls: { label: 'XLS', kind: 'sheet', iconSrc: FILE_ICON_SOURCES.sheet },
+    xlsx: { label: 'XLSX', kind: 'sheet', iconSrc: FILE_ICON_SOURCES.sheet },
+    ppt: { label: 'PPT', kind: 'slide', iconSrc: FILE_ICON_SOURCES.slide },
+    pptx: { label: 'PPTX', kind: 'slide', iconSrc: FILE_ICON_SOURCES.slide },
+    pdf: { label: 'PDF', kind: 'pdf', iconSrc: null },
+    txt: { label: 'TXT', kind: 'text', iconSrc: FILE_ICON_SOURCES.text },
+    zip: { label: 'ZIP', kind: 'archive', iconSrc: null },
+    png: { label: 'PNG', kind: 'image', iconSrc: null },
+    jpg: { label: 'JPG', kind: 'image', iconSrc: null },
+    jpeg: { label: 'JPG', kind: 'image', iconSrc: null },
+    webp: { label: 'WEBP', kind: 'image', iconSrc: null },
   };
 
-  return fileBadgeByExtension[extension] ?? { label: 'FILE', kind: 'generic' };
+  return fileBadgeByExtension[extension] ?? { label: 'FILE', kind: 'generic', iconSrc: FILE_ICON_SOURCES.generic };
 }
 
 function triggerBrowserDownload(blob: Blob, originalName: string): void {
