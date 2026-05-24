@@ -166,9 +166,13 @@ export function LoginPage(): JSX.Element {
             />
           </label>
           <label>
-            <span>{t('auth.textCaptcha')}</span>
+            <span>{getCaptchaTitle(captcha, t)}</span>
             <div className="captcha-box">
-              <strong>{captcha?.prompt ?? '...'}</strong>
+              {captcha?.imageDataUrl ? (
+                <img className="captcha-image" src={captcha.imageDataUrl} alt={captcha.prompt} />
+              ) : (
+                <strong>{captcha?.prompt ?? '...'}</strong>
+              )}
               <button
                 type="button"
                 className="secondary-button"
@@ -180,7 +184,7 @@ export function LoginPage(): JSX.Element {
             </div>
             <input
               value={captchaAnswer}
-              inputMode="numeric"
+              inputMode={captcha?.captchaType === 'TEXT' ? 'text' : 'numeric'}
               onChange={(event) => setCaptchaAnswer(event.target.value)}
             />
           </label>
@@ -235,4 +239,15 @@ export function LoginPage(): JSX.Element {
       )}
     </AuthShell>
   );
+}
+
+function getCaptchaTitle(
+  captcha: TextCaptchaResponse | null,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (captcha?.captchaType === 'ARITHMETIC') {
+    return t('auth.arithmeticCaptcha');
+  }
+
+  return t('auth.textCaptcha');
 }

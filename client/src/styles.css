@@ -192,6 +192,14 @@ button {
   letter-spacing: 0;
 }
 
+.captcha-image {
+  width: 100%;
+  max-width: 220px;
+  height: 52px;
+  display: block;
+  object-fit: contain;
+}
+
 .primary-button,
 .secondary-button {
   min-height: 42px;

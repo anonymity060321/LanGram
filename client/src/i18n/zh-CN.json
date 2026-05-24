@@ -8,6 +8,7 @@
   "auth.passwordLogin": "密码登录",
   "auth.emailCodeLogin": "邮箱验证码登录",
   "auth.textCaptcha": "文本验证码",
+  "auth.arithmeticCaptcha": "算术验证码",
   "auth.displayName": "昵称",
   "auth.login": "登录",
   "auth.register": "注册",

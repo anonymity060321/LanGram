@@ -18,7 +18,7 @@ import { LoginDto } from './dto/login.dto';
 import { PasswordLoginDto } from './dto/password-login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { EmailCodePurposeDto, SendEmailCodeDto } from './dto/send-email-code.dto';
-import { TextCaptchaResponseDto } from './dto/text-captcha.dto';
+import { TextCaptchaResponseDto, type TextCaptchaType } from './dto/text-captcha.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 
@@ -56,14 +56,14 @@ const TEXT_CAPTCHA_MAX_ATTEMPTS = 3;
 const TEXT_CAPTCHA_PURPOSE_LOGIN = 'LOGIN';
 const TEXT_CAPTCHA_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-type TextCaptchaKind = 'arithmetic' | 'code';
 type ArithmeticCaptchaOperation = 'add' | 'subtract' | 'multiply' | 'divide';
 type CaptchaRandomInt = (min: number, max: number) => number;
 
 interface TextCaptchaChallenge {
   prompt: string;
   answer: string;
-  kind: TextCaptchaKind;
+  captchaType: TextCaptchaType;
+  imageDataUrl: string;
 }
 
 export function createTextCaptchaChallenge(rng: CaptchaRandomInt = randomInt): TextCaptchaChallenge {
@@ -81,40 +81,40 @@ function createArithmeticCaptcha(rng: CaptchaRandomInt): TextCaptchaChallenge {
     case 'add': {
       const left = rng(2, 19);
       const right = rng(2, 19);
-      return {
-        kind: 'arithmetic',
+      return withCaptchaImage({
+        captchaType: 'ARITHMETIC',
         prompt: `${left} + ${right} = ?`,
         answer: String(left + right),
-      };
+      });
     }
     case 'subtract': {
       const first = rng(2, 20);
       const second = rng(2, 20);
       const left = Math.max(first, second);
       const right = Math.min(first, second);
-      return {
-        kind: 'arithmetic',
+      return withCaptchaImage({
+        captchaType: 'ARITHMETIC',
         prompt: `${left} - ${right} = ?`,
         answer: String(left - right),
-      };
+      });
     }
     case 'multiply': {
       const left = rng(2, 10);
       const right = rng(2, 10);
-      return {
-        kind: 'arithmetic',
+      return withCaptchaImage({
+        captchaType: 'ARITHMETIC',
         prompt: `${left} × ${right} = ?`,
         answer: String(left * right),
-      };
+      });
     }
     case 'divide': {
       const divisor = rng(2, 10);
       const quotient = rng(2, 10);
-      return {
-        kind: 'arithmetic',
+      return withCaptchaImage({
+        captchaType: 'ARITHMETIC',
         prompt: `${divisor * quotient} ÷ ${divisor} = ?`,
         answer: String(quotient),
-      };
+      });
     }
     default:
       return assertNever(operation);
@@ -128,11 +128,11 @@ function createCodeCaptcha(rng: CaptchaRandomInt): TextCaptchaChallenge {
     answer += TEXT_CAPTCHA_CHARSET[rng(0, TEXT_CAPTCHA_CHARSET.length)];
   }
 
-  return {
-    kind: 'code',
-    prompt: `输入验证码：${answer}`,
+  return withCaptchaImage({
+    captchaType: 'TEXT',
+    prompt: 'Enter the characters shown in the image',
     answer,
-  };
+  });
 }
 
 function getArithmeticOperation(value: number): ArithmeticCaptchaOperation {
@@ -142,6 +142,67 @@ function getArithmeticOperation(value: number): ArithmeticCaptchaOperation {
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected value: ${String(value)}`);
+}
+
+function withCaptchaImage(challenge: {
+  captchaType: TextCaptchaType;
+  prompt: string;
+  answer: string;
+}): TextCaptchaChallenge {
+  return {
+    ...challenge,
+    imageDataUrl: createCaptchaImageDataUrl(
+      challenge.captchaType === 'TEXT' ? challenge.answer : challenge.prompt,
+    ),
+  };
+}
+
+function createCaptchaImageDataUrl(text: string): string {
+  const svg = createCaptchaSvg(text);
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
+}
+
+function createCaptchaSvg(text: string): string {
+  const characters = Array.from(text);
+  const width = Math.max(150, characters.length * 24 + 24);
+  const height = 52;
+  const lines = createCaptchaNoiseLines(text, width, height);
+  const renderedText = characters
+    .map((character, index) => {
+      const x = 14 + index * 22;
+      const y = 32 + ((character.charCodeAt(0) + index) % 7) - 3;
+      const rotation = ((character.charCodeAt(0) + index * 3) % 17) - 8;
+      return `<text x="${x}" y="${y}" transform="rotate(${rotation} ${x} ${y})">${escapeSvgText(character)}</text>`;
+    })
+    .join('');
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="captcha">`,
+    '<rect width="100%" height="100%" rx="8" fill="#f8fafc"/>',
+    lines,
+    '<g fill="#172033" font-family="Arial, sans-serif" font-size="24" font-weight="700">',
+    renderedText,
+    '</g>',
+    '</svg>',
+  ].join('');
+}
+
+function createCaptchaNoiseLines(seed: string, width: number, height: number): string {
+  return Array.from({ length: 5 }, (_, index) => {
+    const code = seed.charCodeAt(index % seed.length);
+    const x1 = (code * (index + 3)) % width;
+    const y1 = (code + index * 11) % height;
+    const x2 = (x1 + 48 + index * 17) % width;
+    const y2 = (y1 + 16 + index * 9) % height;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#64748b" stroke-width="1.4" opacity="0.45"/>`;
+  }).join('');
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 @Injectable()
@@ -199,6 +260,8 @@ export class AuthService {
       captchaId: challenge.id,
       prompt: captcha.prompt,
       expiresInSeconds: TEXT_CAPTCHA_TTL_SECONDS,
+      captchaType: captcha.captchaType,
+      imageDataUrl: captcha.imageDataUrl,
     };
   }
 

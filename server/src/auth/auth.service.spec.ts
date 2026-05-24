@@ -137,6 +137,15 @@ function createSequenceRandomInt(values: number[]): (min: number, max: number) =
   };
 }
 
+function decodeSvgDataUrl(dataUrl: string): string {
+  const prefix = 'data:image/svg+xml;base64,';
+  if (!dataUrl.startsWith(prefix)) {
+    throw new Error('Expected SVG data URL');
+  }
+
+  return Buffer.from(dataUrl.slice(prefix.length), 'base64').toString('utf8');
+}
+
 async function expectPasswordLoginAcceptsCaptchaAnswer(
   captchaAnswer: string,
   submittedAnswer = captchaAnswer,
@@ -290,6 +299,8 @@ describe('AuthService', () => {
       captchaId: 'captcha-id',
       prompt: expect.any(String),
       expiresInSeconds: 120,
+      captchaType: expect.stringMatching(/^(ARITHMETIC|TEXT)$/),
+      imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
     expect(result.prompt.length).toBeGreaterThan(0);
     expect(createArgs.data.purpose).toBe('LOGIN');
@@ -300,10 +311,12 @@ describe('AuthService', () => {
     const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 0, 8, 6]));
 
     expect(captcha).toEqual({
-      kind: 'arithmetic',
+      captchaType: 'ARITHMETIC',
       prompt: '8 + 6 = ?',
       answer: '14',
+      imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
+    expect(decodeSvgDataUrl(captcha.imageDataUrl)).toContain('<line ');
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 
@@ -311,6 +324,7 @@ describe('AuthService', () => {
     const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 1, 5, 13]));
 
     expect(captcha.prompt).toBe('13 - 5 = ?');
+    expect(captcha.captchaType).toBe('ARITHMETIC');
     expect(Number(captcha.answer)).toBeGreaterThanOrEqual(0);
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
@@ -319,9 +333,10 @@ describe('AuthService', () => {
     const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 2, 4, 7]));
 
     expect(captcha).toEqual({
-      kind: 'arithmetic',
+      captchaType: 'ARITHMETIC',
       prompt: '4 × 7 = ?',
       answer: '28',
+      imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
@@ -330,9 +345,10 @@ describe('AuthService', () => {
     const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 3, 6, 4]));
 
     expect(captcha).toEqual({
-      kind: 'arithmetic',
+      captchaType: 'ARITHMETIC',
       prompt: '24 ÷ 6 = ?',
       answer: '4',
+      imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
     expect(24 % 6).toBe(0);
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
@@ -343,11 +359,14 @@ describe('AuthService', () => {
       createSequenceRandomInt([1, 6, 0, 5, 10, 20, 25, 29]),
     );
 
-    expect(captcha.kind).toBe('code');
+    expect(captcha.captchaType).toBe('TEXT');
     expect(captcha.answer).toHaveLength(6);
     expect(captcha.answer).toMatch(/^[A-Z2-9]+$/);
     expect(captcha.answer).not.toMatch(/[0O1IL]/);
-    expect(captcha.prompt).toBe(`输入验证码：${captcha.answer}`);
+    expect(captcha.prompt).toBe('Enter the characters shown in the image');
+    expect(captcha.prompt).not.toContain(captcha.answer);
+    expect(captcha.imageDataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(decodeSvgDataUrl(captcha.imageDataUrl)).toContain('<line ');
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 

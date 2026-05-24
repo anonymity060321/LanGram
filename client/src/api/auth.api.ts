@@ -32,6 +32,8 @@ export interface TextCaptchaResponse {
   captchaId: string;
   prompt: string;
   expiresInSeconds: number;
+  captchaType?: 'ARITHMETIC' | 'TEXT';
+  imageDataUrl?: string;
 }
 
 export interface PasswordLoginRequest {

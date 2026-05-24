@@ -8,6 +8,7 @@
   "auth.passwordLogin": "Password login",
   "auth.emailCodeLogin": "Email code login",
   "auth.textCaptcha": "Text captcha",
+  "auth.arithmeticCaptcha": "Arithmetic captcha",
   "auth.displayName": "Display name",
   "auth.login": "Log in",
   "auth.register": "Register",
