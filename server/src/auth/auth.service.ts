@@ -54,6 +54,95 @@ interface JwtPayload {
 const TEXT_CAPTCHA_TTL_SECONDS = 120;
 const TEXT_CAPTCHA_MAX_ATTEMPTS = 3;
 const TEXT_CAPTCHA_PURPOSE_LOGIN = 'LOGIN';
+const TEXT_CAPTCHA_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+type TextCaptchaKind = 'arithmetic' | 'code';
+type ArithmeticCaptchaOperation = 'add' | 'subtract' | 'multiply' | 'divide';
+type CaptchaRandomInt = (min: number, max: number) => number;
+
+interface TextCaptchaChallenge {
+  prompt: string;
+  answer: string;
+  kind: TextCaptchaKind;
+}
+
+export function createTextCaptchaChallenge(rng: CaptchaRandomInt = randomInt): TextCaptchaChallenge {
+  return rng(0, 2) === 0 ? createArithmeticCaptcha(rng) : createCodeCaptcha(rng);
+}
+
+export function normalizeTextCaptchaAnswer(answer: string): string {
+  return answer.trim().toUpperCase();
+}
+
+function createArithmeticCaptcha(rng: CaptchaRandomInt): TextCaptchaChallenge {
+  const operation = getArithmeticOperation(rng(0, 4));
+
+  switch (operation) {
+    case 'add': {
+      const left = rng(2, 19);
+      const right = rng(2, 19);
+      return {
+        kind: 'arithmetic',
+        prompt: `${left} + ${right} = ?`,
+        answer: String(left + right),
+      };
+    }
+    case 'subtract': {
+      const first = rng(2, 20);
+      const second = rng(2, 20);
+      const left = Math.max(first, second);
+      const right = Math.min(first, second);
+      return {
+        kind: 'arithmetic',
+        prompt: `${left} - ${right} = ?`,
+        answer: String(left - right),
+      };
+    }
+    case 'multiply': {
+      const left = rng(2, 10);
+      const right = rng(2, 10);
+      return {
+        kind: 'arithmetic',
+        prompt: `${left} × ${right} = ?`,
+        answer: String(left * right),
+      };
+    }
+    case 'divide': {
+      const divisor = rng(2, 10);
+      const quotient = rng(2, 10);
+      return {
+        kind: 'arithmetic',
+        prompt: `${divisor * quotient} ÷ ${divisor} = ?`,
+        answer: String(quotient),
+      };
+    }
+    default:
+      return assertNever(operation);
+  }
+}
+
+function createCodeCaptcha(rng: CaptchaRandomInt): TextCaptchaChallenge {
+  const length = rng(5, 7);
+  let answer = '';
+  for (let index = 0; index < length; index += 1) {
+    answer += TEXT_CAPTCHA_CHARSET[rng(0, TEXT_CAPTCHA_CHARSET.length)];
+  }
+
+  return {
+    kind: 'code',
+    prompt: `输入验证码：${answer}`,
+    answer,
+  };
+}
+
+function getArithmeticOperation(value: number): ArithmeticCaptchaOperation {
+  const operations: ArithmeticCaptchaOperation[] = ['add', 'subtract', 'multiply', 'divide'];
+  return operations[value] ?? 'add';
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected value: ${String(value)}`);
+}
 
 @Injectable()
 export class AuthService {
@@ -97,12 +186,10 @@ export class AuthService {
   }
 
   async createTextCaptcha(): Promise<TextCaptchaResponseDto> {
-    const left = randomInt(10, 50);
-    const right = randomInt(10, 50);
-    const answer = String(left + right);
+    const captcha = createTextCaptchaChallenge();
     const challenge = await this.prisma.authCaptchaChallenge.create({
       data: {
-        answerHash: await hashAuthSecret(answer),
+        answerHash: await hashAuthSecret(normalizeTextCaptchaAnswer(captcha.answer)),
         purpose: TEXT_CAPTCHA_PURPOSE_LOGIN,
         expiresAt: new Date(Date.now() + TEXT_CAPTCHA_TTL_SECONDS * 1000),
       },
@@ -110,7 +197,7 @@ export class AuthService {
 
     return {
       captchaId: challenge.id,
-      prompt: `${left} + ${right} = ?`,
+      prompt: captcha.prompt,
       expiresInSeconds: TEXT_CAPTCHA_TTL_SECONDS,
     };
   }
@@ -399,7 +486,10 @@ export class AuthService {
     }
 
     const nextAttemptCount = challenge.attemptCount + 1;
-    const matches = await compareAuthSecret(answer.trim(), challenge.answerHash);
+    const matches = await compareAuthSecret(
+      normalizeTextCaptchaAnswer(answer),
+      challenge.answerHash,
+    );
     if (!matches) {
       await this.prisma.authCaptchaChallenge.update({
         where: { id: challenge.id },

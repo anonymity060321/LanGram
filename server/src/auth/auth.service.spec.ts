@@ -1,7 +1,11 @@
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
-import { AuthService } from './auth.service';
+import {
+  AuthService,
+  createTextCaptchaChallenge,
+  normalizeTextCaptchaAnswer,
+} from './auth.service';
 import { EmailService } from './email.service';
 import { EmailCodePurposeDto } from './dto/send-email-code.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -120,6 +124,66 @@ function createService(prisma: MockPrisma): {
   };
 }
 
+function createSequenceRandomInt(values: number[]): (min: number, max: number) => number {
+  return (min: number, max: number): number => {
+    const value = values.shift();
+    if (value === undefined) {
+      throw new Error('Missing test random value');
+    }
+    if (value < min || value >= max) {
+      throw new Error(`Test random value ${value} is outside [${min}, ${max})`);
+    }
+    return value;
+  };
+}
+
+async function expectPasswordLoginAcceptsCaptchaAnswer(
+  captchaAnswer: string,
+  submittedAnswer = captchaAnswer,
+): Promise<void> {
+  const prisma = createMockPrisma();
+  const captchaHash = await bcrypt.hash(normalizeTextCaptchaAnswer(captchaAnswer), 4);
+  const passwordHash = await bcrypt.hash('password123', 4);
+  prisma.authCaptchaChallenge.findUnique.mockResolvedValue({
+    id: 'captcha-id',
+    answerHash: captchaHash,
+    purpose: 'LOGIN',
+    expiresAt: new Date(Date.now() + 60_000),
+    consumedAt: null,
+    attemptCount: 0,
+  });
+  prisma.authCaptchaChallenge.update.mockResolvedValue({});
+  prisma.user.findUnique.mockResolvedValue({
+    id: 'user-id',
+    email: 'user@example.com',
+    passwordHash,
+    displayName: 'User',
+    accountType: 'EMAIL',
+    status: 'ACTIVE',
+  });
+  prisma.session.updateMany.mockResolvedValue({ count: 1 });
+  prisma.device.upsert.mockResolvedValue({ id: 'device-id' });
+  prisma.session.create.mockResolvedValue({ id: 'session-id' });
+  prisma.loginLog.create.mockResolvedValue({});
+  const { service } = createService(prisma);
+
+  const result = await service.loginWithPassword({
+    email: 'user@example.com',
+    password: 'password123',
+    captchaId: 'captcha-id',
+    captchaAnswer: submittedAnswer,
+    device: {
+      deviceIdentifier: 'device-123456',
+    },
+  });
+
+  expect(result.refreshToken).toMatch(/^session-id\./);
+  expect(prisma.authCaptchaChallenge.update).toHaveBeenCalledWith({
+    where: { id: 'captcha-id' },
+    data: { attemptCount: 1, consumedAt: expect.any(Date) },
+  });
+}
+
 describe('AuthService', () => {
   it('stores only hashed email verification codes', async () => {
     const prisma = createMockPrisma();
@@ -224,11 +288,67 @@ describe('AuthService', () => {
 
     expect(result).toEqual({
       captchaId: 'captcha-id',
-      prompt: expect.stringMatching(/^\d+ \+ \d+ = \?$/),
+      prompt: expect.any(String),
       expiresInSeconds: 120,
     });
+    expect(result.prompt.length).toBeGreaterThan(0);
     expect(createArgs.data.purpose).toBe('LOGIN');
     expect(createArgs.data.answerHash).not.toContain(result.prompt);
+  });
+
+  it('generates and validates addition text captchas', async () => {
+    const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 0, 8, 6]));
+
+    expect(captcha).toEqual({
+      kind: 'arithmetic',
+      prompt: '8 + 6 = ?',
+      answer: '14',
+    });
+    await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
+  });
+
+  it('generates and validates subtraction text captchas without negative answers', async () => {
+    const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 1, 5, 13]));
+
+    expect(captcha.prompt).toBe('13 - 5 = ?');
+    expect(Number(captcha.answer)).toBeGreaterThanOrEqual(0);
+    await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
+  });
+
+  it('generates and validates multiplication text captchas', async () => {
+    const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 2, 4, 7]));
+
+    expect(captcha).toEqual({
+      kind: 'arithmetic',
+      prompt: '4 × 7 = ?',
+      answer: '28',
+    });
+    await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
+  });
+
+  it('generates and validates divisible division text captchas', async () => {
+    const captcha = createTextCaptchaChallenge(createSequenceRandomInt([0, 3, 6, 4]));
+
+    expect(captcha).toEqual({
+      kind: 'arithmetic',
+      prompt: '24 ÷ 6 = ?',
+      answer: '4',
+    });
+    expect(24 % 6).toBe(0);
+    await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
+  });
+
+  it('generates and validates alphanumeric text captchas without ambiguous characters', async () => {
+    const captcha = createTextCaptchaChallenge(
+      createSequenceRandomInt([1, 6, 0, 5, 10, 20, 25, 29]),
+    );
+
+    expect(captcha.kind).toBe('code');
+    expect(captcha.answer).toHaveLength(6);
+    expect(captcha.answer).toMatch(/^[A-Z2-9]+$/);
+    expect(captcha.answer).not.toMatch(/[0O1IL]/);
+    expect(captcha.prompt).toBe(`输入验证码：${captcha.answer}`);
+    await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 
   it('logs in with password after consuming a valid captcha', async () => {
@@ -346,6 +466,10 @@ describe('AuthService', () => {
       where: { id: 'captcha-id' },
       data: { attemptCount: 1 },
     });
+  });
+
+  it('accepts alphanumeric captcha answers case-insensitively', async () => {
+    await expectPasswordLoginAcceptsCaptchaAnswer('A7K9Q', 'a7k9q');
   });
 
   it('rejects password login with an expired captcha', async () => {
