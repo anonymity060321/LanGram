@@ -826,6 +826,7 @@ function MessageContextMenu({
       className="message-context-menu"
       style={{ left: x, top: y }}
       role="menu"
+      onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >

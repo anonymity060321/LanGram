@@ -68,7 +68,11 @@ export function UserAvatar({
     );
   }
 
-  return <span className={`user-avatar user-avatar-${size}`}>{label}</span>;
+  return (
+    <span className={`user-avatar user-avatar-${size}`}>
+      <span className="user-avatar-initial">{label}</span>
+    </span>
+  );
 }
 
 function getInitial(displayName?: string | null): string {

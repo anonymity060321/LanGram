@@ -392,7 +392,7 @@ button {
 
 .sidebar-section p,
 .empty-chat-state p,
-.profile-panel span,
+.profile-panel > span:not(.user-avatar),
 .conversation-item small,
 .message-bubble span,
 .profile-section p {
@@ -436,6 +436,7 @@ button {
 }
 
 .user-avatar {
+  position: relative;
   flex: 0 0 auto;
   overflow: hidden;
   border-radius: 50%;
@@ -454,6 +455,13 @@ button {
   height: 100%;
   display: block;
   object-fit: cover;
+}
+
+.user-avatar-initial {
+  display: block;
+  line-height: 1;
+  text-align: center;
+  transform: translateY(0);
 }
 
 .user-avatar-sm {
@@ -565,7 +573,8 @@ button {
 }
 
 .pairing-code-box span,
-.friend-row span,
+.friend-summary-meta,
+.friend-presence-line,
 .empty-list {
   color: #64748b;
   font-size: 14px;
@@ -602,8 +611,14 @@ button {
   text-align: left;
 }
 
-.friend-row span {
+.friend-summary-text,
+.friend-summary-meta,
+.friend-presence-line {
   display: block;
+}
+
+.friend-summary-meta,
+.friend-presence-line {
   margin-top: 2px;
 }
 
@@ -1120,7 +1135,7 @@ button {
   padding: 0 10px;
 }
 
-.friend-start-button span {
+.friend-start-button > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1152,12 +1167,13 @@ button {
   gap: 10px;
 }
 
-.friend-user-summary > span {
+.friend-summary-text {
   min-width: 0;
 }
 
-.friend-user-summary strong,
-.friend-user-summary span span {
+.friend-summary-name,
+.friend-summary-meta,
+.friend-presence-line {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1182,7 +1198,7 @@ button {
   white-space: nowrap;
 }
 
-.friend-profile-card > span {
+.friend-profile-presence {
   color: #047857;
   font-size: 13px;
 }

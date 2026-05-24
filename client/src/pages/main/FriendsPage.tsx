@@ -320,7 +320,9 @@ function FriendProfileCard({
         size="lg"
       />
       <h2>{selectedFriend.friend.displayName}</h2>
-      <span>{formatPresence(selectedFriend.friend.isOnline, selectedFriend.friend.lastSeenAt, t)}</span>
+      <span className="friend-profile-presence">
+        {formatPresence(selectedFriend.friend.isOnline, selectedFriend.friend.lastSeenAt, t)}
+      </span>
       <dl>
         <div>
           <dt>{t('friends.profileEmail')}</dt>
@@ -469,9 +471,9 @@ function FriendSummary({
         avatarUrl={user.avatarUrl}
         size="sm"
       />
-      <span>
-        <strong>{user.displayName}</strong>
-        <span>{user.statusMessage || user.email || user.accountType}</span>
+      <span className="friend-summary-text">
+        <strong className="friend-summary-name">{user.displayName}</strong>
+        <span className="friend-summary-meta">{user.statusMessage || user.email || user.accountType}</span>
         <span className="friend-presence-line">{presenceLabel}</span>
       </span>
     </div>
