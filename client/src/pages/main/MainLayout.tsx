@@ -418,10 +418,6 @@ export function MainLayout(): JSX.Element {
             ))}
           </div>
         </section>
-        <section className="sidebar-section">
-          <h2>{t('main.sidebarFriends')}</h2>
-          <Link to="/friends">{t('friends.openFriends')}</Link>
-        </section>
       </aside>
 
       <section className="chat-panel">
@@ -730,21 +726,43 @@ function MessageList({
   const { t } = useI18n();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
-  const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
+  const [selectedForwardTargetIds, setSelectedForwardTargetIds] = useState<string[]>([]);
+  const [forwardError, setForwardError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<MessageContextMenuState | null>(null);
+  const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
   const previousMessageCountRef = useRef(0);
   const previousConversationIdRef = useRef<string | null>(null);
   const previousIsLoadingRef = useRef(false);
+  const lastMessageIsOwn = messages[messages.length - 1]?.isOwn ?? false;
 
   useEffect(() => {
     setContextMenu(null);
   }, [messages]);
 
   useEffect(() => {
+    if (!forwardingMessage) {
+      return undefined;
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        closeForwardDialog();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [forwardingMessage]);
+
+  useEffect(() => {
     const conversationChanged = previousConversationIdRef.current !== conversationId;
     const messageAdded = messages.length > previousMessageCountRef.current;
     const loadingFinished = previousIsLoadingRef.current && !isLoading;
+    const shouldStickToBottom =
+      conversationChanged || loadingFinished || isAtBottomRef.current || lastMessageIsOwn;
     previousConversationIdRef.current = conversationId;
     previousMessageCountRef.current = messages.length;
     previousIsLoadingRef.current = isLoading;
@@ -753,13 +771,13 @@ function MessageList({
       return;
     }
 
-    requestAnimationFrame(() => {
-      listRef.current?.scrollTo({
-        top: listRef.current.scrollHeight,
-        behavior: conversationChanged ? 'auto' : 'smooth',
-      });
-    });
-  }, [conversationId, isLoading, messages.length]);
+    if (!shouldStickToBottom) {
+      setIsJumpToBottomVisible(true);
+      return;
+    }
+
+    requestAnimationFrame(() => scrollToMessageBottom(conversationChanged ? 'auto' : 'smooth'));
+  }, [conversationId, isLoading, lastMessageIsOwn, messages.length]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -795,9 +813,47 @@ function MessageList({
     setEditDraft('');
   }
 
-  async function handleForward(message: ChatMessage, target: ForwardTarget): Promise<void> {
-    await onForwardMessage(message.id, target);
-    setForwardingMessageId(null);
+  function openForwardDialog(message: ChatMessage): void {
+    setForwardingMessage(message);
+    setSelectedForwardTargetIds([]);
+    setForwardError(null);
+  }
+
+  function closeForwardDialog(): void {
+    setForwardingMessage(null);
+    setSelectedForwardTargetIds([]);
+    setForwardError(null);
+  }
+
+  function toggleForwardTarget(targetId: string): void {
+    setForwardError(null);
+    setSelectedForwardTargetIds((current) =>
+      current.includes(targetId)
+        ? current.filter((id) => id !== targetId)
+        : [...current, targetId],
+    );
+  }
+
+  async function handleForwardSelectedTargets(): Promise<void> {
+    if (!forwardingMessage || selectedForwardTargetIds.length === 0) {
+      return;
+    }
+
+    const selectedTargets = forwardTargets.filter((target) =>
+      selectedForwardTargetIds.includes(target.id),
+    );
+    if (selectedTargets.length === 0) {
+      return;
+    }
+
+    try {
+      for (const target of selectedTargets) {
+        await onForwardMessage(forwardingMessage.id, target);
+      }
+      closeForwardDialog();
+    } catch {
+      setForwardError(t('chat.forwardFailed'));
+    }
   }
 
   function handleContextMenu(event: MouseEvent, message: ChatMessage): void {
@@ -806,6 +862,32 @@ function MessageList({
       message,
       ...getContextMenuPosition(event.clientX, event.clientY),
     });
+  }
+
+  function handleListScroll(): void {
+    setContextMenu(null);
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    const isAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+    isAtBottomRef.current = isAtBottom;
+    setIsJumpToBottomVisible(!isAtBottom);
+  }
+
+  function scrollToMessageBottom(behavior: ScrollBehavior): void {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    list.scrollTo({
+      top: list.scrollHeight,
+      behavior,
+    });
+    isAtBottomRef.current = true;
+    setIsJumpToBottomVisible(false);
   }
 
   function handleMenuAction(action: MessageMenuAction, message: ChatMessage): void {
@@ -817,7 +899,7 @@ function MessageList({
         }
         break;
       case 'forward':
-        setForwardingMessageId(message.id);
+        openForwardDialog(message);
         break;
       case 'edit':
         setEditingMessageId(message.id);
@@ -851,97 +933,131 @@ function MessageList({
   }
 
   return (
-    <div ref={listRef} className="message-list" onScroll={() => setContextMenu(null)}>
-      {messages.map((message) => (
-        <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
-          <div
-            className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
-            onContextMenu={(event) => handleContextMenu(event, message)}
-          >
-            {editingMessageId === message.id ? (
-              <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
-                <input
-                  value={editDraft}
-                  onChange={(event) => setEditDraft(event.target.value)}
-                  autoFocus
-                />
-                <div className="message-edit-actions">
-                  <button type="submit" className="message-action" disabled={!editDraft.trim()}>
-                    {t('chat.saveEdit')}
-                  </button>
-                  <button
-                    type="button"
-                    className="message-action"
-                    onClick={() => {
-                      setEditingMessageId(null);
-                      setEditDraft('');
-                    }}
-                  >
-                    {t('chat.cancel')}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <p>
-                {message.status === 'recalled'
-                  ? t('chat.messageRecalled')
-                  : renderMessageBody(message, searchQuery, t, downloadStates)}
-              </p>
-            )}
-            <div className="message-meta">
-              <span>
-                {message.isOwn && message.status !== 'recalled'
-                  ? t(`chat.status.${message.status}`)
-                  : formatTime(message.recalledAt ?? message.createdAt)}
-              </span>
-              {message.editedAt && message.status !== 'recalled' ? (
-                <span>{t('chat.edited')}</span>
-              ) : null}
-            </div>
-            {forwardingMessageId === message.id ? (
-              <div className="forward-picker">
-                <div className="forward-picker-header">
-                  <strong>{t('chat.forwardTo')}</strong>
-                  <button
-                    type="button"
-                    className="message-action"
-                    onClick={() => setForwardingMessageId(null)}
-                  >
-                    {t('chat.cancel')}
-                  </button>
-                </div>
-                {forwardTargets.length === 0 ? (
-                  <p>{t('chat.selectForwardTarget')}</p>
-                ) : (
-                  <div className="forward-target-list">
-                    {forwardTargets.map((target) => (
-                      <button
-                        type="button"
-                        className="forward-target"
-                        key={target.id}
-                        onClick={() => void handleForward(message, target)}
-                      >
-                        <span>{target.label}</span>
-                        <small>{t('chat.direct')}</small>
-                      </button>
-                    ))}
+    <div className="message-list-shell">
+      <div ref={listRef} className="message-list" onScroll={handleListScroll}>
+        {messages.map((message) => (
+          <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
+            <div
+              className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
+              onContextMenu={(event) => handleContextMenu(event, message)}
+            >
+              {editingMessageId === message.id ? (
+                <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
+                  <input
+                    value={editDraft}
+                    onChange={(event) => setEditDraft(event.target.value)}
+                    autoFocus
+                  />
+                  <div className="message-edit-actions">
+                    <button type="submit" className="message-action" disabled={!editDraft.trim()}>
+                      {t('chat.saveEdit')}
+                    </button>
+                    <button
+                      type="button"
+                      className="message-action"
+                      onClick={() => {
+                        setEditingMessageId(null);
+                        setEditDraft('');
+                      }}
+                    >
+                      {t('chat.cancel')}
+                    </button>
                   </div>
-                )}
+                </form>
+              ) : (
+                <p>
+                  {message.status === 'recalled'
+                    ? t('chat.messageRecalled')
+                    : renderMessageBody(message, searchQuery, t, downloadStates)}
+                </p>
+              )}
+              <div className="message-meta">
+                <span>
+                  {message.isOwn && message.status !== 'recalled'
+                    ? t(`chat.status.${message.status}`)
+                    : formatTime(message.recalledAt ?? message.createdAt)}
+                </span>
+                {message.editedAt && message.status !== 'recalled' ? (
+                  <span>{t('chat.edited')}</span>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-        </article>
-      ))}
-      {contextMenu ? (
-        <MessageContextMenu
-          message={contextMenu.message}
-          x={contextMenu.x}
-          y={contextMenu.y}
-          t={t}
-          downloadStatus={contextMenu.message.file ? downloadStates[contextMenu.message.file.id] : undefined}
-          onAction={handleMenuAction}
-          onClose={() => setContextMenu(null)}
-        />
+            </div>
+          </article>
+        ))}
+        {contextMenu ? (
+          <MessageContextMenu
+            message={contextMenu.message}
+            x={contextMenu.x}
+            y={contextMenu.y}
+            t={t}
+            downloadStatus={contextMenu.message.file ? downloadStates[contextMenu.message.file.id] : undefined}
+            onAction={handleMenuAction}
+            onClose={() => setContextMenu(null)}
+          />
+        ) : null}
+      </div>
+      {isJumpToBottomVisible ? (
+        <button
+          type="button"
+          className="jump-to-bottom-button"
+          aria-label={t('chat.jumpToBottom')}
+          title={t('chat.jumpToBottom')}
+          onClick={() => scrollToMessageBottom('smooth')}
+        >
+          ↓
+        </button>
+      ) : null}
+      {forwardingMessage ? (
+        <div
+          className="forward-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeForwardDialog();
+            }
+          }}
+        >
+          <section className="forward-dialog" role="dialog" aria-modal="true" aria-labelledby="forward-dialog-title">
+            <header className="forward-dialog-header">
+              <strong id="forward-dialog-title">{t('chat.forwardTo')}</strong>
+            </header>
+            {forwardTargets.length === 0 ? (
+              <p className="forward-dialog-empty">{t('chat.selectForwardTarget')}</p>
+            ) : (
+              <div className="forward-target-list">
+                {forwardTargets.map((target) => {
+                  const isSelected = selectedForwardTargetIds.includes(target.id);
+                  return (
+                    <button
+                      type="button"
+                      className={`forward-target ${isSelected ? 'is-selected' : ''}`}
+                      aria-pressed={isSelected}
+                      key={target.id}
+                      onClick={() => toggleForwardTarget(target.id)}
+                    >
+                      <span>{target.label}</span>
+                      <small>{t('chat.direct')}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {forwardError ? <p className="forward-dialog-error">{forwardError}</p> : null}
+            <footer className="forward-dialog-actions">
+              <button type="button" className="secondary-button compact-button" onClick={closeForwardDialog}>
+                {t('chat.cancel')}
+              </button>
+              <button
+                type="button"
+                className="primary-button compact-button"
+                disabled={selectedForwardTargetIds.length === 0}
+                onClick={() => void handleForwardSelectedTargets()}
+              >
+                {t('chat.forward')}
+              </button>
+            </footer>
+          </section>
+        </div>
       ) : null}
     </div>
   );
@@ -1075,11 +1191,11 @@ function renderMessageBody(
 
   if (message.messageType === 'FILE' && message.file) {
     const downloadStatus = downloadStates[message.file.id];
+    const fileBadge = formatFileBadge(message.file.originalName);
 
     return (
       <span className="file-message-card">
-        <span className="file-message-icon">{t('chat.file')}</span>
-        <span>
+        <span className="file-message-details">
           <strong>{message.file.originalName}</strong>
           <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
           {downloadStatus ? (
@@ -1087,6 +1203,9 @@ function renderMessageBody(
               {downloadStatus === 'downloading' ? t('chat.downloading') : t('chat.downloadFailed')}
             </small>
           ) : null}
+        </span>
+        <span className={`file-message-icon file-kind-${fileBadge.kind}`}>
+          <span className="file-message-icon-label">{fileBadge.label}</span>
         </span>
       </span>
     );
@@ -1178,6 +1297,11 @@ type ImagePreviewState =
   | { status: 'loading'; objectUrl: null }
   | { status: 'failed'; objectUrl: null }
   | { status: 'loaded'; objectUrl: string };
+type FileBadgeKind = 'word' | 'sheet' | 'slide' | 'pdf' | 'text' | 'archive' | 'image' | 'generic';
+type FileBadge = {
+  label: string;
+  kind: FileBadgeKind;
+};
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -1213,6 +1337,31 @@ function formatFileSize(sizeBytes: number): string {
   }
 
   return `${sizeBytes} B`;
+}
+
+function formatFileBadge(originalName: string): FileBadge {
+  const extension = originalName.split('.').pop()?.trim().toLocaleLowerCase();
+  if (!extension || extension === originalName) {
+    return { label: 'FILE', kind: 'generic' };
+  }
+
+  const fileBadgeByExtension: Record<string, FileBadge> = {
+    doc: { label: 'DOC', kind: 'word' },
+    docx: { label: 'DOCX', kind: 'word' },
+    xls: { label: 'XLS', kind: 'sheet' },
+    xlsx: { label: 'XLSX', kind: 'sheet' },
+    ppt: { label: 'PPT', kind: 'slide' },
+    pptx: { label: 'PPTX', kind: 'slide' },
+    pdf: { label: 'PDF', kind: 'pdf' },
+    txt: { label: 'TXT', kind: 'text' },
+    zip: { label: 'ZIP', kind: 'archive' },
+    png: { label: 'PNG', kind: 'image' },
+    jpg: { label: 'JPG', kind: 'image' },
+    jpeg: { label: 'JPG', kind: 'image' },
+    webp: { label: 'WEBP', kind: 'image' },
+  };
+
+  return fileBadgeByExtension[extension] ?? { label: 'FILE', kind: 'generic' };
 }
 
 function triggerBrowserDownload(blob: Blob, originalName: string): void {

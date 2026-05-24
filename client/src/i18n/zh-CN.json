@@ -75,6 +75,7 @@
   "chat.unsupportedFileType": "不支持的文件类型",
   "chat.image": "图片",
   "chat.file": "文件",
+  "chat.jumpToBottom": "跳到底部",
   "chat.fileMessageFailed": "文件消息发送失败",
   "chat.searchPlaceholder": "搜索当前会话已加载消息",
   "chat.searchNoResults": "没有匹配的已加载消息",
