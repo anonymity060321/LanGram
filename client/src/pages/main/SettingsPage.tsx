@@ -76,6 +76,12 @@ export function SettingsPage(): JSX.Element {
     setSaved(true);
   }
 
+  async function handleThemeChange(nextTheme: ThemePreference): Promise<void> {
+    setTheme(nextTheme);
+    await updateConfig({ theme: nextTheme });
+    setSaved(false);
+  }
+
   async function handleProfileSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setProfileError(null);
@@ -150,7 +156,7 @@ export function SettingsPage(): JSX.Element {
             <span>{t('settings.theme')}</span>
             <select
               value={theme}
-              onChange={(event) => setTheme(event.target.value as ThemePreference)}
+              onChange={(event) => void handleThemeChange(event.target.value as ThemePreference)}
             >
               <option value="system">{t('theme.system')}</option>
               <option value="light">{t('theme.light')}</option>

@@ -27,6 +27,7 @@ import {
 } from '../realtime/socket';
 
 export type LocalMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'recalled';
+const UNABLE_TO_DECRYPT_MESSAGE = '[Unable to decrypt message]';
 
 export interface ChatMessage {
   id: string;
@@ -46,13 +47,14 @@ export interface ChatMessage {
 interface ChatState {
   conversations: Conversation[];
   selectedConversationId: string | null;
+  currentUserId: string | null;
   messagesByConversation: Record<string, ChatMessage[]>;
   presenceByUserId: Record<string, PresenceUpdatePayload>;
   error: string | null;
   searchQuery: string;
   isLoadingConversations: boolean;
   isLoadingMessages: boolean;
-  loadConversations: () => Promise<void>;
+  loadConversations: (currentUserId?: string) => Promise<void>;
   selectConversation: (conversationId: string, currentUserId: string) => Promise<void>;
   closeConversation: () => void;
   openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<string | null>;
@@ -85,23 +87,32 @@ type ChatSet = (
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   selectedConversationId: null,
+  currentUserId: null,
   messagesByConversation: {},
   presenceByUserId: {},
   error: null,
   searchQuery: '',
   isLoadingConversations: false,
   isLoadingMessages: false,
-  loadConversations: async () => {
+  loadConversations: async (currentUserId) => {
     set({ isLoadingConversations: true, error: null });
     try {
       const result = await listConversations();
-      set({ conversations: result.conversations, isLoadingConversations: false });
+      const userId = currentUserId ?? get().currentUserId;
+      const conversations = userId ? await enrichConversations(result.conversations) : result.conversations;
+      set({ conversations, currentUserId: userId ?? null, isLoadingConversations: false });
     } catch {
       set({ error: 'Failed to load conversations', isLoadingConversations: false });
     }
   },
   selectConversation: async (conversationId, currentUserId) => {
-    set({ selectedConversationId: conversationId, isLoadingMessages: true, error: null });
+    set((state) => ({
+      selectedConversationId: conversationId,
+      currentUserId,
+      conversations: clearConversationUnread(state.conversations, conversationId),
+      isLoadingMessages: true,
+      error: null,
+    }));
     try {
       const result = await listMessages(conversationId, { limit: 50 });
       const conversation = get().conversations.find((item) => item.id === conversationId);
@@ -119,6 +130,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...state.messagesByConversation,
           [conversationId]: messages,
         },
+        conversations: updateConversationFromMessages(state.conversations, conversationId, messages),
         isLoadingMessages: false,
       }));
 
@@ -347,6 +359,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   markRead: (conversationId, messageId) => {
+    set((state) => ({
+      conversations: clearConversationUnread(state.conversations, conversationId),
+    }));
     sendRealtimeRead({ conversationId, messageId });
   },
   recallMessage: (conversationId, messageId) => {
@@ -510,6 +525,135 @@ async function toChatMessage(
   };
 }
 
+async function enrichConversations(conversations: Conversation[]): Promise<Conversation[]> {
+  const enriched = await Promise.all(
+    conversations.map(async (conversation) => {
+      if (!conversation.lastMessage) {
+        return conversation;
+      }
+
+      return {
+        ...conversation,
+        ...(await buildLastMessagePreview(conversation, conversation.lastMessage)),
+      };
+    }),
+  );
+
+  return sortConversations(enriched);
+}
+
+async function buildLastMessagePreview(
+  conversation: Conversation,
+  message: EncryptedMessage,
+): Promise<Pick<Conversation, 'lastMessagePlaintext' | 'lastMessageDecryptionFailed'>> {
+  if (message.status === 'RECALLED') {
+    return { lastMessagePlaintext: null, lastMessageDecryptionFailed: false };
+  }
+
+  if (message.messageType !== 'TEXT') {
+    return { lastMessagePlaintext: null, lastMessageDecryptionFailed: false };
+  }
+
+  const plaintext = await decryptSafely(message.ciphertext, message.nonce, conversation);
+  return {
+    lastMessagePlaintext: plaintext,
+    lastMessageDecryptionFailed: plaintext === UNABLE_TO_DECRYPT_MESSAGE,
+  };
+}
+
+function updateConversationForIncomingMessage(
+  conversations: Conversation[],
+  payload: MessageNewPayload,
+  message: ChatMessage,
+  selectedConversationId: string | null,
+  currentUserId: string | null,
+): Conversation[] {
+  return sortConversations(
+    conversations.map((conversation) => {
+      if (conversation.id !== payload.conversationId) {
+        return conversation;
+      }
+
+      const shouldCountUnread =
+        payload.senderId !== currentUserId && selectedConversationId !== payload.conversationId;
+
+      return {
+        ...conversation,
+        lastMessage: messagePayloadToEncryptedMessage(payload),
+        lastMessageAt: payload.createdAt,
+        lastMessagePlaintext:
+          message.status === 'recalled' || message.messageType !== 'TEXT' ? null : message.plaintext,
+        lastMessageDecryptionFailed: message.plaintext === UNABLE_TO_DECRYPT_MESSAGE,
+        unreadCount: shouldCountUnread ? conversation.unreadCount + 1 : 0,
+        updatedAt: payload.createdAt,
+      };
+    }),
+  );
+}
+
+function updateConversationFromMessages(
+  conversations: Conversation[],
+  conversationId: string,
+  messages: ChatMessage[],
+): Conversation[] {
+  const lastMessage = messages.at(-1);
+  if (!lastMessage) {
+    return conversations;
+  }
+
+  return sortConversations(
+    conversations.map((conversation) =>
+      conversation.id === conversationId
+        ? {
+            ...conversation,
+            lastMessageAt: lastMessage.createdAt,
+            lastMessagePlaintext:
+              lastMessage.status === 'recalled' || lastMessage.messageType !== 'TEXT'
+                ? null
+                : lastMessage.plaintext,
+            lastMessageDecryptionFailed: lastMessage.plaintext === UNABLE_TO_DECRYPT_MESSAGE,
+          }
+        : conversation,
+    ),
+  );
+}
+
+function messagePayloadToEncryptedMessage(payload: MessageNewPayload): EncryptedMessage {
+  return {
+    id: payload.messageId,
+    conversationId: payload.conversationId,
+    senderId: payload.senderId,
+    messageType: payload.messageType,
+    ciphertext: payload.ciphertext,
+    encryptionVersion: payload.encryptionVersion,
+    nonce: payload.nonce,
+    replyToMessageId: payload.replyToMessageId,
+    status: payload.status,
+    file: payload.file,
+    editedAt: null,
+    recalledAt: null,
+    createdAt: payload.createdAt,
+    updatedAt: payload.createdAt,
+  };
+}
+
+function clearConversationUnread(
+  conversations: Conversation[],
+  conversationId: string,
+): Conversation[] {
+  return conversations.map((conversation) =>
+    conversation.id === conversationId ? { ...conversation, unreadCount: 0 } : conversation,
+  );
+}
+
+function sortConversations(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort(
+    (left, right) =>
+      new Date(right.lastMessageAt ?? right.updatedAt).getTime() -
+      new Date(left.lastMessageAt ?? left.updatedAt).getTime(),
+  );
+}
+
 async function handleIncomingMessage(
   payload: MessageNewPayload,
   get: () => ChatState,
@@ -518,7 +662,7 @@ async function handleIncomingMessage(
   const state = get();
   const conversation = state.conversations.find((item) => item.id === payload.conversationId);
   if (!conversation) {
-    await state.loadConversations();
+    await state.loadConversations(state.currentUserId ?? undefined);
     return;
   }
 
@@ -548,6 +692,13 @@ async function handleIncomingMessage(
       payload.conversationId,
       message,
     ),
+    conversations: updateConversationForIncomingMessage(
+      currentState.conversations,
+      payload,
+      message,
+      currentState.selectedConversationId,
+      currentState.currentUserId,
+    ),
   }));
 
   if (!message.isOwn && state.selectedConversationId === payload.conversationId) {
@@ -567,6 +718,11 @@ function handleRead(
   set: ChatSet,
 ): void {
   updateMessageStatus(payload.conversationId, payload.messageId, 'read', set);
+  set((state: ChatState) =>
+    payload.readerId === state.currentUserId
+      ? { conversations: clearConversationUnread(state.conversations, payload.conversationId) }
+      : {},
+  );
 }
 
 function handleRecalled(
@@ -588,6 +744,21 @@ function handleRecalled(
             : message,
       ),
     },
+    conversations: state.conversations.map((conversation) =>
+      conversation.id === payload.conversationId &&
+      conversation.lastMessage?.id === payload.messageId
+        ? {
+            ...conversation,
+            lastMessage: {
+              ...conversation.lastMessage,
+              status: 'RECALLED',
+              recalledAt: payload.recalledAt,
+            },
+            lastMessagePlaintext: null,
+            lastMessageDecryptionFailed: false,
+          }
+        : conversation,
+    ),
   }));
 }
 
@@ -599,7 +770,7 @@ async function handleEdited(
   const state = get();
   const conversation = state.conversations.find((item) => item.id === payload.conversationId);
   if (!conversation) {
-    await state.loadConversations();
+    await state.loadConversations(state.currentUserId ?? undefined);
     return;
   }
 
@@ -620,6 +791,22 @@ async function handleEdited(
             : message,
       ),
     },
+    conversations: currentState.conversations.map((item) =>
+      item.id === payload.conversationId && item.lastMessage?.id === payload.messageId
+        ? {
+            ...item,
+            lastMessage: {
+              ...item.lastMessage,
+              ciphertext: payload.ciphertext,
+              nonce: payload.nonce,
+              encryptionVersion: payload.encryptionVersion,
+              editedAt: payload.editedAt,
+            },
+            lastMessagePlaintext: plaintext,
+            lastMessageDecryptionFailed: plaintext === '[Unable to decrypt message]',
+          }
+        : item,
+    ),
   }));
 }
 
@@ -638,7 +825,7 @@ async function decryptSafely(
   try {
     return await decryptMessage(ciphertext, nonce, conversation);
   } catch {
-    return '[Unable to decrypt message]';
+    return UNABLE_TO_DECRYPT_MESSAGE;
   }
 }
 

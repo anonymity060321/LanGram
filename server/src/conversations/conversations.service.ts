@@ -27,6 +27,12 @@ type ConversationWithMembers = {
   members: Array<{ user: UserSummary }>;
 };
 
+type ConversationListItem = ConversationWithMembers & {
+  lastMessage: MessageRecord | null;
+  lastMessageAt: Date | null;
+  unreadCount: number;
+};
+
 type MessageRecord = {
   id: string;
   conversationId: string;
@@ -79,10 +85,42 @@ export class ConversationsService {
       orderBy: { updatedAt: 'desc' },
       include: this.conversationInclude(),
     });
+    const enrichedConversations = await Promise.all(
+      conversations.map(async (conversation) => {
+        const typedConversation = conversation as unknown as ConversationWithMembers;
+        const lastMessage = await this.prisma.message.findFirst({
+          where: { conversationId: typedConversation.id },
+          orderBy: { createdAt: 'desc' },
+          select: this.messageSelect(),
+        });
+        const unreadCount = await this.prisma.messageDelivery.count({
+          where: {
+            receiverId: userId,
+            readAt: null,
+            message: {
+              conversationId: typedConversation.id,
+              senderId: { not: userId },
+              status: { not: MessageStatus.RECALLED },
+            },
+          },
+        });
+
+        return {
+          ...typedConversation,
+          lastMessage: lastMessage ? (lastMessage as unknown as MessageRecord) : null,
+          lastMessageAt: lastMessage?.createdAt ?? null,
+          unreadCount,
+        };
+      }),
+    );
+    enrichedConversations.sort(
+      (left, right) =>
+        this.conversationSortTime(right).getTime() - this.conversationSortTime(left).getTime(),
+    );
 
     return {
-      conversations: conversations.map((conversation) =>
-        this.toConversationDto(conversation as unknown as ConversationWithMembers, userId),
+      conversations: enrichedConversations.map((conversation) =>
+        this.toConversationDto(conversation, userId),
       ),
     };
   }
@@ -304,14 +342,24 @@ export class ConversationsService {
     };
   }
 
-  private toConversationDto(conversation: ConversationWithMembers, currentUserId: string): unknown {
+  private toConversationDto(
+    conversation: ConversationWithMembers | ConversationListItem,
+    currentUserId: string,
+  ): unknown {
     const peer = conversation.members.find((member) => member.user.id !== currentUserId)?.user ?? null;
+    const listItem =
+      'lastMessage' in conversation
+        ? conversation
+        : { lastMessage: null, lastMessageAt: null, unreadCount: 0 };
 
     return {
       id: conversation.id,
       type: conversation.type,
       peer: peer ? this.toUserDto(peer) : null,
       members: conversation.members.map((member) => this.toUserDto(member.user)),
+      lastMessage: listItem.lastMessage ? this.toMessageDto(listItem.lastMessage) : null,
+      lastMessageAt: listItem.lastMessageAt,
+      unreadCount: listItem.unreadCount,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
     };
@@ -370,6 +418,10 @@ export class ConversationsService {
       updatedAt: file.updatedAt,
       deletedAt: file.deletedAt,
     };
+  }
+
+  private conversationSortTime(conversation: ConversationListItem): Date {
+    return conversation.lastMessageAt ?? conversation.updatedAt;
   }
 
   private normalizeUserPair(userId: string, friendUserId: string): [string, string] {

@@ -15,6 +15,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+:root[data-theme='dark'] {
+  color: #e5edf7;
+  background: #0f172a;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -269,7 +274,7 @@ button {
   height: 100vh;
   min-height: 0;
   display: grid;
-  grid-template-columns: 86px minmax(240px, 320px) minmax(360px, 1fr) minmax(220px, 280px);
+  grid-template-columns: 74px minmax(220px, 286px) minmax(520px, 1fr) minmax(190px, 240px);
   overflow: hidden;
   background: #eef3f8;
 }
@@ -281,7 +286,7 @@ button {
   gap: 16px;
   border-right: 1px solid #d6deea;
   background: #ffffff;
-  padding: 14px 10px;
+  padding: 14px 8px;
 }
 
 .app-nav .app-logo {
@@ -347,6 +352,50 @@ button {
 
 .app-nav-logout span {
   background: #fff1f2;
+  color: #b42318;
+}
+
+.app-nav-menu {
+  position: relative;
+}
+
+.app-nav-menu-toggle {
+  width: 100%;
+}
+
+.app-nav-popover {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 0;
+  z-index: 30;
+  width: 148px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
+  padding: 6px;
+}
+
+.app-nav-menu-item {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #172033;
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.app-nav-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.app-nav-menu-item.is-danger {
   color: #b42318;
 }
 
@@ -655,7 +704,7 @@ button {
 }
 
 .conversation-item {
-  min-height: 58px;
+  min-height: 68px;
   display: grid;
   grid-template-columns: 40px 1fr;
   align-items: center;
@@ -673,6 +722,55 @@ button {
 .conversation-item strong,
 .conversation-item small {
   display: block;
+}
+
+.conversation-item-body {
+  min-width: 0;
+}
+
+.conversation-item-header,
+.conversation-item-meta {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-item-header strong,
+.conversation-item-meta small,
+.conversation-presence {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-item-header time {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.conversation-item-meta {
+  margin-top: 3px;
+}
+
+.conversation-unread {
+  min-width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.conversation-presence {
+  margin-top: 2px;
 }
 
 .message-list {
@@ -1253,7 +1351,7 @@ button {
 
 @media (max-width: 960px) {
   .main-layout {
-    grid-template-columns: 78px minmax(220px, 300px) 1fr;
+    grid-template-columns: 68px minmax(210px, 270px) minmax(0, 1fr);
   }
 
   .profile-panel {
@@ -1263,7 +1361,7 @@ button {
 
 @media (max-width: 720px) {
   .main-layout {
-    grid-template-columns: 72px 1fr;
+    grid-template-columns: 64px minmax(0, 1fr);
   }
 
   .conversation-panel {
@@ -1304,4 +1402,86 @@ button {
   .attachment-menu {
     width: 100%;
   }
+}
+
+:root[data-theme='dark'] body,
+:root[data-theme='dark'] .main-layout,
+:root[data-theme='dark'] .chat-panel {
+  background: #0f172a;
+}
+
+:root[data-theme='dark'] .app-nav,
+:root[data-theme='dark'] .conversation-panel,
+:root[data-theme='dark'] .profile-panel,
+:root[data-theme='dark'] .sidebar-header,
+:root[data-theme='dark'] .chat-header,
+:root[data-theme='dark'] .auth-panel,
+:root[data-theme='dark'] .settings-panel,
+:root[data-theme='dark'] .friends-shell,
+:root[data-theme='dark'] .friends-panel,
+:root[data-theme='dark'] .app-nav-popover {
+  border-color: #334155;
+  background: #111827;
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .chat-search-bar,
+:root[data-theme='dark'] .message-bubble,
+:root[data-theme='dark'] .attachment-menu,
+:root[data-theme='dark'] .captcha-box,
+:root[data-theme='dark'] .pairing-code-box,
+:root[data-theme='dark'] .file-message-card,
+:root[data-theme='dark'] .message-context-menu {
+  border-color: #334155;
+  background: #1e293b;
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .message-row.is-own .message-bubble {
+  border-color: #1d4ed8;
+  background: #1e3a8a;
+}
+
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select {
+  border-color: #475569;
+  background: #0f172a;
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .app-logo,
+:root[data-theme='dark'] .app-nav-link,
+:root[data-theme='dark'] .conversation-item,
+:root[data-theme='dark'] .friend-start-button,
+:root[data-theme='dark'] .app-nav-menu-item,
+:root[data-theme='dark'] .message-context-menu button,
+:root[data-theme='dark'] .friend-profile-card dd {
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .app-nav-link:hover,
+:root[data-theme='dark'] .app-nav-link.is-active,
+:root[data-theme='dark'] .conversation-item:hover,
+:root[data-theme='dark'] .conversation-item.is-active,
+:root[data-theme='dark'] .friend-start-button:hover,
+:root[data-theme='dark'] .app-nav-menu-item:hover {
+  border-color: #3b82f6;
+  background: #1e293b;
+}
+
+:root[data-theme='dark'] .sidebar-section p,
+:root[data-theme='dark'] .empty-chat-state p,
+:root[data-theme='dark'] .profile-panel > span:not(.user-avatar),
+:root[data-theme='dark'] .conversation-item small,
+:root[data-theme='dark'] .message-bubble span,
+:root[data-theme='dark'] .profile-section p,
+:root[data-theme='dark'] .chat-header span,
+:root[data-theme='dark'] .conversation-item-header time,
+:root[data-theme='dark'] .file-message-card small,
+:root[data-theme='dark'] .friend-profile-card dt {
+  color: #94a3b8;
+}
+
+:root[data-theme='dark'] .app-nav-menu-item.is-danger {
+  color: #fca5a5;
 }

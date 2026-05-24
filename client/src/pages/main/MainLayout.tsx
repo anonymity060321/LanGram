@@ -53,11 +53,17 @@ export function MainLayout(): JSX.Element {
   });
   const [sendOriginalImage, setSendOriginalImage] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
+  const appMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
+  const profileUser = selectedConversation?.peer ?? user ?? null;
+  const profilePresence = selectedConversation?.peer
+    ? formatPresence(selectedConversation.peer.isOnline, selectedConversation.peer.lastSeenAt, t)
+    : t('presence.online');
   const messages = useMemo(
     () => (selectedConversationId ? messagesByConversation[selectedConversationId] ?? [] : []),
     [messagesByConversation, selectedConversationId],
@@ -68,11 +74,13 @@ export function MainLayout(): JSX.Element {
   );
 
   useEffect(() => {
-    void loadConversations();
+    if (user) {
+      void loadConversations(user.id);
+    }
     void listFriends()
       .then((result) => setFriends(result.friends))
       .catch(() => setFriends([]));
-  }, [loadConversations]);
+  }, [loadConversations, user]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -83,6 +91,33 @@ export function MainLayout(): JSX.Element {
     connect(accessToken);
     return () => disconnect();
   }, [accessToken, connect, disconnect]);
+
+  useEffect(() => {
+    if (!isAppMenuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      if (appMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsAppMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setIsAppMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAppMenuOpen]);
 
   useEffect(() => {
     setFriends((current) =>
@@ -296,15 +331,42 @@ export function MainLayout(): JSX.Element {
             <span>C</span>
             <strong>{t('main.navContacts')}</strong>
           </Link>
-          <Link className="app-nav-link" to="/settings">
-            <span>S</span>
-            <strong>{t('main.navSettings')}</strong>
-          </Link>
         </nav>
-        <button type="button" className="app-nav-link app-nav-logout" onClick={() => void handleLogout()}>
-          <span>Q</span>
-          <strong>{t('auth.logout')}</strong>
-        </button>
+        <div className="app-nav-menu" ref={appMenuRef}>
+          {isAppMenuOpen ? (
+            <div className="app-nav-popover" role="menu">
+              <Link
+                role="menuitem"
+                to="/settings"
+                className="app-nav-menu-item"
+                onClick={() => setIsAppMenuOpen(false)}
+              >
+                {t('main.navSettings')}
+              </Link>
+              <button
+                type="button"
+                role="menuitem"
+                className="app-nav-menu-item is-danger"
+                onClick={() => {
+                  setIsAppMenuOpen(false);
+                  void handleLogout();
+                }}
+              >
+                {t('auth.logout')}
+              </button>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="app-nav-link app-nav-menu-toggle"
+            aria-label={t('main.moreMenu')}
+            aria-expanded={isAppMenuOpen}
+            onClick={() => setIsAppMenuOpen((isOpen) => !isOpen)}
+          >
+            <span>☰</span>
+            <strong>{t('main.moreMenu')}</strong>
+          </button>
+        </div>
       </aside>
       <aside className="conversation-panel">
         <div className="sidebar-header">
@@ -331,9 +393,22 @@ export function MainLayout(): JSX.Element {
                   displayName={conversation.peer?.displayName}
                   avatarUrl={conversation.peer?.avatarUrl}
                 />
-                <span>
-                  <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
-                  <small>
+                <span className="conversation-item-body">
+                  <span className="conversation-item-header">
+                    <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
+                    <time dateTime={conversation.lastMessageAt ?? conversation.updatedAt}>
+                      {formatConversationTime(conversation.lastMessageAt ?? conversation.updatedAt, t)}
+                    </time>
+                  </span>
+                  <span className="conversation-item-meta">
+                    <small>{formatConversationSummary(conversation, t)}</small>
+                    {conversation.unreadCount > 0 ? (
+                      <span className="conversation-unread">
+                        {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
+                      </span>
+                    ) : null}
+                  </span>
+                  <small className="conversation-presence">
                     {conversation.peer
                       ? formatPresence(conversation.peer.isOnline, conversation.peer.lastSeenAt, t)
                       : t('chat.direct')}
@@ -387,6 +462,7 @@ export function MainLayout(): JSX.Element {
               ) : null}
             </div>
             <MessageList
+              conversationId={selectedConversation.id}
               messages={visibleMessages}
               isLoading={isLoadingMessages}
               searchQuery={searchQuery}
@@ -481,14 +557,14 @@ export function MainLayout(): JSX.Element {
 
       <aside className="profile-panel">
         <UserAvatar
-          userId={user?.id}
-          displayName={user?.displayName}
-          avatarUrl={user?.avatarUrl}
+          userId={profileUser?.id}
+          displayName={profileUser?.displayName}
+          avatarUrl={profileUser?.avatarUrl}
           size="lg"
         />
-        <strong>{user?.displayName ?? t('app.name')}</strong>
-        <span className="presence-text">{t('presence.online')}</span>
-        <span>{user?.statusMessage || user?.email || user?.accountType || 'MVP'}</span>
+        <strong>{profileUser?.displayName ?? t('app.name')}</strong>
+        <span className="presence-text">{profilePresence}</span>
+        <span>{profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}</span>
         <section className="profile-section">
           <h2>{t('chat.startChat')}</h2>
           {visibleFriends.length === 0 ? <p>{t('chat.noFriendsToStart')}</p> : null}
@@ -577,7 +653,55 @@ function formatPresence(
   return `${Math.floor(diffMinutes / 60)} ${t('presence.hoursAgo')}`;
 }
 
+function formatConversationSummary(
+  conversation: Conversation,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const message = conversation.lastMessage;
+  if (!message) {
+    return t('chat.noMessages');
+  }
+
+  if (message.status === 'RECALLED') {
+    return t('chat.messageRecalled');
+  }
+
+  if (conversation.lastMessageDecryptionFailed) {
+    return t('chat.decryptFailed');
+  }
+
+  if (message.messageType === 'IMAGE') {
+    return `[${t('chat.image')}] ${message.file?.originalName ?? t('chat.image')}`;
+  }
+
+  if (message.messageType === 'FILE') {
+    return `[${t('chat.file')}] ${message.file?.originalName ?? t('chat.file')}`;
+  }
+
+  return conversation.lastMessagePlaintext?.trim() || t('chat.noMessages');
+}
+
+function formatConversationTime(
+  value: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const date = new Date(value);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    return t('chat.yesterday');
+  }
+
+  return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+}
+
 function MessageList({
+  conversationId,
   messages,
   isLoading,
   searchQuery,
@@ -590,6 +714,7 @@ function MessageList({
   forwardTargets,
   downloadStates,
 }: {
+  conversationId: string;
   messages: ChatMessage[];
   isLoading: boolean;
   searchQuery: string;
@@ -607,10 +732,34 @@ function MessageList({
   const [editDraft, setEditDraft] = useState('');
   const [forwardingMessageId, setForwardingMessageId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<MessageContextMenuState | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const previousMessageCountRef = useRef(0);
+  const previousConversationIdRef = useRef<string | null>(null);
+  const previousIsLoadingRef = useRef(false);
 
   useEffect(() => {
     setContextMenu(null);
   }, [messages]);
+
+  useEffect(() => {
+    const conversationChanged = previousConversationIdRef.current !== conversationId;
+    const messageAdded = messages.length > previousMessageCountRef.current;
+    const loadingFinished = previousIsLoadingRef.current && !isLoading;
+    previousConversationIdRef.current = conversationId;
+    previousMessageCountRef.current = messages.length;
+    previousIsLoadingRef.current = isLoading;
+
+    if (isLoading || (!conversationChanged && !messageAdded && !loadingFinished)) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      listRef.current?.scrollTo({
+        top: listRef.current.scrollHeight,
+        behavior: conversationChanged ? 'auto' : 'smooth',
+      });
+    });
+  }, [conversationId, isLoading, messages.length]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -702,7 +851,7 @@ function MessageList({
   }
 
   return (
-    <div className="message-list" onScroll={() => setContextMenu(null)}>
+    <div ref={listRef} className="message-list" onScroll={() => setContextMenu(null)}>
       {messages.map((message) => (
         <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
           <div
@@ -913,9 +1062,7 @@ function renderMessageBody(
         <ImageMessagePreview file={message.file} t={t} />
         <span className="image-message-details">
           <strong>{message.file.originalName}</strong>
-          <small>
-            {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
-          </small>
+          <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
           {downloadStatus ? (
             <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
               {downloadStatus === 'downloading' ? t('chat.downloading') : t('chat.downloadFailed')}
@@ -934,9 +1081,7 @@ function renderMessageBody(
         <span className="file-message-icon">{t('chat.file')}</span>
         <span>
           <strong>{message.file.originalName}</strong>
-          <small>
-            {message.file.mimeType} · {formatFileSize(Number(message.file.sizeBytes))}
-          </small>
+          <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
           {downloadStatus ? (
             <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
               {downloadStatus === 'downloading' ? t('chat.downloading') : t('chat.downloadFailed')}
@@ -1165,3 +1310,4 @@ function renderHighlightedText(text: string, query: string): Array<string | JSX.
 
   return fragments;
 }
+

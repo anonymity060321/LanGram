@@ -72,8 +72,10 @@ export function LoginPage(): JSX.Element {
       setSession(result);
       navigate('/', { replace: true });
     } catch {
-      setError(t('auth.submitFailed'));
+      setPassword('');
+      setCaptchaAnswer('');
       await refreshCaptcha();
+      setError(t('auth.passwordLoginFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -94,7 +96,7 @@ export function LoginPage(): JSX.Element {
       setSession(result);
       navigate('/', { replace: true });
     } catch {
-      setError(t('auth.submitFailed'));
+      setError(t('auth.emailLoginFailed'));
     } finally {
       setIsSubmitting(false);
     }

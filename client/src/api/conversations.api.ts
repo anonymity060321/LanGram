@@ -23,6 +23,11 @@ export interface Conversation {
   type: ConversationType;
   peer: ConversationUser | null;
   members: ConversationUser[];
+  lastMessage: EncryptedMessage | null;
+  lastMessageAt: string | null;
+  unreadCount: number;
+  lastMessagePlaintext?: string | null;
+  lastMessageDecryptionFailed?: boolean;
   createdAt: string;
   updatedAt: string;
 }

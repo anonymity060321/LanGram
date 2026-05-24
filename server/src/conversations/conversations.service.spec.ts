@@ -25,6 +25,7 @@ interface MockPrisma {
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   messageDelivery: {
+    count: MockFunction<(args: unknown) => Promise<number>>;
     updateMany: MockFunction<(args: unknown) => Promise<unknown>>;
   };
 }
@@ -48,6 +49,7 @@ function createMockPrisma(): MockPrisma {
       findFirst: jest.fn(),
     },
     messageDelivery: {
+      count: jest.fn(),
       updateMany: jest.fn(),
     },
   } as unknown as MockPrisma;
@@ -123,6 +125,73 @@ function messageFixture(): unknown {
 }
 
 describe('ConversationsService', () => {
+  it('lists conversations with encrypted last message metadata and unread counts sorted by activity', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findMany.mockResolvedValue([
+      {
+        ...(conversationFixture() as Record<string, unknown>),
+        id: 'older-conversation',
+        updatedAt: new Date('2026-05-19T10:00:00.000Z'),
+      },
+      {
+        ...(conversationFixture() as Record<string, unknown>),
+        id: 'newer-conversation',
+        updatedAt: new Date('2026-05-19T09:00:00.000Z'),
+      },
+    ]);
+    prisma.message.findFirst
+      .mockResolvedValueOnce({
+        ...(messageFixture() as Record<string, unknown>),
+        id: 'older-message',
+        conversationId: 'older-conversation',
+        createdAt: new Date('2026-05-19T10:30:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        ...(messageFixture() as Record<string, unknown>),
+        id: 'newer-message',
+        conversationId: 'newer-conversation',
+        createdAt: new Date('2026-05-19T11:00:00.000Z'),
+      });
+    prisma.messageDelivery.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    const service = createService(prisma);
+
+    const result = await service.listConversations('user-b') as {
+      conversations: Array<{
+        id: string;
+        lastMessage: { id: string; ciphertext: string };
+        lastMessageAt: Date;
+        unreadCount: number;
+      }>;
+    };
+
+    expect(result.conversations.map((conversation) => conversation.id)).toEqual([
+      'newer-conversation',
+      'older-conversation',
+    ]);
+    expect(result.conversations[0]).toMatchObject({
+      lastMessage: {
+        id: 'newer-message',
+        ciphertext: 'encrypted-body',
+      },
+      lastMessageAt: new Date('2026-05-19T11:00:00.000Z'),
+      unreadCount: 0,
+    });
+    expect(result.conversations[1].unreadCount).toBe(2);
+    expect(JSON.stringify(result)).not.toContain('plaintext');
+    expect(prisma.messageDelivery.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          receiverId: 'user-b',
+          readAt: null,
+          message: expect.objectContaining({
+            senderId: { not: 'user-b' },
+            status: { not: MessageStatus.RECALLED },
+          }),
+        }),
+      }),
+    );
+  });
+
   it('creates a direct conversation only for friends', async () => {
     const prisma = createMockPrisma();
     prisma.friendship.findUnique.mockResolvedValue({ id: 'friendship-id' });
