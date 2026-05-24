@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   acceptFriendRequest,
+  clearFriendRequests,
   createFriendRequest,
   createPairingCode,
   deleteFriend,
@@ -164,6 +165,30 @@ export function FriendsPage(): JSX.Element {
     }
   }
 
+  async function handleClearRequests(): Promise<void> {
+    if (!window.confirm(t('friends.clearRequestsConfirm'))) {
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await clearFriendRequests();
+      setNotice(`${t('friends.clearRequestsSuccess')} ${result.deletedCount}`);
+      await refreshFriendsData();
+    } catch {
+      setError(t('friends.clearRequestsFailed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  const canClearRequests = useMemo(
+    () => [...incoming, ...outgoing].some((request) => request.status !== 'PENDING'),
+    [incoming, outgoing],
+  );
+
   return (
     <main className="friends-page">
       <section className="friends-shell">
@@ -220,8 +245,10 @@ export function FriendsPage(): JSX.Element {
             incoming={incoming}
             outgoing={outgoing}
             isBusy={isBusy}
+            canClearRequests={canClearRequests}
             t={t}
             onRespond={handleRespond}
+            onClearRequests={handleClearRequests}
           />
         ) : null}
       </section>
@@ -402,18 +429,34 @@ function FriendRequestsSection({
   incoming,
   outgoing,
   isBusy,
+  canClearRequests,
   t,
   onRespond,
+  onClearRequests,
 }: {
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
   isBusy: boolean;
+  canClearRequests: boolean;
   t: ReturnType<typeof useI18n>['t'];
   onRespond: (requestId: string, action: 'accept' | 'reject') => Promise<void>;
+  onClearRequests: () => Promise<void>;
 }): JSX.Element {
   return (
     <section className="friends-panel">
-      <h2>{t('friends.requestsTitle')}</h2>
+      <div className="friends-panel-header">
+        <h2>{t('friends.requestsTitle')}</h2>
+        {incoming.length > 0 || outgoing.length > 0 ? (
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            disabled={isBusy || !canClearRequests}
+            onClick={() => void onClearRequests()}
+          >
+            {t('friends.clearRequests')}
+          </button>
+        ) : null}
+      </div>
       {incoming.length === 0 && outgoing.length === 0 ? (
         <p className="empty-list">{t('friends.noRequests')}</p>
       ) : null}

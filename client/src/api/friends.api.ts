@@ -48,6 +48,10 @@ export function listFriendRequests(): Promise<{
   return apiRequest('/friends/requests');
 }
 
+export function clearFriendRequests(): Promise<{ deletedCount: number }> {
+  return apiRequest('/friends/requests', { method: 'DELETE' });
+}
+
 export function acceptFriendRequest(requestId: string): Promise<FriendRequest> {
   return apiRequest(`/friends/requests/${requestId}/accept`, { method: 'POST' });
 }

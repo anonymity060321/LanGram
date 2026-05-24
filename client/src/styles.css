@@ -630,6 +630,31 @@ button {
   font-size: 18px;
 }
 
+.friends-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.friends-panel-header h2 {
+  margin: 0;
+}
+
+.temporary-register-box {
+  display: grid;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.form-hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .pairing-code-box {
   margin-top: 14px;
   display: grid;
@@ -1455,6 +1480,7 @@ button {
 :root[data-theme='dark'] .message-row.is-own .message-bubble {
   border-color: #1d4ed8;
   background: #1e3a8a;
+  color: #f8fafc;
 }
 
 :root[data-theme='dark'] input,
@@ -1497,6 +1523,38 @@ button {
   color: #e5edf7;
 }
 
+:root[data-theme='dark'] .friend-row {
+  border-color: #334155;
+  background: #0f172a;
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .friend-row.is-selected {
+  border-color: #60a5fa;
+  background: #172554;
+}
+
+:root[data-theme='dark'] .friends-tabs {
+  background: #0f172a;
+}
+
+:root[data-theme='dark'] .friends-tabs button {
+  color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .friends-tabs button.is-active {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .friend-summary-name,
+:root[data-theme='dark'] .friends-panel h2,
+:root[data-theme='dark'] .friend-profile-card h2,
+:root[data-theme='dark'] .file-message-card strong,
+:root[data-theme='dark'] .image-message-card strong {
+  color: #f8fafc;
+}
+
 :root[data-theme='dark'] .app-nav-link:hover,
 :root[data-theme='dark'] .app-nav-link.is-active,
 :root[data-theme='dark'] .conversation-item:hover,
@@ -1517,8 +1575,26 @@ button {
 :root[data-theme='dark'] .conversation-item-header time,
 :root[data-theme='dark'] .file-message-card small,
 :root[data-theme='dark'] .image-message-card small,
-:root[data-theme='dark'] .friend-profile-card dt {
+:root[data-theme='dark'] .friend-profile-card dt,
+:root[data-theme='dark'] .friend-summary-meta,
+:root[data-theme='dark'] .friend-presence-line,
+:root[data-theme='dark'] .empty-list,
+:root[data-theme='dark'] .form-hint {
   color: #94a3b8;
+}
+
+:root[data-theme='dark'] .form-stack label > span,
+:root[data-theme='dark'] .settings-panel h1,
+:root[data-theme='dark'] .settings-page-title {
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .form-success {
+  color: #86efac;
+}
+
+:root[data-theme='dark'] .form-error {
+  color: #fca5a5;
 }
 
 :root[data-theme='dark'] .app-nav-menu-item.is-danger {

@@ -18,6 +18,7 @@ interface MockPrisma {
   friendRequest: {
     create: MockFunction<(args: unknown) => Promise<unknown>>;
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
+    deleteMany: MockFunction<(args: unknown) => Promise<{ count: number }>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   friendship: {
@@ -38,6 +39,7 @@ function createMockPrisma(): MockPrisma {
     friendRequest: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      deleteMany: jest.fn(),
       update: jest.fn(),
     },
     friendship: {
@@ -227,6 +229,22 @@ describe('FriendsService', () => {
     await expect(service.deleteFriend('user-a', 'friendship-id')).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+    expect(prisma.friendship.delete).not.toHaveBeenCalled();
+  });
+
+  it('clears only processed friend requests related to the current user', async () => {
+    const prisma = createMockPrisma();
+    prisma.friendRequest.deleteMany.mockResolvedValue({ count: 2 });
+    const service = createService(prisma);
+
+    await expect(service.clearRequestHistory('user-a')).resolves.toEqual({ deletedCount: 2 });
+
+    expect(prisma.friendRequest.deleteMany).toHaveBeenCalledWith({
+      where: {
+        status: { in: [FriendRequestStatus.ACCEPTED, FriendRequestStatus.REJECTED] },
+        OR: [{ requesterId: 'user-a' }, { addresseeId: 'user-a' }],
+      },
+    });
     expect(prisma.friendship.delete).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ import { LoginDto } from './dto/login.dto';
 import { PasswordLoginDto } from './dto/password-login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { EmailCodePurposeDto, SendEmailCodeDto } from './dto/send-email-code.dto';
+import { TemporaryRegisterDto } from './dto/temporary-register.dto';
 import { TextCaptchaResponseDto, type TextCaptchaType } from './dto/text-captcha.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
@@ -299,6 +300,32 @@ export class AuthService {
         passwordHash,
         displayName,
         accountType: 'EMAIL',
+      },
+    });
+
+    return this.issueSession(user, dto.device);
+  }
+
+  async registerTemporary(dto: TemporaryRegisterDto): Promise<AuthResult> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Temporary registration is disabled');
+    }
+
+    const email = dto.email.toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException('Email is already registered');
+    }
+
+    const passwordHash = await hashAuthSecret(dto.password);
+    const displayName = dto.displayName?.trim() || email.split('@')[0];
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        displayName,
+        accountType: 'EMAIL',
+        isTemporary: true,
       },
     });
 

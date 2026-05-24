@@ -265,6 +265,43 @@ describe('AuthService', () => {
     });
   });
 
+  it('registers a temporary email user without consuming an email code', async () => {
+    const prisma = createMockPrisma();
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({
+      id: 'temp-user-id',
+      email: 'temp@example.com',
+      displayName: 'Temp',
+      accountType: 'EMAIL',
+      isTemporary: true,
+    });
+    prisma.session.updateMany.mockResolvedValue({ count: 0 });
+    prisma.device.upsert.mockResolvedValue({ id: 'device-id' });
+    prisma.session.create.mockResolvedValue({ id: 'session-id' });
+    const { service } = createService(prisma);
+
+    const result = await service.registerTemporary({
+      email: 'TEMP@example.com',
+      password: 'password123',
+      displayName: 'Temp',
+      device: {
+        deviceIdentifier: 'device-123456',
+      },
+    });
+
+    expect(result.refreshToken).toMatch(/^session-id\./);
+    expect(prisma.emailVerificationCode.findFirst).not.toHaveBeenCalled();
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: {
+        email: 'temp@example.com',
+        passwordHash: expect.any(String),
+        displayName: 'Temp',
+        accountType: 'EMAIL',
+        isTemporary: true,
+      },
+    });
+  });
+
   it('rotates refresh token hashes without storing the plaintext token', async () => {
     const prisma = createMockPrisma();
     const refreshSecret = 'refresh-secret';

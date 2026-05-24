@@ -32,6 +32,11 @@ export class FriendsController {
     return this.friendsService.listRequests(request.user.id);
   }
 
+  @Delete('requests')
+  async clearRequests(@Req() request: AuthenticatedRequest): Promise<unknown> {
+    return this.friendsService.clearRequestHistory(request.user.id);
+  }
+
   @Post('requests/:id/accept')
   async acceptRequest(
     @Req() request: AuthenticatedRequest,

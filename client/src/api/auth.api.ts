@@ -58,6 +58,8 @@ export interface RegisterRequest {
   device: DeviceIdentity;
 }
 
+export type TemporaryRegisterRequest = Omit<RegisterRequest, 'code'>;
+
 export interface GuestLoginRequest {
   displayName?: string;
   device: DeviceIdentity;
@@ -99,6 +101,13 @@ export function loginWithEmailCode(request: EmailCodeLoginRequest): Promise<Auth
 
 export function register(request: RegisterRequest): Promise<AuthResult> {
   return apiRequest('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function registerTemporary(request: TemporaryRegisterRequest): Promise<AuthResult> {
+  return apiRequest('/auth/register/temporary', {
     method: 'POST',
     body: JSON.stringify(request),
   });

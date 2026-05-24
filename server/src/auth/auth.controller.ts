@@ -8,6 +8,7 @@ import { PasswordLoginDto } from './dto/password-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SendEmailCodeDto } from './dto/send-email-code.dto';
+import { TemporaryRegisterDto } from './dto/temporary-register.dto';
 import { TextCaptchaResponseDto } from './dto/text-captcha.dto';
 import { AccessTokenGuard } from './guards/access-token.guard';
 import { AuthenticatedUser } from '../common/current-user';
@@ -34,6 +35,11 @@ export class AuthController {
   @Post('register')
   async register(@Body() dto: RegisterDto): Promise<unknown> {
     return this.authService.register(dto);
+  }
+
+  @Post('register/temporary')
+  async registerTemporary(@Body() dto: TemporaryRegisterDto): Promise<unknown> {
+    return this.authService.registerTemporary(dto);
   }
 
   @Post('login/password')

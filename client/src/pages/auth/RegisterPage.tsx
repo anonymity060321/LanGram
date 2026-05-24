@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { register, sendEmailCode } from '../../api/auth.api';
+import { register, registerTemporary, sendEmailCode } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { getDeviceIdentity } from '../../utils/device';
@@ -48,6 +48,27 @@ export function RegisterPage(): JSX.Element {
     }
   }
 
+  async function handleTemporaryRegister(): Promise<void> {
+    if (!email || !password || !window.confirm(t('auth.temporaryRegisterConfirm'))) {
+      return;
+    }
+
+    setError(null);
+    try {
+      const device = await getDeviceIdentity();
+      const result = await registerTemporary({
+        email,
+        password,
+        displayName: displayName || undefined,
+        device,
+      });
+      setSession(result);
+      navigate('/', { replace: true });
+    } catch {
+      setError(t('auth.submitFailed'));
+    }
+  }
+
   return (
     <AuthShell title={t('auth.registerTitle')}>
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
@@ -80,6 +101,17 @@ export function RegisterPage(): JSX.Element {
         <button type="submit" className="primary-button">
           {t('auth.register')}
         </button>
+        <div className="temporary-register-box">
+          <p className="form-hint">{t('auth.temporaryRegisterHint')}</p>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!email || !password}
+            onClick={() => void handleTemporaryRegister()}
+          >
+            {t('auth.temporaryRegister')}
+          </button>
+        </div>
       </form>
     </AuthShell>
   );

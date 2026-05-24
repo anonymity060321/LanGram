@@ -185,6 +185,17 @@ export class FriendsService {
     return this.toFriendRequestDto(rejectedRequest);
   }
 
+  async clearRequestHistory(userId: string): Promise<{ deletedCount: number }> {
+    const result = await this.prisma.friendRequest.deleteMany({
+      where: {
+        status: { in: [FriendRequestStatus.ACCEPTED, FriendRequestStatus.REJECTED] },
+        OR: [{ requesterId: userId }, { addresseeId: userId }],
+      },
+    });
+
+    return { deletedCount: result.count };
+  }
+
   async listFriends(userId: string): Promise<{ friends: unknown[] }> {
     const friendships = await this.prisma.friendship.findMany({
       where: {
