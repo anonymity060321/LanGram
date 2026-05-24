@@ -146,6 +146,12 @@ function decodeSvgDataUrl(dataUrl: string): string {
   return Buffer.from(dataUrl.slice(prefix.length), 'base64').toString('utf8');
 }
 
+function expectCaptchaSvgInterference(svg: string): void {
+  expect(svg).toContain('<line ');
+  expect(svg).toContain('class="captcha-noise"');
+  expect(svg).toContain('<circle ');
+}
+
 async function expectPasswordLoginAcceptsCaptchaAnswer(
   captchaAnswer: string,
   submittedAnswer = captchaAnswer,
@@ -316,7 +322,7 @@ describe('AuthService', () => {
       answer: '14',
       imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
-    expect(decodeSvgDataUrl(captcha.imageDataUrl)).toContain('<line ');
+    expectCaptchaSvgInterference(decodeSvgDataUrl(captcha.imageDataUrl));
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 
@@ -326,6 +332,7 @@ describe('AuthService', () => {
     expect(captcha.prompt).toBe('13 - 5 = ?');
     expect(captcha.captchaType).toBe('ARITHMETIC');
     expect(Number(captcha.answer)).toBeGreaterThanOrEqual(0);
+    expectCaptchaSvgInterference(decodeSvgDataUrl(captcha.imageDataUrl));
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 
@@ -338,6 +345,7 @@ describe('AuthService', () => {
       answer: '28',
       imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
+    expectCaptchaSvgInterference(decodeSvgDataUrl(captcha.imageDataUrl));
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 
@@ -351,6 +359,7 @@ describe('AuthService', () => {
       imageDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/),
     });
     expect(24 % 6).toBe(0);
+    expectCaptchaSvgInterference(decodeSvgDataUrl(captcha.imageDataUrl));
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 
@@ -366,7 +375,7 @@ describe('AuthService', () => {
     expect(captcha.prompt).toBe('Enter the characters shown in the image');
     expect(captcha.prompt).not.toContain(captcha.answer);
     expect(captcha.imageDataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
-    expect(decodeSvgDataUrl(captcha.imageDataUrl)).toContain('<line ');
+    expectCaptchaSvgInterference(decodeSvgDataUrl(captcha.imageDataUrl));
     await expectPasswordLoginAcceptsCaptchaAnswer(captcha.answer);
   });
 

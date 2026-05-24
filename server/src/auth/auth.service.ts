@@ -167,6 +167,7 @@ function createCaptchaSvg(text: string): string {
   const width = Math.max(150, characters.length * 24 + 24);
   const height = 52;
   const lines = createCaptchaNoiseLines(text, width, height);
+  const noise = createCaptchaNoiseDots(text, width, height);
   const renderedText = characters
     .map((character, index) => {
       const x = 14 + index * 22;
@@ -179,12 +180,28 @@ function createCaptchaSvg(text: string): string {
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="captcha">`,
     '<rect width="100%" height="100%" rx="8" fill="#f8fafc"/>',
+    noise,
     lines,
     '<g fill="#172033" font-family="Arial, sans-serif" font-size="24" font-weight="700">',
     renderedText,
     '</g>',
     '</svg>',
   ].join('');
+}
+
+function createCaptchaNoiseDots(seed: string, width: number, height: number): string {
+  const dotCount = 25 + (seed.length % 36);
+  const dots = Array.from({ length: dotCount }, (_, index) => {
+    const code = seed.charCodeAt(index % seed.length);
+    const x = (code * (index + 5) + index * 13) % width;
+    const y = (code * (index + 7) + index * 17) % height;
+    const radius = 0.7 + ((code + index) % 4) * 0.25;
+    const opacity = 0.25 + ((code + index * 3) % 4) * 0.08;
+    const fill = index % 2 === 0 ? '#94a3b8' : '#cbd5e1';
+    return `<circle cx="${x}" cy="${y}" r="${radius.toFixed(2)}" fill="${fill}" opacity="${opacity.toFixed(2)}"/>`;
+  }).join('');
+
+  return `<g class="captcha-noise">${dots}</g>`;
 }
 
 function createCaptchaNoiseLines(seed: string, width: number, height: number): string {
