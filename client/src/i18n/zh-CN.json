@@ -132,6 +132,7 @@
   "friends.deleteFailed": "删除好友失败。",
   "settings.title": "设置",
   "settings.serverUrl": "服务器 API 地址",
+  "settings.saveServerUrl": "保存地址",
   "settings.theme": "主题",
   "settings.language": "语言",
   "settings.deviceId": "设备 ID",

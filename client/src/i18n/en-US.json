@@ -132,6 +132,7 @@
   "friends.deleteFailed": "Failed to delete friend.",
   "settings.title": "Settings",
   "settings.serverUrl": "Server API URL",
+  "settings.saveServerUrl": "Save API URL",
   "settings.theme": "Theme",
   "settings.language": "Language",
   "settings.deviceId": "Device ID",

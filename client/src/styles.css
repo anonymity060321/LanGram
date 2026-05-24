@@ -274,7 +274,7 @@ button {
   height: 100vh;
   min-height: 0;
   display: grid;
-  grid-template-columns: 74px minmax(220px, 286px) minmax(520px, 1fr) minmax(190px, 240px);
+  grid-template-columns: 74px minmax(220px, 276px) minmax(500px, 1fr) minmax(220px, 270px);
   overflow: hidden;
   background: #eef3f8;
 }
@@ -553,6 +553,21 @@ button {
 
 .settings-title h1 {
   margin: 0;
+}
+
+.settings-title .app-logo {
+  font-size: 17px;
+}
+
+.settings-page-title {
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.settings-inline-save {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .friends-grid {
@@ -1449,13 +1464,36 @@ button {
   color: #e5edf7;
 }
 
+:root[data-theme='dark'] input::placeholder {
+  color: #94a3b8;
+}
+
+:root[data-theme='dark'] a {
+  color: #93c5fd;
+}
+
+:root[data-theme='dark'] .secondary-button {
+  border-color: #3b82f6;
+  background: #172554;
+  color: #dbeafe;
+}
+
+:root[data-theme='dark'] .danger-button {
+  border-color: #7f1d1d;
+  background: #450a0a;
+  color: #fecaca;
+}
+
 :root[data-theme='dark'] .app-logo,
 :root[data-theme='dark'] .app-nav-link,
 :root[data-theme='dark'] .conversation-item,
 :root[data-theme='dark'] .friend-start-button,
 :root[data-theme='dark'] .app-nav-menu-item,
 :root[data-theme='dark'] .message-context-menu button,
-:root[data-theme='dark'] .friend-profile-card dd {
+:root[data-theme='dark'] .friend-profile-card dd,
+:root[data-theme='dark'] .file-message-card strong,
+:root[data-theme='dark'] .image-message-card strong,
+:root[data-theme='dark'] .message-row.is-own .message-bubble p {
   color: #e5edf7;
 }
 
@@ -1478,10 +1516,22 @@ button {
 :root[data-theme='dark'] .chat-header span,
 :root[data-theme='dark'] .conversation-item-header time,
 :root[data-theme='dark'] .file-message-card small,
+:root[data-theme='dark'] .image-message-card small,
 :root[data-theme='dark'] .friend-profile-card dt {
   color: #94a3b8;
 }
 
 :root[data-theme='dark'] .app-nav-menu-item.is-danger {
   color: #fca5a5;
+}
+
+:root[data-theme='dark'] .image-preview-placeholder {
+  border-color: #475569;
+  background: #0f172a;
+  color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .message-highlight {
+  background: #92400e;
+  color: #fef3c7;
 }

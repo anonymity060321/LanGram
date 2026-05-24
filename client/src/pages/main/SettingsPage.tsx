@@ -72,13 +72,19 @@ export function SettingsPage(): JSX.Element {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    await updateConfig({ serverUrl, theme, language });
+    await updateConfig({ serverUrl });
     setSaved(true);
   }
 
   async function handleThemeChange(nextTheme: ThemePreference): Promise<void> {
     setTheme(nextTheme);
     await updateConfig({ theme: nextTheme });
+    setSaved(false);
+  }
+
+  async function handleLanguageChange(nextLanguage: LanguagePreference): Promise<void> {
+    setLanguage(nextLanguage);
+    await updateConfig({ language: nextLanguage });
     setSaved(false);
   }
 
@@ -143,14 +149,25 @@ export function SettingsPage(): JSX.Element {
         <div className="settings-header">
           <div className="settings-title">
             <AppLogo label={t('app.name')} size="sm" />
-            <h1>{t('settings.title')}</h1>
+            <h1 className="settings-page-title">{t('settings.title')}</h1>
           </div>
           <Link to="/">{t('common.back')}</Link>
         </div>
         <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
           <label>
             <span>{t('settings.serverUrl')}</span>
-            <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} />
+            <span className="settings-inline-save">
+              <input
+                value={serverUrl}
+                onChange={(event) => {
+                  setServerUrl(event.target.value);
+                  setSaved(false);
+                }}
+              />
+              <button type="submit" className="secondary-button compact-button">
+                {t('settings.saveServerUrl')}
+              </button>
+            </span>
           </label>
           <label>
             <span>{t('settings.theme')}</span>
@@ -167,7 +184,7 @@ export function SettingsPage(): JSX.Element {
             <span>{t('settings.language')}</span>
             <select
               value={language}
-              onChange={(event) => setLanguage(event.target.value as LanguagePreference)}
+              onChange={(event) => void handleLanguageChange(event.target.value as LanguagePreference)}
             >
               <option value="system">{t('language.system')}</option>
               <option value="zh-CN">{t('language.zh-CN')}</option>
@@ -178,9 +195,6 @@ export function SettingsPage(): JSX.Element {
             <span>{t('settings.deviceId')}</span>
             <input value={config?.deviceId ?? ''} readOnly />
           </label>
-          <button type="submit" className="primary-button">
-            {t('settings.save')}
-          </button>
           {saved ? <p className="form-success">{t('settings.saved')}</p> : null}
         </form>
         <section className="profile-editor">
