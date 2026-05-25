@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum } from 'class-validator';
+import { IsEmail, IsEnum, MaxLength } from 'class-validator';
 
 export enum EmailCodePurposeDto {
   REGISTER = 'REGISTER',
@@ -7,6 +7,7 @@ export enum EmailCodePurposeDto {
 
 export class SendEmailCodeDto {
   @IsEmail()
+  @MaxLength(254)
   email!: string;
 
   @IsEnum(EmailCodePurposeDto)

@@ -6,6 +6,8 @@ import { useAuthStore } from '../../stores/auth.store';
 import { getDeviceIdentity } from '../../utils/device';
 import { AuthShell } from './AuthShell';
 
+const DISPLAY_NAME_MAX_LENGTH = 80;
+
 export function GuestLoginPage(): JSX.Element {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -37,7 +39,11 @@ export function GuestLoginPage(): JSX.Element {
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
         <label>
           <span>{t('auth.displayName')}</span>
-          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <input
+            value={displayName}
+            maxLength={DISPLAY_NAME_MAX_LENGTH}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
         </label>
         {error ? <p className="form-error">{error}</p> : null}
         <button type="submit" className="primary-button">

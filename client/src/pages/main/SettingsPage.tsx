@@ -148,7 +148,7 @@ export function SettingsPage(): JSX.Element {
         <div className="settings-header">
           <div className="settings-title">
             <span className="settings-brand">
-              <img src="/logo.svg" alt="" aria-hidden="true" />
+              <img src="/logo/logo.svg" alt="" aria-hidden="true" />
               <span className="settings-brand-name">{t('app.name')}</span>
             </span>
             <h1 className="settings-page-title">{t('settings.title')}</h1>

@@ -67,13 +67,13 @@ export function MainLayout(): JSX.Element {
   const setSearchQuery = useChatStore((state) => state.setSearchQuery);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
+  const [messageLimitNotice, setMessageLimitNotice] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<FileUploadState>({
     isUploading: false,
     notice: null,
     error: null,
   });
   const [sendOriginalImage, setSendOriginalImage] = useState(false);
-  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const [isImageOptionsOpen, setIsImageOptionsOpen] = useState(false);
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
@@ -86,6 +86,7 @@ export function MainLayout(): JSX.Element {
   const appMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const isMessageComposingRef = useRef(false);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const profileUser = selectedConversation?.peer ?? user ?? null;
@@ -160,6 +161,15 @@ export function MainLayout(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isAppMenuOpen]);
+
+  useEffect(() => {
+    if (!messageLimitNotice) {
+      return undefined;
+    }
+
+    const timerId = window.setTimeout(() => setMessageLimitNotice(null), 1800);
+    return () => window.clearTimeout(timerId);
+  }, [messageLimitNotice]);
 
   useEffect(() => {
     if (!conversationContextMenu) {
@@ -321,13 +331,39 @@ export function MainLayout(): JSX.Element {
 
   async function handleSend(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    await submitMessageDraft();
+  }
+
+  async function submitMessageDraft(): Promise<void> {
     if (!user || !selectedConversationId || !messageDraft.trim()) {
       return;
     }
 
     const plaintext = messageDraft.trim();
     setMessageDraft('');
+    setMessageLimitNotice(null);
     await sendTextMessage(selectedConversationId, plaintext, user.id);
+  }
+
+  function handleMessageDraftChange(value: string): void {
+    const wasBelowLimit = messageDraft.length < MESSAGE_DRAFT_MAX_LENGTH;
+    setMessageDraft(value);
+    if (wasBelowLimit && value.length >= MESSAGE_DRAFT_MAX_LENGTH) {
+      setMessageLimitNotice(t('chat.messageLengthLimitReached'));
+    }
+  }
+
+  function handleMessageDraftKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key !== 'Enter' || event.shiftKey) {
+      return;
+    }
+
+    if (event.nativeEvent.isComposing || isMessageComposingRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    void submitMessageDraft();
   }
 
   async function handleFileSelected(
@@ -336,7 +372,6 @@ export function MainLayout(): JSX.Element {
   ): Promise<void> {
     const file = event.target.files?.[0] ?? null;
     event.target.value = '';
-    setIsAttachmentMenuOpen(false);
 
     if (!user || !selectedConversationId || !file) {
       return;
@@ -396,7 +431,6 @@ export function MainLayout(): JSX.Element {
   }
 
   function handleOpenImageOptions(): void {
-    setIsAttachmentMenuOpen(false);
     setSendOriginalImage(false);
     setIsImageOptionsOpen(true);
   }
@@ -867,36 +901,35 @@ export function MainLayout(): JSX.Element {
                 {uploadState.notice ? <small>{uploadState.notice}</small> : null}
               </div>
             ) : null}
+            {messageLimitNotice ? (
+              <div className="message-limit-notice" role="status">
+                {messageLimitNotice}
+              </div>
+            ) : null}
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
-              <div className="attachment-menu-wrap">
+              <div className="message-input-toolbar" aria-label={t('chat.attachments')}>
                 <button
                   type="button"
-                  className="attachment-toggle"
-                  aria-label={t('chat.attachments')}
-                  aria-expanded={isAttachmentMenuOpen}
+                  className="composer-tool-button"
+                  aria-label={t('chat.sendFile')}
+                  title={t('chat.sendFile')}
                   disabled={uploadState.isUploading}
-                  onClick={() => setIsAttachmentMenuOpen((isOpen) => !isOpen)}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  +
+                  <img src="/vector_icon/folder-closed.svg" alt="" aria-hidden="true" />
+                  <span>{t('chat.sendFile')}</span>
                 </button>
-                {isAttachmentMenuOpen ? (
-                  <div className="attachment-menu">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadState.isUploading}
-                    >
-                      {t('chat.sendFile')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenImageOptions}
-                      disabled={uploadState.isUploading}
-                    >
-                      {t('chat.sendImage')}
-                    </button>
-                  </div>
-                ) : null}
+                <button
+                  type="button"
+                  className="composer-tool-button"
+                  aria-label={t('chat.sendImage')}
+                  title={t('chat.sendImage')}
+                  onClick={handleOpenImageOptions}
+                  disabled={uploadState.isUploading}
+                >
+                  <img src="/vector_icon/file-image.svg" alt="" aria-hidden="true" />
+                  <span>{t('chat.sendImage')}</span>
+                </button>
                 {isImageOptionsOpen ? (
                   <div
                     className="image-options-backdrop"
@@ -954,14 +987,29 @@ export function MainLayout(): JSX.Element {
                   accept={IMAGE_UPLOAD_ACCEPT}
                 />
               </div>
-              <input
-                value={messageDraft}
-                onChange={(event) => setMessageDraft(event.target.value)}
-                placeholder={t('chat.messagePlaceholder')}
-              />
-              <button type="submit" className="primary-button" disabled={!messageDraft.trim()}>
-                {t('chat.send')}
-              </button>
+              <div className="message-editor">
+                <textarea
+                  value={messageDraft}
+                  onChange={(event) => handleMessageDraftChange(event.target.value)}
+                  onCompositionStart={() => {
+                    isMessageComposingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    isMessageComposingRef.current = false;
+                  }}
+                  onKeyDown={handleMessageDraftKeyDown}
+                  placeholder={t('chat.messagePlaceholder')}
+                  rows={3}
+                  maxLength={MESSAGE_DRAFT_MAX_LENGTH}
+                />
+                <button
+                  type="submit"
+                  className="primary-button message-send-button"
+                  disabled={!messageDraft.trim()}
+                >
+                  {t('chat.send')}
+                </button>
+              </div>
             </form>
           </>
         ) : (
@@ -2089,6 +2137,7 @@ type FileBadge = {
 };
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
+const MESSAGE_DRAFT_MAX_LENGTH = 5000;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_UPLOAD_MIME_TYPES = new Set([
   'application/pdf',
@@ -2102,11 +2151,11 @@ const FILE_UPLOAD_MIME_TYPES = new Set([
 const IMAGE_UPLOAD_ACCEPT = Array.from(IMAGE_UPLOAD_MIME_TYPES).join(',');
 const FILE_UPLOAD_ACCEPT = Array.from(FILE_UPLOAD_MIME_TYPES).join(',');
 const FILE_ICON_SOURCES: Record<FileBadgeKind, string | null> = {
-  word: '/microsoft_word_macos_bigsur_icon_189948.png',
-  sheet: '/microsoft_excel_macos_bigsur_icon_189980.png',
-  slide: '/microsoft_powerpoint_macos_bigsur_icon_189966.png',
+  word: '/file_icon/microsoft_word_macos_bigsur_icon_189948.png',
+  sheet: '/file_icon/microsoft_excel_macos_bigsur_icon_189980.png',
+  slide: '/file_icon/microsoft_powerpoint_macos_bigsur_icon_189966.png',
   pdf: null,
-  text: '/txt_filetype_icon_177515.png',
+  text: '/file_icon/txt_filetype_icon_177515.png',
   archive: null,
   image: null,
   generic: null,

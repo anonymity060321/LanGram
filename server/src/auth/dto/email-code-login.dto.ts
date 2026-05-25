@@ -4,6 +4,7 @@ import { DeviceDto } from './device.dto';
 
 export class EmailCodeLoginDto {
   @IsEmail()
+  @MaxLength(254)
   email!: string;
 
   @IsString()

@@ -13,6 +13,7 @@ import { DeviceDto } from './device.dto';
 export class PasswordLoginDto {
   @IsOptional()
   @IsEmail()
+  @MaxLength(254)
   email?: string;
 
   @IsOptional()

@@ -1218,7 +1218,8 @@ button {
 }
 
 .message-context-menu,
-.conversation-context-menu {
+.conversation-context-menu,
+.input-context-menu {
   position: fixed;
   z-index: 20;
   width: 168px;
@@ -1235,8 +1236,14 @@ button {
   width: 190px;
 }
 
+.input-context-menu {
+  z-index: 70;
+  width: 156px;
+}
+
 .message-context-menu button,
-.conversation-context-menu button {
+.conversation-context-menu button,
+.input-context-menu button {
   min-height: 34px;
   border: 0;
   border-radius: 6px;
@@ -1247,7 +1254,8 @@ button {
 }
 
 .message-context-menu button:hover,
-.conversation-context-menu button:hover {
+.conversation-context-menu button:hover,
+.input-context-menu button:hover {
   background: #f1f5f9;
 }
 
@@ -1257,7 +1265,8 @@ button {
 }
 
 .message-context-menu button:disabled,
-.conversation-context-menu button:disabled {
+.conversation-context-menu button:disabled,
+.input-context-menu button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1761,68 +1770,89 @@ button {
 
 .message-input {
   position: relative;
-  min-height: 67px;
+  min-height: 151px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 12px 18px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
   border-top: 1px solid #d6deea;
   background: #ffffff;
 }
 
-.message-input input[type='text'],
-.message-input > input:not([type]) {
-  min-height: 42px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 9px 11px;
-}
-
-.attachment-menu-wrap {
-  position: relative;
-  display: grid;
+.message-input-toolbar {
+  min-height: 38px;
+  display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 7px 18px 6px;
+  border-bottom: 1px solid #eef2f7;
 }
 
-.attachment-toggle {
-  width: 42px;
-  min-height: 42px;
-  border: 1px solid #bfdbfe;
+.composer-tool-button {
+  min-width: 34px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
   border-radius: 8px;
+  background: transparent;
+  color: #475569;
+  padding: 0 7px;
+  font-size: 13px;
+}
+
+.composer-tool-button img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.composer-tool-button span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.composer-tool-button:hover:not(:disabled) {
+  border-color: #bfdbfe;
   background: #eef4ff;
   color: #1d4ed8;
+}
+
+.message-editor {
+  position: relative;
+  min-height: 112px;
   padding: 0;
-  font-size: 24px;
-  font-weight: 700;
 }
 
-.attachment-menu {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: 5;
-  width: 190px;
-  display: grid;
-  gap: 4px;
-  border: 1px solid #d6deea;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
-  padding: 8px;
-}
-
-.attachment-menu button {
-  min-height: 36px;
+.message-editor textarea {
+  width: 100%;
+  min-height: 112px;
+  max-height: 140px;
   border: 0;
-  border-radius: 6px;
   background: transparent;
   color: #172033;
-  padding: 0 9px;
-  text-align: left;
+  padding: 10px 112px 38px 18px;
+  overflow-y: auto;
+  resize: none;
+  line-height: 20px;
+  font: inherit;
 }
 
-.attachment-menu button:hover {
-  background: #f1f5f9;
+.message-editor textarea:focus {
+  outline: 0;
+}
+
+.message-send-button {
+  position: absolute;
+  right: 18px;
+  bottom: 12px;
+  min-height: 32px;
+  padding: 0 16px;
 }
 
 .hidden-file-input {
@@ -1900,6 +1930,14 @@ button {
 .file-upload-status.is-error {
   background: #fff1f2;
   color: #b42318;
+}
+
+.message-limit-notice {
+  border-top: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  padding: 8px 18px;
+  font-size: 13px;
 }
 
 .chat-error {
@@ -2077,7 +2115,7 @@ button {
 .secondary-button,
 .danger-button,
 .compact-button,
-.attachment-toggle,
+.composer-tool-button,
 .jump-to-bottom-button,
 .conversation-item,
 .friend-start-button,
@@ -2087,7 +2125,7 @@ button {
 .settings-select-option,
 .message-context-menu button,
 .conversation-context-menu button,
-.attachment-menu button,
+.input-context-menu button,
 .app-nav-link,
 .app-nav-menu-item {
   transition:
@@ -2100,7 +2138,7 @@ button {
 
 .primary-button:hover:not(:disabled),
 .secondary-button:hover:not(:disabled),
-.attachment-toggle:hover:not(:disabled),
+.composer-tool-button:hover:not(:disabled),
 .jump-to-bottom-button:hover,
 .conversation-item:hover,
 .friend-start-button:hover,
@@ -2116,8 +2154,8 @@ button {
 .friend-start-button:focus-visible,
 .friend-row-button:focus-visible,
 .app-nav-link:focus-visible,
-.attachment-toggle:focus-visible,
-.message-input input:focus-visible,
+.composer-tool-button:focus-visible,
+.message-editor textarea:focus-visible,
 .form-stack input:focus-visible,
 .chat-search-bar input:focus-visible,
 .settings-select-button:focus-visible {
@@ -2193,8 +2231,8 @@ button {
 
 .message-context-menu,
 .conversation-context-menu,
+.input-context-menu,
 .app-nav-popover,
-.attachment-menu,
 .image-options-panel,
 .settings-select-menu {
   border-color: var(--border-soft);
@@ -2218,6 +2256,7 @@ button {
 }
 
 .file-upload-status,
+.message-limit-notice,
 .chat-error {
   border-radius: var(--radius-md);
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.12);
@@ -2323,16 +2362,8 @@ button {
     flex-direction: column;
   }
 
-  .message-input {
-    grid-template-columns: 1fr;
-  }
-
-  .attachment-toggle {
-    width: 100%;
-  }
-
-  .attachment-menu {
-    width: 100%;
+  .message-input-toolbar {
+    flex-wrap: wrap;
   }
 
   .image-lightbox-backdrop {
@@ -2412,10 +2443,10 @@ button {
 
 :root[data-theme='dark'] .chat-search-bar,
 :root[data-theme='dark'] .message-bubble,
-:root[data-theme='dark'] .attachment-menu,
 :root[data-theme='dark'] .captcha-box,
 :root[data-theme='dark'] .pairing-code-box,
-:root[data-theme='dark'] .message-context-menu {
+:root[data-theme='dark'] .message-context-menu,
+:root[data-theme='dark'] .input-context-menu {
   border-color: #334155;
   background: #1e293b;
   color: #e5edf7;
@@ -2551,6 +2582,7 @@ button {
 :root[data-theme='dark'] .app-nav-menu-item,
 :root[data-theme='dark'] .message-context-menu button,
 :root[data-theme='dark'] .conversation-context-menu button,
+:root[data-theme='dark'] .input-context-menu button,
 :root[data-theme='dark'] .friend-profile-card dd,
 :root[data-theme='dark'] .file-message-card strong,
 :root[data-theme='dark'] .image-message-card strong,
@@ -2681,20 +2713,23 @@ button {
 }
 
 :root[data-theme='dark'] .message-context-menu,
-:root[data-theme='dark'] .conversation-context-menu {
+:root[data-theme='dark'] .conversation-context-menu,
+:root[data-theme='dark'] .input-context-menu {
   border-color: #475569;
   background: #111827;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.42);
 }
 
 :root[data-theme='dark'] .message-context-menu button,
-:root[data-theme='dark'] .conversation-context-menu button {
+:root[data-theme='dark'] .conversation-context-menu button,
+:root[data-theme='dark'] .input-context-menu button {
   color: #e5edf7;
   opacity: 1;
 }
 
 :root[data-theme='dark'] .message-context-menu button:hover:not(:disabled),
-:root[data-theme='dark'] .conversation-context-menu button:hover:not(:disabled) {
+:root[data-theme='dark'] .conversation-context-menu button:hover:not(:disabled),
+:root[data-theme='dark'] .input-context-menu button:hover:not(:disabled) {
   background: #334155;
   color: #f8fafc;
 }
@@ -2711,7 +2746,8 @@ button {
 }
 
 :root[data-theme='dark'] .message-context-menu button:disabled,
-:root[data-theme='dark'] .conversation-context-menu button:disabled {
+:root[data-theme='dark'] .conversation-context-menu button:disabled,
+:root[data-theme='dark'] .input-context-menu button:disabled {
   color: #64748b;
   opacity: 1;
 }
@@ -2872,37 +2908,28 @@ button {
   color: #e5edf7;
 }
 
-:root[data-theme='dark'] .attachment-toggle {
-  border-color: #60a5fa;
-  background: #172554;
-  color: #dbeafe;
-}
-
 :root[data-theme='dark'] .message-input {
   border-top-color: #334155;
   background: #111827;
 }
 
-:root[data-theme='dark'] .message-input input[type='text'],
-:root[data-theme='dark'] .message-input > input:not([type]) {
-  border-color: #334155;
-  background: #0f172a;
-  color: #e5edf7;
+:root[data-theme='dark'] .message-input-toolbar {
+  border-bottom-color: #1e293b;
 }
 
-:root[data-theme='dark'] .message-input input[type='text']:focus,
-:root[data-theme='dark'] .message-input > input:not([type]):focus {
+:root[data-theme='dark'] .composer-tool-button {
+  color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .composer-tool-button:hover:not(:disabled) {
   border-color: #60a5fa;
-  outline: 2px solid rgba(96, 165, 250, 0.18);
-  outline-offset: 0;
+  background: #172554;
+  color: #dbeafe;
 }
 
-:root[data-theme='dark'] .attachment-menu button {
+:root[data-theme='dark'] .message-editor textarea {
+  background: transparent;
   color: #e5edf7;
-}
-
-:root[data-theme='dark'] .attachment-menu button:hover {
-  background: #334155;
 }
 
 :root[data-theme='dark'] .original-image-toggle {
@@ -2936,6 +2963,12 @@ button {
 :root[data-theme='dark'] .file-upload-status.is-error {
   background: #450a0a;
   color: #fca5a5;
+}
+
+:root[data-theme='dark'] .message-limit-notice {
+  border-color: #713f12;
+  background: #422006;
+  color: #fde68a;
 }
 
 :root[data-theme='dark'] .image-preview-placeholder {
@@ -2990,7 +3023,7 @@ button {
 
   .primary-button:hover:not(:disabled),
   .secondary-button:hover:not(:disabled),
-  .attachment-toggle:hover:not(:disabled),
+  .composer-tool-button:hover:not(:disabled),
   .jump-to-bottom-button:hover,
   .conversation-item:hover,
   .friend-start-button:hover,

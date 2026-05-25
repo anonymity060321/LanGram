@@ -11,6 +11,7 @@ import { DeviceDto } from './device.dto';
 
 export class TemporaryRegisterDto {
   @IsEmail()
+  @MaxLength(254)
   email!: string;
 
   @IsString()

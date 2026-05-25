@@ -16,6 +16,11 @@ import { AuthShell } from './AuthShell';
 
 type LoginMode = 'password' | 'emailCode' | 'forgotPassword';
 
+const EMAIL_MAX_LENGTH = 254;
+const PASSWORD_MAX_LENGTH = 128;
+const EMAIL_CODE_MAX_LENGTH = 6;
+const CAPTCHA_ANSWER_MAX_LENGTH = 32;
+
 export function LoginPage(): JSX.Element {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -220,6 +225,7 @@ export function LoginPage(): JSX.Element {
             <input
               value={identifier}
               autoComplete="username"
+              maxLength={EMAIL_MAX_LENGTH}
               onChange={(event) => setIdentifier(event.target.value)}
             />
           </label>
@@ -229,6 +235,7 @@ export function LoginPage(): JSX.Element {
               type="password"
               value={password}
               autoComplete="current-password"
+              maxLength={PASSWORD_MAX_LENGTH}
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
@@ -252,6 +259,7 @@ export function LoginPage(): JSX.Element {
             <input
               value={captchaAnswer}
               inputMode={captcha?.captchaType === 'TEXT' ? 'text' : 'numeric'}
+              maxLength={CAPTCHA_ANSWER_MAX_LENGTH}
               onChange={(event) => setCaptchaAnswer(event.target.value)}
             />
           </label>
@@ -280,6 +288,7 @@ export function LoginPage(): JSX.Element {
               type="email"
               value={emailCodeEmail}
               autoComplete="email"
+              maxLength={EMAIL_MAX_LENGTH}
               onChange={(event) => setEmailCodeEmail(event.target.value)}
             />
           </label>
@@ -290,7 +299,7 @@ export function LoginPage(): JSX.Element {
                 value={emailCode}
                 autoComplete="one-time-code"
                 onChange={(event) => setEmailCode(event.target.value)}
-                maxLength={6}
+                maxLength={EMAIL_CODE_MAX_LENGTH}
               />
               <button
                 type="button"
@@ -319,6 +328,7 @@ export function LoginPage(): JSX.Element {
               type="email"
               value={resetEmail}
               autoComplete="email"
+              maxLength={EMAIL_MAX_LENGTH}
               onChange={(event) => setResetEmail(event.target.value)}
             />
           </label>
@@ -329,7 +339,7 @@ export function LoginPage(): JSX.Element {
                 value={resetCode}
                 autoComplete="one-time-code"
                 onChange={(event) => setResetCode(event.target.value)}
-                maxLength={6}
+                maxLength={EMAIL_CODE_MAX_LENGTH}
               />
               <button
                 type="button"
@@ -347,6 +357,7 @@ export function LoginPage(): JSX.Element {
               type="password"
               value={resetPasswordValue}
               autoComplete="new-password"
+              maxLength={PASSWORD_MAX_LENGTH}
               onChange={(event) => setResetPasswordValue(event.target.value)}
             />
           </label>
@@ -356,6 +367,7 @@ export function LoginPage(): JSX.Element {
               type="password"
               value={resetPasswordConfirm}
               autoComplete="new-password"
+              maxLength={PASSWORD_MAX_LENGTH}
               onChange={(event) => setResetPasswordConfirm(event.target.value)}
             />
           </label>

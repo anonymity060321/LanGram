@@ -6,6 +6,11 @@ import { useAuthStore } from '../../stores/auth.store';
 import { getDeviceIdentity } from '../../utils/device';
 import { AuthShell } from './AuthShell';
 
+const EMAIL_MAX_LENGTH = 254;
+const PASSWORD_MAX_LENGTH = 128;
+const EMAIL_CODE_MAX_LENGTH = 6;
+const DISPLAY_NAME_MAX_LENGTH = 80;
+
 export function RegisterPage(): JSX.Element {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -78,24 +83,38 @@ export function RegisterPage(): JSX.Element {
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
         <label>
           <span>{t('auth.email')}</span>
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <input
+            type="email"
+            value={email}
+            maxLength={EMAIL_MAX_LENGTH}
+            onChange={(event) => setEmail(event.target.value)}
+          />
         </label>
         <label>
           <span>{t('auth.displayName')}</span>
-          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <input
+            value={displayName}
+            maxLength={DISPLAY_NAME_MAX_LENGTH}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
         </label>
         <label>
           <span>{t('auth.password')}</span>
           <input
             type="password"
             value={password}
+            maxLength={PASSWORD_MAX_LENGTH}
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
         <label>
           <span>{t('auth.code')}</span>
           <div className="inline-control">
-            <input value={code} onChange={(event) => setCode(event.target.value)} maxLength={6} />
+            <input
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              maxLength={EMAIL_CODE_MAX_LENGTH}
+            />
             <button type="button" className="secondary-button" onClick={() => void handleSendCode()}>
               {t('auth.sendCode')}
             </button>
