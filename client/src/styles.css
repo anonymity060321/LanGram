@@ -562,23 +562,144 @@ button {
   gap: 12px;
 }
 
-.settings-title h1 {
-  margin: 0;
+.settings-panel .settings-brand {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #172033;
+  line-height: 1.15;
 }
 
-.settings-title .app-logo {
-  font-size: 17px;
+.settings-panel .settings-brand img {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: block;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
-.settings-page-title {
+.settings-panel .settings-brand-name {
+  min-width: 0;
+  overflow: hidden;
   font-size: 22px;
-  line-height: 1.2;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-panel .settings-page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
 }
 
 .settings-inline-save {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.settings-select-control {
+  position: relative;
+  width: 100%;
+}
+
+.settings-select-button {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #172033;
+  padding: 9px 14px 9px 12px;
+  text-align: left;
+}
+
+.settings-select-button:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.16);
+  outline: 0;
+}
+
+.settings-select-button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-select-arrow {
+  width: 12px;
+  height: 12px;
+  display: block;
+  background: no-repeat center / 12px 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23475569' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  transition: transform 140ms ease;
+}
+
+.settings-select-button[aria-expanded='true'] .settings-select-arrow {
+  transform: rotate(180deg);
+}
+
+.settings-select-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+  border: 1px solid #d6deea;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.16);
+  opacity: 0;
+  padding: 6px;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+  visibility: hidden;
+}
+
+.settings-select-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.settings-select-option {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #172033;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.settings-select-option:hover,
+.settings-select-option:focus {
+  background: #eef4ff;
+  outline: 0;
+}
+
+.settings-select-option.is-selected {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
 }
 
 .friends-grid {
@@ -1213,6 +1334,21 @@ button {
   background: #e5ebf3;
 }
 
+.image-preview-frame {
+  display: block;
+  padding: 0;
+}
+
+.image-preview-trigger {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  cursor: zoom-in;
+}
+
+.image-preview-trigger:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.16);
+}
+
 .image-preview-frame img {
   width: 100%;
   height: 100%;
@@ -1230,6 +1366,101 @@ button {
 .image-preview-placeholder.is-error {
   background: #fff1f2;
   color: #b42318;
+}
+
+.image-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.66);
+  padding: 24px;
+}
+
+.image-lightbox {
+  width: min(960px, 100%);
+  max-height: calc(100vh - 48px);
+  min-height: min(620px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.34);
+  padding: 14px;
+}
+
+.image-lightbox-header,
+.image-lightbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.image-lightbox-header {
+  justify-content: space-between;
+}
+
+.image-lightbox-header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #172033;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-lightbox-icon-button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #172033;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.image-lightbox-stage {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 18px;
+}
+
+.image-lightbox-stage img {
+  max-width: 100%;
+  max-height: calc(100vh - 190px);
+  display: block;
+  object-fit: contain;
+  transform-origin: center;
+}
+
+.image-lightbox-state {
+  margin: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #e5edf7;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.image-lightbox-state.is-error {
+  background: rgba(127, 29, 29, 0.88);
+  color: #fee2e2;
+}
+
+.image-lightbox-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .file-message-icon {
@@ -1696,6 +1927,32 @@ button {
   .attachment-menu {
     width: 100%;
   }
+
+  .image-lightbox-backdrop {
+    padding: 12px;
+  }
+
+  .image-lightbox {
+    max-height: calc(100vh - 24px);
+    min-height: calc(100vh - 24px);
+    padding: 10px;
+  }
+
+  .image-lightbox-stage {
+    padding: 10px;
+  }
+
+  .image-lightbox-stage img {
+    max-height: calc(100vh - 210px);
+  }
+
+  .image-lightbox-actions {
+    justify-content: stretch;
+  }
+
+  .image-lightbox-actions button {
+    flex: 1 1 auto;
+  }
 }
 
 :root[data-theme='dark'] body,
@@ -1759,6 +2016,45 @@ button {
   border-color: #475569;
   background: #0f172a;
   color: #e5edf7;
+}
+
+:root[data-theme='dark'] .settings-panel .settings-brand {
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .settings-select-button {
+  border-color: #475569;
+  background: #0f172a;
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .settings-select-button:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
+}
+
+:root[data-theme='dark'] .settings-select-arrow {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23cbd5e1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+:root[data-theme='dark'] .settings-select-menu {
+  border-color: #334155;
+  background: #111827;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme='dark'] .settings-select-option {
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .settings-select-option:hover,
+:root[data-theme='dark'] .settings-select-option:focus {
+  background: #1e293b;
+}
+
+:root[data-theme='dark'] .settings-select-option.is-selected {
+  background: #172554;
+  color: #dbeafe;
 }
 
 :root[data-theme='dark'] input::placeholder {
@@ -2159,6 +2455,35 @@ button {
   border-color: #475569;
   background: #0f172a;
   color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .image-preview-trigger:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 8px 18px rgba(96, 165, 250, 0.18);
+}
+
+:root[data-theme='dark'] .image-lightbox-backdrop {
+  background: rgba(2, 6, 23, 0.76);
+}
+
+:root[data-theme='dark'] .image-lightbox {
+  border-color: #334155;
+  background: #111827;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.56);
+}
+
+:root[data-theme='dark'] .image-lightbox-header strong {
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .image-lightbox-icon-button {
+  border-color: #475569;
+  background: #1e293b;
+  color: #e5edf7;
+}
+
+:root[data-theme='dark'] .image-lightbox-stage {
+  background: #020617;
 }
 
 :root[data-theme='dark'] .message-highlight {

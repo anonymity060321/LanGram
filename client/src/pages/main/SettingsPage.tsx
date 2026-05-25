@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { logout as requestLogout } from '../../api/auth.api';
 import {
@@ -6,7 +6,6 @@ import {
   updateCurrentUserProfile,
   uploadCurrentUserAvatar,
 } from '../../api/users.api';
-import { AppLogo } from '../../components/AppLogo';
 import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
@@ -148,7 +147,10 @@ export function SettingsPage(): JSX.Element {
       <section className="settings-panel">
         <div className="settings-header">
           <div className="settings-title">
-            <AppLogo label={t('app.name')} size="sm" />
+            <span className="settings-brand">
+              <img src="/logo.svg" alt="" aria-hidden="true" />
+              <span className="settings-brand-name">{t('app.name')}</span>
+            </span>
             <h1 className="settings-page-title">{t('settings.title')}</h1>
           </div>
           <Link to="/">{t('common.back')}</Link>
@@ -171,25 +173,29 @@ export function SettingsPage(): JSX.Element {
           </label>
           <label>
             <span>{t('settings.theme')}</span>
-            <select
+            <SettingsSelect<ThemePreference>
               value={theme}
-              onChange={(event) => void handleThemeChange(event.target.value as ThemePreference)}
-            >
-              <option value="system">{t('theme.system')}</option>
-              <option value="light">{t('theme.light')}</option>
-              <option value="dark">{t('theme.dark')}</option>
-            </select>
+              options={[
+                { value: 'system', label: t('theme.system') },
+                { value: 'light', label: t('theme.light') },
+                { value: 'dark', label: t('theme.dark') },
+              ]}
+              ariaLabel={t('settings.theme')}
+              onChange={handleThemeChange}
+            />
           </label>
           <label>
             <span>{t('settings.language')}</span>
-            <select
+            <SettingsSelect<LanguagePreference>
               value={language}
-              onChange={(event) => void handleLanguageChange(event.target.value as LanguagePreference)}
-            >
-              <option value="system">{t('language.system')}</option>
-              <option value="zh-CN">{t('language.zh-CN')}</option>
-              <option value="en-US">{t('language.en-US')}</option>
-            </select>
+              options={[
+                { value: 'system', label: t('language.system') },
+                { value: 'zh-CN', label: t('language.zh-CN') },
+                { value: 'en-US', label: t('language.en-US') },
+              ]}
+              ariaLabel={t('settings.language')}
+              onChange={handleLanguageChange}
+            />
           </label>
           <label>
             <span>{t('settings.deviceId')}</span>
@@ -244,5 +250,93 @@ export function SettingsPage(): JSX.Element {
         </section>
       </section>
     </main>
+  );
+}
+
+function SettingsSelect<TValue extends string>({
+  value,
+  options,
+  ariaLabel,
+  onChange,
+}: {
+  value: TValue;
+  options: Array<{ value: TValue; label: string }>;
+  ariaLabel: string;
+  onChange: (value: TValue) => Promise<void>;
+}): JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedOption = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      if (rootRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsOpen(false);
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  function handleButtonKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      setIsOpen(true);
+    }
+  }
+
+  function handleSelect(nextValue: TValue): void {
+    setIsOpen(false);
+    if (nextValue !== value) {
+      void onChange(nextValue);
+    }
+  }
+
+  return (
+    <div className="settings-select-control" ref={rootRef}>
+      <button
+        type="button"
+        className="settings-select-button"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+        onKeyDown={handleButtonKeyDown}
+      >
+        <span>{selectedOption.label}</span>
+        <span className="settings-select-arrow" aria-hidden="true" />
+      </button>
+      <div className={`settings-select-menu ${isOpen ? 'is-open' : ''}`} role="listbox" aria-label={ariaLabel}>
+        {options.map((option) => (
+          <button
+            type="button"
+            className={`settings-select-option ${option.value === value ? 'is-selected' : ''}`}
+            role="option"
+            aria-selected={option.value === value}
+            key={option.value}
+            onClick={() => handleSelect(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

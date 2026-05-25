@@ -1074,6 +1074,7 @@ function MessageList({
   const [selectedForwardTargetIds, setSelectedForwardTargetIds] = useState<string[]>([]);
   const [forwardError, setForwardError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<MessageContextMenuState | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileMetadataResponse | null>(null);
   const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -1084,6 +1085,7 @@ function MessageList({
 
   useEffect(() => {
     setContextMenu(null);
+    setPreviewFile(null);
   }, [messages]);
 
   useEffect(() => {
@@ -1220,6 +1222,11 @@ function MessageList({
     setIsJumpToBottomVisible(!isAtBottom);
   }
 
+  function openImagePreview(file: FileMetadataResponse): void {
+    setContextMenu(null);
+    setPreviewFile(file);
+  }
+
   function scrollToMessageBottom(behavior: ScrollBehavior): void {
     const list = listRef.current;
     if (!list) {
@@ -1312,7 +1319,7 @@ function MessageList({
                 <p>
                   {message.status === 'recalled'
                     ? t('chat.messageRecalled')
-                    : renderMessageBody(message, searchQuery, t, downloadStates)}
+                    : renderMessageBody(message, searchQuery, t, downloadStates, openImagePreview)}
                 </p>
               )}
               <div className="message-meta">
@@ -1350,6 +1357,14 @@ function MessageList({
         >
           ↓
         </button>
+      ) : null}
+      {previewFile ? (
+        <ImagePreviewDialog
+          file={previewFile}
+          t={t}
+          onClose={() => setPreviewFile(null)}
+          onDownload={() => void onDownloadFile(previewFile)}
+        />
       ) : null}
       {forwardingMessage ? (
         <div
@@ -1570,13 +1585,14 @@ function renderMessageBody(
   searchQuery: string,
   t: ReturnType<typeof useI18n>['t'],
   downloadStates: Record<string, FileDownloadStatus>,
+  onOpenImagePreview: (file: FileMetadataResponse) => void,
 ): Array<string | JSX.Element> | JSX.Element | string {
   if (message.messageType === 'IMAGE' && message.file) {
     const downloadStatus = downloadStates[message.file.id];
 
     return (
       <span className="image-message-card">
-        <ImageMessagePreview file={message.file} t={t} />
+        <ImageMessagePreview file={message.file} t={t} onOpenPreview={onOpenImagePreview} />
         <span className="image-message-details">
           <strong>{message.file.originalName}</strong>
           <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
@@ -1624,9 +1640,11 @@ function renderMessageBody(
 function ImageMessagePreview({
   file,
   t,
+  onOpenPreview,
 }: {
   file: FileMetadataResponse;
   t: ReturnType<typeof useI18n>['t'];
+  onOpenPreview: (file: FileMetadataResponse) => void;
 }): JSX.Element {
   const [previewState, setPreviewState] = useState<ImagePreviewState>({
     status: 'loading',
@@ -1668,9 +1686,15 @@ function ImageMessagePreview({
 
   if (previewState.status === 'loaded' && previewState.objectUrl) {
     return (
-      <span className="image-preview-frame">
+      <button
+        type="button"
+        className="image-preview-frame image-preview-trigger"
+        aria-label={t('chat.openImagePreview')}
+        title={t('chat.openImagePreview')}
+        onClick={() => onOpenPreview(file)}
+      >
         <img src={previewState.objectUrl} alt={file.originalName} />
-      </span>
+      </button>
     );
   }
 
@@ -1678,6 +1702,139 @@ function ImageMessagePreview({
     <span className={`image-preview-placeholder ${previewState.status === 'failed' ? 'is-error' : ''}`}>
       {previewState.status === 'failed' ? t('chat.imagePreviewFailed') : t('chat.imagePreviewLoading')}
     </span>
+  );
+}
+
+function ImagePreviewDialog({
+  file,
+  t,
+  onClose,
+  onDownload,
+}: {
+  file: FileMetadataResponse;
+  t: ReturnType<typeof useI18n>['t'];
+  onClose: () => void;
+  onDownload: () => void;
+}): JSX.Element {
+  const [previewState, setPreviewState] = useState<ImagePreviewState>({
+    status: 'loading',
+    objectUrl: null,
+  });
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    let isCancelled = false;
+    let objectUrl: string | null = null;
+
+    setPreviewState({ status: 'loading', objectUrl: null });
+    setScale(1);
+    void downloadFile(file.id)
+      .then((blob) => {
+        if (!blob.type.toLowerCase().startsWith('image/')) {
+          throw new Error('Downloaded file is not an image');
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        if (isCancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        setPreviewState({ status: 'loaded', objectUrl });
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setPreviewState({ status: 'failed', objectUrl: null });
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [file.id]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  function updateScale(nextScale: number): void {
+    setScale(Math.min(3, Math.max(0.5, nextScale)));
+  }
+
+  return (
+    <div
+      className="image-lightbox-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="image-lightbox" role="dialog" aria-modal="true" aria-labelledby="image-preview-title">
+        <header className="image-lightbox-header">
+          <strong id="image-preview-title">{file.originalName}</strong>
+          <button type="button" className="image-lightbox-icon-button" aria-label={t('chat.closePreview')} onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <div className="image-lightbox-stage">
+          {previewState.status === 'loaded' && previewState.objectUrl ? (
+            <img
+              src={previewState.objectUrl}
+              alt={file.originalName}
+              style={{ transform: `scale(${scale})` }}
+            />
+          ) : (
+            <p className={`image-lightbox-state ${previewState.status === 'failed' ? 'is-error' : ''}`}>
+              {previewState.status === 'failed' ? t('chat.imagePreviewFailed') : t('chat.imagePreviewLoading')}
+            </p>
+          )}
+        </div>
+        <footer className="image-lightbox-actions">
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            disabled={scale <= 0.5}
+            onClick={() => updateScale(scale - 0.25)}
+          >
+            {t('chat.zoomOut')}
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            disabled={scale === 1}
+            onClick={() => updateScale(1)}
+          >
+            {t('chat.zoomReset')}
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            disabled={scale >= 3}
+            onClick={() => updateScale(scale + 0.25)}
+          >
+            {t('chat.zoomIn')}
+          </button>
+          <button type="button" className="primary-button compact-button" onClick={onDownload}>
+            {t('chat.download')}
+          </button>
+          <button type="button" className="secondary-button compact-button" onClick={onClose}>
+            {t('chat.closePreview')}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 
