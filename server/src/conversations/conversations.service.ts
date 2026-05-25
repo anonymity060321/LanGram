@@ -167,25 +167,30 @@ export class ConversationsService {
     userId: string,
     conversationId: string,
     query: ListMessagesQueryDto,
-  ): Promise<{ messages: unknown[] }> {
+  ): Promise<{ messages: unknown[]; hasMore: boolean; nextCursor: string | null }> {
     await this.assertConversationMember(userId, conversationId);
     const limit = query.limit ?? 50;
-    const beforeMessage = query.before
-      ? await this.findMessageInConversation(conversationId, query.before)
+    const beforeMessageId = query.beforeMessageId ?? query.before;
+    const beforeMessage = beforeMessageId
+      ? await this.findMessageInConversation(conversationId, beforeMessageId)
       : null;
 
     const messages = await this.prisma.message.findMany({
       where: {
         conversationId,
-        ...(beforeMessage ? { createdAt: { lt: beforeMessage.createdAt } } : {}),
       },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
+      ...(beforeMessage ? { cursor: { id: beforeMessage.id }, skip: 1 } : {}),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
       select: this.messageSelect(),
     });
+    const hasMore = messages.length > limit;
+    const page = messages.slice(0, limit).reverse();
 
     return {
-      messages: messages.reverse().map((message) => this.toMessageDto(message)),
+      messages: page.map((message) => this.toMessageDto(message)),
+      hasMore,
+      nextCursor: page[0]?.id ?? null,
     };
   }
 

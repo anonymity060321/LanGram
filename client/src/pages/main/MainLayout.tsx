@@ -40,6 +40,9 @@ export function MainLayout(): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
   const selectedConversationId = useChatStore((state) => state.selectedConversationId);
   const messagesByConversation = useChatStore((state) => state.messagesByConversation);
+  const messagePaginationByConversation = useChatStore(
+    (state) => state.messagePaginationByConversation,
+  );
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
   const chatError = useChatStore((state) => state.error);
   const searchQuery = useChatStore((state) => state.searchQuery);
@@ -47,6 +50,7 @@ export function MainLayout(): JSX.Element {
   const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
   const selectConversation = useChatStore((state) => state.selectConversation);
+  const loadOlderMessages = useChatStore((state) => state.loadOlderMessages);
   const closeConversation = useChatStore((state) => state.closeConversation);
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
   const connect = useChatStore((state) => state.connect);
@@ -91,6 +95,9 @@ export function MainLayout(): JSX.Element {
     () => (selectedConversationId ? messagesByConversation[selectedConversationId] ?? [] : []),
     [messagesByConversation, selectedConversationId],
   );
+  const selectedMessagePagination = selectedConversationId
+    ? messagePaginationByConversation[selectedConversationId] ?? null
+    : null;
   const searchResults = useMemo(
     () => buildSearchResults(messages, searchQuery),
     [messages, searchQuery],
@@ -627,6 +634,14 @@ export function MainLayout(): JSX.Element {
     setActiveSearchResultIndex(-1);
   }
 
+  async function handleLoadOlderMessages(): Promise<boolean> {
+    if (!user || !selectedConversationId) {
+      return false;
+    }
+
+    return loadOlderMessages(selectedConversationId, user.id);
+  }
+
   return (
     <main className="main-layout">
       <aside className="app-nav">
@@ -831,9 +846,12 @@ export function MainLayout(): JSX.Element {
               conversationId={selectedConversation.id}
               messages={messages}
               isLoading={isLoadingMessages}
+              hasMoreMessages={selectedMessagePagination?.hasMore ?? false}
+              isLoadingOlderMessages={selectedMessagePagination?.isLoadingOlder ?? false}
               searchQuery={searchQuery}
               activeSearchMessageId={activeSearchMessageId}
               searchMatchIds={searchMatchIds}
+              onLoadOlderMessages={handleLoadOlderMessages}
               onDeleteLocalMessage={handleDeleteLocalMessage}
               onRecallMessage={handleRecallMessage}
               onEditMessage={handleEditMessage}
@@ -1145,9 +1163,12 @@ function MessageList({
   conversationId,
   messages,
   isLoading,
+  hasMoreMessages,
+  isLoadingOlderMessages,
   searchQuery,
   activeSearchMessageId,
   searchMatchIds,
+  onLoadOlderMessages,
   onDeleteLocalMessage,
   onRecallMessage,
   onEditMessage,
@@ -1159,9 +1180,12 @@ function MessageList({
   conversationId: string;
   messages: ChatMessage[];
   isLoading: boolean;
+  hasMoreMessages: boolean;
+  isLoadingOlderMessages: boolean;
   searchQuery: string;
   activeSearchMessageId: string | null;
   searchMatchIds: Set<string>;
+  onLoadOlderMessages: () => Promise<boolean>;
   onDeleteLocalMessage: (messageId: string) => void;
   onRecallMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, plaintext: string) => Promise<void>;
@@ -1185,12 +1209,17 @@ function MessageList({
   const previousMessageCountRef = useRef(0);
   const previousConversationIdRef = useRef<string | null>(null);
   const previousIsLoadingRef = useRef(false);
+  const isLoadingOlderRef = useRef(false);
   const lastMessageIsOwn = messages[messages.length - 1]?.isOwn ?? false;
 
   useEffect(() => {
     setContextMenu(null);
     setPreviewFile(null);
   }, [messages]);
+
+  useEffect(() => {
+    isLoadingOlderRef.current = isLoadingOlderMessages;
+  }, [isLoadingOlderMessages]);
 
   useEffect(() => {
     if (!activeSearchMessageId) {
@@ -1333,6 +1362,33 @@ function MessageList({
     const isAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
     isAtBottomRef.current = isAtBottom;
     setIsJumpToBottomVisible(!isAtBottom);
+
+    if (list.scrollTop < 96) {
+      void loadOlderMessagesFromTop();
+    }
+  }
+
+  async function loadOlderMessagesFromTop(): Promise<void> {
+    const list = listRef.current;
+    if (!list || !hasMoreMessages || isLoadingOlderRef.current) {
+      return;
+    }
+
+    isLoadingOlderRef.current = true;
+    const previousScrollHeight = list.scrollHeight;
+    const previousScrollTop = list.scrollTop;
+    const didAddMessages = await onLoadOlderMessages();
+    requestAnimationFrame(() => {
+      const currentList = listRef.current;
+      if (!currentList) {
+        return;
+      }
+
+      if (didAddMessages) {
+        currentList.scrollTop = currentList.scrollHeight - previousScrollHeight + previousScrollTop;
+      }
+      isLoadingOlderRef.current = false;
+    });
   }
 
   function openImagePreview(file: FileMetadataResponse): void {
@@ -1399,6 +1455,11 @@ function MessageList({
   return (
     <div className="message-list-shell">
       <div ref={listRef} className="message-list" onScroll={handleListScroll}>
+        {isLoadingOlderMessages || !hasMoreMessages ? (
+          <div className="message-history-status" aria-live="polite">
+            {isLoadingOlderMessages ? t('chat.loadingOlderMessages') : t('chat.allMessagesLoaded')}
+          </div>
+        ) : null}
         {messages.map((message) => (
           <article
             className={`message-row ${message.isOwn ? 'is-own' : ''} ${

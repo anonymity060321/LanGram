@@ -49,6 +49,12 @@ export interface EncryptedMessage {
   updatedAt: string;
 }
 
+export interface ListMessagesResponse {
+  messages: EncryptedMessage[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
 export function listConversations(): Promise<{ conversations: Conversation[] }> {
   return apiRequest('/conversations');
 }
@@ -62,11 +68,12 @@ export function createDirectConversation(friendUserId: string): Promise<Conversa
 
 export function listMessages(
   conversationId: string,
-  options: { before?: string; limit?: number } = {},
-): Promise<{ messages: EncryptedMessage[] }> {
+  options: { before?: string; beforeMessageId?: string; limit?: number } = {},
+): Promise<ListMessagesResponse> {
   const params = new URLSearchParams();
-  if (options.before) {
-    params.set('before', options.before);
+  const beforeMessageId = options.beforeMessageId ?? options.before;
+  if (beforeMessageId) {
+    params.set('beforeMessageId', beforeMessageId);
   }
   if (options.limit) {
     params.set('limit', String(options.limit));

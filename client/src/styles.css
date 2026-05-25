@@ -998,6 +998,18 @@ button {
   padding: 18px;
 }
 
+.message-history-status {
+  align-self: center;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #64748b;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
 .jump-to-bottom-button {
   position: absolute;
   right: 18px;
@@ -2281,6 +2293,13 @@ button {
 :root[data-theme='dark'] .chat-panel,
 :root[data-theme='dark'] .message-list {
   background: #0f172a;
+}
+
+:root[data-theme='dark'] .message-history-status {
+  border-color: rgba(71, 85, 105, 0.76);
+  background: rgba(15, 23, 42, 0.88);
+  color: #cbd5e1;
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.32);
 }
 
 :root[data-theme='dark'] .auth-tabs,

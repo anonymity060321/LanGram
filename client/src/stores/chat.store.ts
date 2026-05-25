@@ -28,6 +28,7 @@ import {
 
 export type LocalMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'recalled';
 const UNABLE_TO_DECRYPT_MESSAGE = '[Unable to decrypt message]';
+const MESSAGE_PAGE_SIZE = 50;
 
 export interface ChatMessage {
   id: string;
@@ -44,11 +45,18 @@ export interface ChatMessage {
   isOwn: boolean;
 }
 
+export interface MessagePaginationState {
+  hasMore: boolean;
+  nextCursor: string | null;
+  isLoadingOlder: boolean;
+}
+
 interface ChatState {
   conversations: Conversation[];
   selectedConversationId: string | null;
   currentUserId: string | null;
   messagesByConversation: Record<string, ChatMessage[]>;
+  messagePaginationByConversation: Record<string, MessagePaginationState>;
   presenceByUserId: Record<string, PresenceUpdatePayload>;
   error: string | null;
   searchQuery: string;
@@ -56,6 +64,7 @@ interface ChatState {
   isLoadingMessages: boolean;
   loadConversations: (currentUserId?: string) => Promise<void>;
   selectConversation: (conversationId: string, currentUserId: string) => Promise<void>;
+  loadOlderMessages: (conversationId: string, currentUserId: string) => Promise<boolean>;
   closeConversation: () => void;
   openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<string | null>;
   connect: (accessToken: string) => void;
@@ -89,6 +98,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedConversationId: null,
   currentUserId: null,
   messagesByConversation: {},
+  messagePaginationByConversation: {},
   presenceByUserId: {},
   error: null,
   searchQuery: '',
@@ -110,13 +120,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       selectedConversationId: conversationId,
       currentUserId,
       conversations: clearConversationUnread(state.conversations, conversationId),
+      messagePaginationByConversation: {
+        [conversationId]: { hasMore: false, nextCursor: null, isLoadingOlder: false },
+      },
       isLoadingMessages: true,
       error: null,
     }));
     try {
-      const result = await listMessages(conversationId, { limit: 50 });
+      const result = await listMessages(conversationId, { limit: MESSAGE_PAGE_SIZE });
       const conversation = get().conversations.find((item) => item.id === conversationId);
-      if (!conversation) {
+      if (!conversation || get().selectedConversationId !== conversationId) {
         set({ isLoadingMessages: false });
         return;
       }
@@ -130,6 +143,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...state.messagesByConversation,
           [conversationId]: messages,
         },
+        messagePaginationByConversation: {
+          [conversationId]: {
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+            isLoadingOlder: false,
+          },
+        },
         conversations: updateConversationFromMessages(state.conversations, conversationId, messages),
         isLoadingMessages: false,
       }));
@@ -140,6 +160,80 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch {
       set({ error: 'Failed to load messages', isLoadingMessages: false });
+    }
+  },
+  loadOlderMessages: async (conversationId, currentUserId) => {
+    const state = get();
+    const pagination = state.messagePaginationByConversation[conversationId];
+    if (!pagination?.hasMore || pagination.isLoadingOlder || !pagination.nextCursor) {
+      return false;
+    }
+
+    const conversation = state.conversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      return false;
+    }
+
+    set((currentState) => ({
+      messagePaginationByConversation: {
+        ...currentState.messagePaginationByConversation,
+        [conversationId]: {
+          ...pagination,
+          isLoadingOlder: true,
+        },
+      },
+      error: null,
+    }));
+
+    try {
+      const result = await listMessages(conversationId, {
+        beforeMessageId: pagination.nextCursor,
+        limit: MESSAGE_PAGE_SIZE,
+      });
+      if (get().selectedConversationId !== conversationId) {
+        return false;
+      }
+
+      const olderMessages = await Promise.all(
+        result.messages.map((message) => toChatMessage(message, conversation, currentUserId)),
+      );
+
+      let didAddMessages = false;
+      set((currentState) => {
+        const currentMessages = currentState.messagesByConversation[conversationId] ?? [];
+        const mergedMessages = mergeOlderMessages(olderMessages, currentMessages);
+        didAddMessages = mergedMessages.length > currentMessages.length;
+
+        return {
+          messagesByConversation: {
+            ...currentState.messagesByConversation,
+            [conversationId]: mergedMessages,
+          },
+          messagePaginationByConversation: {
+            ...currentState.messagePaginationByConversation,
+            [conversationId]: {
+              hasMore: result.hasMore,
+              nextCursor: result.nextCursor,
+              isLoadingOlder: false,
+            },
+          },
+        };
+      });
+
+      return didAddMessages;
+    } catch {
+      set((currentState) => ({
+        error: 'Failed to load messages',
+        messagePaginationByConversation: {
+          ...currentState.messagePaginationByConversation,
+          [conversationId]: {
+            hasMore: currentState.messagePaginationByConversation[conversationId]?.hasMore ?? false,
+            nextCursor: currentState.messagePaginationByConversation[conversationId]?.nextCursor ?? null,
+            isLoadingOlder: false,
+          },
+        },
+      }));
+      return false;
     }
   },
   closeConversation: () => {
@@ -852,6 +946,22 @@ function appendMessage(
     ...messagesByConversation,
     [conversationId]: [...(messagesByConversation[conversationId] ?? []), message],
   };
+}
+
+function mergeOlderMessages(
+  olderMessages: ChatMessage[],
+  currentMessages: ChatMessage[],
+): ChatMessage[] {
+  const currentIds = new Set(
+    currentMessages.flatMap((message) =>
+      message.clientMessageId ? [message.id, message.clientMessageId] : [message.id],
+    ),
+  );
+  const uniqueOlderMessages = olderMessages.filter(
+    (message) => !currentIds.has(message.id) && !currentIds.has(message.clientMessageId ?? ''),
+  );
+
+  return [...uniqueOlderMessages, ...currentMessages];
 }
 
 function upsertConversation(

@@ -271,6 +271,51 @@ describe('ConversationsService', () => {
     expect(JSON.stringify(result)).not.toContain('plaintext');
   });
 
+  it('returns paginated encrypted messages with an older-message cursor', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'cursor-message',
+      createdAt: new Date('2026-05-19T00:03:00.000Z'),
+    });
+    prisma.message.findMany.mockResolvedValue([
+      {
+        ...(messageFixture() as Record<string, unknown>),
+        id: 'message-3',
+        createdAt: new Date('2026-05-19T00:02:00.000Z'),
+      },
+      {
+        ...(messageFixture() as Record<string, unknown>),
+        id: 'message-2',
+        createdAt: new Date('2026-05-19T00:01:00.000Z'),
+      },
+      {
+        ...(messageFixture() as Record<string, unknown>),
+        id: 'message-1',
+        createdAt: new Date('2026-05-19T00:00:00.000Z'),
+      },
+    ]);
+    const service = createService(prisma);
+
+    const result = await service.listMessages('user-a', 'conversation-id', {
+      beforeMessageId: 'cursor-message',
+      limit: 2,
+    }) as { messages: Array<{ id: string }>; hasMore: boolean; nextCursor: string | null };
+
+    expect(prisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cursor: { id: 'cursor-message' },
+        skip: 1,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 3,
+      }),
+    );
+    expect(result.messages.map((message) => message.id)).toEqual(['message-2', 'message-3']);
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBe('message-2');
+    expect(JSON.stringify(result)).not.toContain('plaintext');
+  });
+
   it('marks a conversation read for members', async () => {
     const prisma = createMockPrisma();
     prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });

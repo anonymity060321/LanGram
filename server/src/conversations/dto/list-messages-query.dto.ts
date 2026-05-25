@@ -7,6 +7,10 @@ export class ListMessagesQueryDto {
   before?: string;
 
   @IsOptional()
+  @IsUUID()
+  beforeMessageId?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
