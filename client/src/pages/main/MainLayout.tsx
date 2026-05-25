@@ -615,7 +615,6 @@ export function MainLayout(): JSX.Element {
           <strong>{t('main.sidebarChats')}</strong>
         </div>
         <section className="sidebar-section">
-          <h2>{t('main.sidebarChats')}</h2>
           {isLoadingConversations ? <p>{t('chat.loading')}</p> : null}
           {!isLoadingConversations && displayedConversations.length === 0 ? (
             <p>{t('chat.noConversations')}</p>

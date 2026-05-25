@@ -217,42 +217,44 @@ export function FriendsPage(): JSX.Element {
         {error ? <p className="form-error">{error}</p> : null}
         {notice ? <p className="form-success">{notice}</p> : null}
 
-        {activeTab === 'list' ? (
-          <FriendListSection
-            friends={friends}
-            selectedFriend={selectedFriend}
-            isBusy={isBusy}
-            t={t}
-            onSelectFriend={setSelectedFriendshipId}
-            onOpenChat={handleOpenChat}
-            onDeleteFriend={handleDeleteFriend}
-          />
-        ) : null}
+        <div className="friends-tab-panel" key={activeTab}>
+          {activeTab === 'list' ? (
+            <FriendListSection
+              friends={friends}
+              selectedFriend={selectedFriend}
+              isBusy={isBusy}
+              t={t}
+              onSelectFriend={setSelectedFriendshipId}
+              onOpenChat={handleOpenChat}
+              onDeleteFriend={handleDeleteFriend}
+            />
+          ) : null}
 
-        {activeTab === 'add' ? (
-          <AddFriendSection
-            pairingCode={pairingCode}
-            pairingCodeExpiresAt={pairingCodeExpiresAt}
-            inputCode={inputCode}
-            isBusy={isBusy}
-            t={t}
-            onInputCodeChange={setInputCode}
-            onGenerateCode={handleGenerateCode}
-            onSubmitRequest={handleSubmitRequest}
-          />
-        ) : null}
+          {activeTab === 'add' ? (
+            <AddFriendSection
+              pairingCode={pairingCode}
+              pairingCodeExpiresAt={pairingCodeExpiresAt}
+              inputCode={inputCode}
+              isBusy={isBusy}
+              t={t}
+              onInputCodeChange={setInputCode}
+              onGenerateCode={handleGenerateCode}
+              onSubmitRequest={handleSubmitRequest}
+            />
+          ) : null}
 
-        {activeTab === 'requests' ? (
-          <FriendRequestsSection
-            incoming={incoming}
-            outgoing={outgoing}
-            isBusy={isBusy}
-            canClearRequests={canClearRequests}
-            t={t}
-            onRespond={handleRespond}
-            onClearRequests={handleClearRequests}
-          />
-        ) : null}
+          {activeTab === 'requests' ? (
+            <FriendRequestsSection
+              incoming={incoming}
+              outgoing={outgoing}
+              isBusy={isBusy}
+              canClearRequests={canClearRequests}
+              t={t}
+              onRespond={handleRespond}
+              onClearRequests={handleClearRequests}
+            />
+          ) : null}
+        </div>
       </section>
     </main>
   );
