@@ -47,6 +47,10 @@ export interface RealtimeErrorPayload {
   message: string;
 }
 
+export interface SessionKickedPayload {
+  reason: 'new_device_login';
+}
+
 export interface PresenceUpdatePayload {
   userId: string;
   isOnline: boolean;

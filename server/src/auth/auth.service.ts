@@ -22,6 +22,7 @@ import { EmailCodePurposeDto, SendEmailCodeDto } from './dto/send-email-code.dto
 import { TemporaryRegisterDto } from './dto/temporary-register.dto';
 import { TextCaptchaResponseDto, type TextCaptchaType } from './dto/text-captcha.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeSessionService } from '../realtime/realtime-session.service';
 import { UsersService } from '../users/users.service';
 
 interface TokenPair {
@@ -233,6 +234,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly usersService: UsersService,
+    private readonly realtimeSessionService: RealtimeSessionService,
   ) {}
 
   async sendEmailCode(dto: SendEmailCodeDto): Promise<void> {
@@ -681,6 +683,7 @@ export class AuthService {
       where: { userId: user.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    this.realtimeSessionService.kickUser(user.id, { reason: 'new_device_login' });
 
     const savedDevice = await this.prisma.device.upsert({
       where: {

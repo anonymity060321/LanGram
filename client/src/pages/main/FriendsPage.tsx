@@ -26,6 +26,7 @@ export function FriendsPage(): JSX.Element {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const accessToken = useAuthStore((state) => state.accessToken);
+  const notifySessionReplaced = useAuthStore((state) => state.notifySessionReplaced);
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
@@ -52,9 +53,9 @@ export function FriendsPage(): JSX.Element {
       return;
     }
 
-    connect(accessToken);
+    connect(accessToken, () => notifySessionReplaced());
     return () => disconnect();
-  }, [accessToken, connect, disconnect]);
+  }, [accessToken, connect, disconnect, notifySessionReplaced]);
 
   useEffect(() => {
     setFriends((current) =>

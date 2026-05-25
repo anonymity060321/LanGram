@@ -24,6 +24,7 @@ import {
   type MessageReadPayload,
   type MessageRecalledPayload,
   type RealtimeErrorPayload,
+  type SessionKickedPayload,
 } from '../realtime/socket';
 
 export type LocalMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'recalled';
@@ -67,7 +68,7 @@ interface ChatState {
   loadOlderMessages: (conversationId: string, currentUserId: string) => Promise<boolean>;
   closeConversation: () => void;
   openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<string | null>;
-  connect: (accessToken: string) => void;
+  connect: (accessToken: string, onSessionKicked: (payload: SessionKickedPayload) => void) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
   sendFileMessage: (
@@ -253,7 +254,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return null;
     }
   },
-  connect: (accessToken) => {
+  connect: (accessToken, onSessionKicked) => {
     connectRealtime(getApiBaseUrl(), accessToken, {
       onMessageNew: (payload) => {
         void handleIncomingMessage(payload, get, set);
@@ -273,6 +274,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onPresenceUpdate: (payload) => {
         get().updatePresence(payload);
       },
+      onSessionKicked,
       onError: (payload) => {
         handleRealtimeError(payload, set);
       },

@@ -28,7 +28,12 @@ export function GuestLoginPage(): JSX.Element {
   }
 
   return (
-    <AuthShell title={t('auth.guestTitle')}>
+    <AuthShell
+      title={t('auth.guestTitle')}
+      showGuestLink={false}
+      loginLinkLabel={t('auth.toLoginPrompt')}
+      registerLinkLabel={t('auth.toRegisterPrompt')}
+    >
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
         <label>
           <span>{t('auth.displayName')}</span>

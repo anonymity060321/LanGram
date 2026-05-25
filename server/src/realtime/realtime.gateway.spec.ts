@@ -4,6 +4,7 @@ import { PresenceService } from '../presence/presence.service';
 import { RealtimeAuthService } from './realtime-auth.service';
 import { REALTIME_EVENTS } from './realtime.events';
 import { RealtimeGateway } from './realtime.gateway';
+import { RealtimeSessionService } from './realtime-session.service';
 
 type MockSocket = {
   id: string;
@@ -93,6 +94,7 @@ function createGateway(): {
     >;
     listFriendUserIds: jest.MockedFunction<(userId: string) => Promise<string[]>>;
   };
+  realtimeSessionService: RealtimeSessionService;
 } {
   const authService = {
     authenticate: jest.fn(),
@@ -123,16 +125,19 @@ function createGateway(): {
       return [];
     }),
   };
+  const realtimeSessionService = new RealtimeSessionService();
 
   return {
     gateway: new RealtimeGateway(
       authService as unknown as RealtimeAuthService,
       messagesService as unknown as MessagesService,
       presenceService as unknown as PresenceService,
+      realtimeSessionService,
     ),
     authService,
     messagesService,
     presenceService,
+    realtimeSessionService,
   };
 }
 
@@ -193,7 +198,7 @@ describe('RealtimeGateway', () => {
     await gateway.handleConnection(second as never);
 
     expect(first.emit).toHaveBeenCalledWith(REALTIME_EVENTS.SESSION_KICKED, {
-      reason: 'new_realtime_connection',
+      reason: 'new_device_login',
     });
     expect(first.disconnect).toHaveBeenCalledWith(true);
   });

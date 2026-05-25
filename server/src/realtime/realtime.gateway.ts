@@ -11,6 +11,7 @@ import { AuthenticatedUser } from '../common/current-user';
 import { MessagesService } from '../messages/messages.service';
 import { PresenceService, type PresenceState } from '../presence/presence.service';
 import { RealtimeAuthService } from './realtime-auth.service';
+import { RealtimeSessionService } from './realtime-session.service';
 import {
   MessageEditPayload,
   MessageRecallPayload,
@@ -32,19 +33,18 @@ interface AuthenticatedSocket extends Socket {
   cors: { origin: true },
 })
 export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  private readonly socketsByUserId = new Map<string, AuthenticatedSocket>();
-
   constructor(
     private readonly authService: RealtimeAuthService,
     private readonly messagesService: MessagesService,
     private readonly presenceService: PresenceService,
+    private readonly realtimeSessionService: RealtimeSessionService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
     try {
       const user = await this.authService.authenticate(this.extractToken(client));
       client.data.user = user;
-      this.registerSocket(user.id, client);
+      this.realtimeSessionService.registerSocket(user, client);
       this.presenceService.markOnline(user.id);
       await this.notifyFriendsPresence(user.id, { isOnline: true, lastSeenAt: null });
       await this.deliverOfflineMessages(user.id);
@@ -63,8 +63,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       return;
     }
 
-    if (this.socketsByUserId.get(userId)?.id === client.id) {
-      this.socketsByUserId.delete(userId);
+    if (this.realtimeSessionService.unregisterSocket(userId, client.id)) {
       const presence = await this.presenceService.markOffline(userId);
       await this.notifyFriendsPresence(userId, presence);
     }
@@ -100,7 +99,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.emit(REALTIME_EVENTS.MESSAGE_NEW, result.message);
 
       for (const receiverId of result.receiverIds) {
-        const receiverSocket = this.socketsByUserId.get(receiverId);
+        const receiverSocket = this.realtimeSessionService.getSocket(receiverId);
         if (!receiverSocket) {
           continue;
         }
@@ -140,7 +139,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
       for (const peerId of peerIds) {
-        this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_READ, read);
+        this.realtimeSessionService.getSocket(peerId)?.emit(REALTIME_EVENTS.MESSAGE_READ, read);
       }
     } catch (error) {
       client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));
@@ -171,7 +170,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
       for (const peerId of peerIds) {
-        this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_RECALLED, recalled);
+        this.realtimeSessionService.getSocket(peerId)?.emit(REALTIME_EVENTS.MESSAGE_RECALLED, recalled);
       }
     } catch (error) {
       client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));
@@ -207,25 +206,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       const peerIds = await this.messagesService.getConversationPeerIds(payload.conversationId, user.id);
       for (const peerId of peerIds) {
-        this.socketsByUserId.get(peerId)?.emit(REALTIME_EVENTS.MESSAGE_EDITED, edited);
+        this.realtimeSessionService.getSocket(peerId)?.emit(REALTIME_EVENTS.MESSAGE_EDITED, edited);
       }
     } catch (error) {
       client.emit(REALTIME_EVENTS.ERROR, this.toErrorPayload(error));
     }
   }
 
-  private registerSocket(userId: string, client: AuthenticatedSocket): void {
-    const existing = this.socketsByUserId.get(userId);
-    if (existing && existing.id !== client.id) {
-      existing.emit(REALTIME_EVENTS.SESSION_KICKED, { reason: 'new_realtime_connection' });
-      existing.disconnect(true);
-    }
-
-    this.socketsByUserId.set(userId, client);
-  }
-
   private async deliverOfflineMessages(userId: string): Promise<void> {
-    const socket = this.socketsByUserId.get(userId);
+    const socket = this.realtimeSessionService.getSocket(userId);
     if (!socket) {
       return;
     }
@@ -238,7 +227,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         continue;
       }
 
-      const senderSocket = this.socketsByUserId.get(message.senderId);
+      const senderSocket = this.realtimeSessionService.getSocket(message.senderId);
       senderSocket?.emit(REALTIME_EVENTS.MESSAGE_DELIVERED, delivered);
     }
   }
@@ -252,7 +241,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     };
 
     for (const friendId of friendIds) {
-      this.socketsByUserId.get(friendId)?.emit(REALTIME_EVENTS.PRESENCE_UPDATE, payload);
+      this.realtimeSessionService.getSocket(friendId)?.emit(REALTIME_EVENTS.PRESENCE_UPDATE, payload);
     }
   }
 

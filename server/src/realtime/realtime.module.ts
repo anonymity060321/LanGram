@@ -4,9 +4,11 @@ import { MessagesModule } from '../messages/messages.module';
 import { PresenceModule } from '../presence/presence.module';
 import { RealtimeAuthService } from './realtime-auth.service';
 import { RealtimeGateway } from './realtime.gateway';
+import { RealtimeSessionService } from './realtime-session.service';
 
 @Module({
   imports: [JwtModule.register({}), MessagesModule, PresenceModule],
-  providers: [RealtimeAuthService, RealtimeGateway],
+  providers: [RealtimeAuthService, RealtimeGateway, RealtimeSessionService],
+  exports: [RealtimeSessionService],
 })
 export class RealtimeModule {}

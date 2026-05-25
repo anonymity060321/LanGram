@@ -12,6 +12,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
+  SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
 } as const;
 
@@ -92,6 +93,10 @@ export interface PresenceUpdatePayload {
   lastSeenAt: string | null;
 }
 
+export interface SessionKickedPayload {
+  reason: 'new_device_login';
+}
+
 interface RealtimeHandlers {
   onMessageNew: (payload: MessageNewPayload) => void;
   onMessageDelivered: (payload: MessageDeliveredPayload) => void;
@@ -99,6 +104,7 @@ interface RealtimeHandlers {
   onMessageRecalled: (payload: MessageRecalledPayload) => void;
   onMessageEdited: (payload: MessageEditedPayload) => void;
   onPresenceUpdate: (payload: PresenceUpdatePayload) => void;
+  onSessionKicked: (payload: SessionKickedPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
 }
 
@@ -123,6 +129,7 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.MESSAGE_RECALLED, handlers.onMessageRecalled);
   socket.on(REALTIME_EVENTS.MESSAGE_EDITED, handlers.onMessageEdited);
   socket.on(REALTIME_EVENTS.PRESENCE_UPDATE, handlers.onPresenceUpdate);
+  socket.on(REALTIME_EVENTS.SESSION_KICKED, handlers.onSessionKicked);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
   socket.on('connect_error', (error) => {
     handlers.onError({ code: 'WS_CONNECT_ERROR', message: error.message });

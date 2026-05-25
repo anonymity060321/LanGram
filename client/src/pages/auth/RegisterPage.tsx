@@ -70,7 +70,11 @@ export function RegisterPage(): JSX.Element {
   }
 
   return (
-    <AuthShell title={t('auth.registerTitle')}>
+    <AuthShell
+      title={t('auth.registerTitle')}
+      showRegisterLink={false}
+      loginLinkLabel={t('auth.toLoginPrompt')}
+    >
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
         <label>
           <span>{t('auth.email')}</span>

@@ -36,6 +36,7 @@ export function MainLayout(): JSX.Element {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const accessToken = useAuthStore((state) => state.accessToken);
+  const notifySessionReplaced = useAuthStore((state) => state.notifySessionReplaced);
   const clearSession = useAuthStore((state) => state.clearSession);
   const conversations = useChatStore((state) => state.conversations);
   const selectedConversationId = useChatStore((state) => state.selectedConversationId);
@@ -129,9 +130,9 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
-    connect(accessToken);
+    connect(accessToken, () => notifySessionReplaced());
     return () => disconnect();
-  }, [accessToken, connect, disconnect]);
+  }, [accessToken, connect, disconnect, notifySessionReplaced]);
 
   useEffect(() => {
     if (!isAppMenuOpen) {

@@ -20,6 +20,7 @@ export class ApiClientError extends Error {
 
 let baseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api');
 let accessToken: string | null = null;
+let sessionRevokedHandler: (() => void) | null = null;
 
 export function setApiBaseUrl(nextBaseUrl: string): void {
   baseUrl = normalizeBaseUrl(nextBaseUrl);
@@ -31,6 +32,10 @@ export function getApiBaseUrl(): string {
 
 export function setAccessToken(nextAccessToken: string | null): void {
   accessToken = nextAccessToken;
+}
+
+export function setSessionRevokedHandler(handler: (() => void) | null): void {
+  sessionRevokedHandler = handler;
 }
 
 export async function apiRequest<TResponse>(
@@ -54,7 +59,9 @@ export async function apiRequest<TResponse>(
   });
 
   if (!response.ok) {
-    throw new ApiClientError(response.status, await parseErrorPayload(response));
+    const payload = await parseErrorPayload(response);
+    notifySessionRevoked(response.status, payload);
+    throw new ApiClientError(response.status, payload);
   }
 
   if (response.status === 204) {
@@ -77,7 +84,9 @@ export async function apiBlobRequest(path: string, options: RequestInit = {}): P
   });
 
   if (!response.ok) {
-    throw new ApiClientError(response.status, await parseErrorPayload(response));
+    const payload = await parseErrorPayload(response);
+    notifySessionRevoked(response.status, payload);
+    throw new ApiClientError(response.status, payload);
   }
 
   return response.blob();
@@ -97,4 +106,12 @@ async function parseErrorPayload(response: Response): Promise<ApiErrorPayload> {
   } catch {
     return { message: response.statusText };
   }
+}
+
+function notifySessionRevoked(status: number, payload: ApiErrorPayload): void {
+  if (status !== 401 || payload.message !== 'Session is no longer active') {
+    return;
+  }
+
+  sessionRevokedHandler?.();
 }

@@ -9,6 +9,7 @@ import {
 import { EmailService } from './email.service';
 import { EmailCodePurposeDto } from './dto/send-email-code.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeSessionService } from '../realtime/realtime-session.service';
 import { UsersService } from '../users/users.service';
 
 type MockFunction<T extends (...args: never[]) => unknown> = jest.MockedFunction<T>;
@@ -101,6 +102,9 @@ function createService(prisma: MockPrisma): {
   emailService: {
     sendVerificationCode: jest.MockedFunction<(email: string, code: string) => Promise<void>>;
   };
+  realtimeSessionService: {
+    kickUser: jest.MockedFunction<(userId: string, payload: { reason: 'new_device_login' }) => void>;
+  };
 } {
   const jwtService = {
     signAsync: jest.fn(async () => 'access-token'),
@@ -113,6 +117,9 @@ function createService(prisma: MockPrisma): {
   const usersService = {
     findPublicById: jest.fn(),
   } as unknown as UsersService;
+  const realtimeSessionService = {
+    kickUser: jest.fn(),
+  };
 
   return {
     service: new AuthService(
@@ -121,8 +128,10 @@ function createService(prisma: MockPrisma): {
       createConfigService(),
       emailService as unknown as EmailService,
       usersService,
+      realtimeSessionService as unknown as RealtimeSessionService,
     ),
     emailService,
+    realtimeSessionService,
   };
 }
 
@@ -350,7 +359,7 @@ describe('AuthService', () => {
     prisma.session.updateMany.mockResolvedValue({ count: 1 });
     prisma.device.upsert.mockResolvedValue({ id: 'device-id' });
     prisma.session.create.mockResolvedValue({ id: 'session-id' });
-    const { service } = createService(prisma);
+    const { service, realtimeSessionService } = createService(prisma);
 
     const result = await service.register({
       email: 'USER@example.com',
@@ -368,6 +377,9 @@ describe('AuthService', () => {
     expect(prisma.session.updateMany).toHaveBeenCalledWith({
       where: { userId: 'user-id', revokedAt: null },
       data: { revokedAt: expect.any(Date) },
+    });
+    expect(realtimeSessionService.kickUser).toHaveBeenCalledWith('user-id', {
+      reason: 'new_device_login',
     });
     expect(prisma.emailVerificationCode.update).toHaveBeenCalledWith({
       where: { id: 'code-id' },

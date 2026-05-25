@@ -8,9 +8,12 @@ interface AuthState {
   refreshToken: string | null;
   expiresAt: number | null;
   isAuthenticated: boolean;
+  isSessionReplaced: boolean;
   setSession: (result: AuthResult) => void;
   updateUser: (user: AuthUser) => void;
   clearSession: () => void;
+  notifySessionReplaced: () => void;
+  acknowledgeSessionReplaced: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -19,6 +22,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   refreshToken: null,
   expiresAt: null,
   isAuthenticated: false,
+  isSessionReplaced: false,
   setSession: (result) => {
     const expiresAt = Date.now() + result.expiresInSeconds * 1000;
     setAccessToken(result.accessToken);
@@ -28,6 +32,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       refreshToken: result.refreshToken,
       expiresAt,
       isAuthenticated: true,
+      isSessionReplaced: false,
     });
   },
   updateUser: (user) => {
@@ -42,5 +47,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       expiresAt: null,
       isAuthenticated: false,
     });
+  },
+  notifySessionReplaced: () => {
+    set((state) => (state.isAuthenticated ? { isSessionReplaced: true } : {}));
+  },
+  acknowledgeSessionReplaced: () => {
+    set({ isSessionReplaced: false });
   },
 }));
