@@ -60,6 +60,16 @@ export interface RegisterRequest {
 
 export type TemporaryRegisterRequest = Omit<RegisterRequest, 'code'>;
 
+export interface PasswordResetCodeRequest {
+  email: string;
+}
+
+export interface PasswordResetRequest {
+  email: string;
+  code: string;
+  newPassword: string;
+}
+
 export interface GuestLoginRequest {
   displayName?: string;
   device: DeviceIdentity;
@@ -94,6 +104,22 @@ export function loginWithPassword(request: PasswordLoginRequest): Promise<AuthRe
 
 export function loginWithEmailCode(request: EmailCodeLoginRequest): Promise<AuthResult> {
   return apiRequest('/auth/login/email-code', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function requestPasswordResetCode(
+  request: PasswordResetCodeRequest,
+): Promise<{ sent: true }> {
+  return apiRequest('/auth/password/reset/code', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function resetPassword(request: PasswordResetRequest): Promise<{ reset: true }> {
+  return apiRequest('/auth/password/reset', {
     method: 'POST',
     body: JSON.stringify(request),
   });

@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { EmailCodeLoginDto } from './dto/email-code-login.dto';
 import { GuestLoginDto } from './dto/guest-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { PasswordResetCodeDto, PasswordResetDto } from './dto/password-reset.dto';
 import { PasswordLoginDto } from './dto/password-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -53,6 +54,18 @@ export class AuthController {
     @Req() request: Request,
   ): Promise<unknown> {
     return this.authService.loginWithEmailCode(dto, request.ip, request.headers['user-agent']);
+  }
+
+  @Post('password/reset/code')
+  async sendPasswordResetCode(@Body() dto: PasswordResetCodeDto): Promise<{ sent: true }> {
+    await this.authService.sendPasswordResetCode(dto);
+    return { sent: true };
+  }
+
+  @Post('password/reset')
+  async resetPassword(@Body() dto: PasswordResetDto): Promise<{ reset: true }> {
+    await this.authService.resetPassword(dto);
+    return { reset: true };
   }
 
   /**

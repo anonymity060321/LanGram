@@ -23,6 +23,7 @@ enum UserStatus {
 enum EmailVerificationPurpose {
   REGISTER
   LOGIN
+  PASSWORD_RESET
 
   @@map("email_verification_purpose")
 }

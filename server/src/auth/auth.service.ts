@@ -15,6 +15,7 @@ import { EmailService } from './email.service';
 import { EmailCodeLoginDto } from './dto/email-code-login.dto';
 import { GuestLoginDto } from './dto/guest-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { PasswordResetCodeDto, PasswordResetDto } from './dto/password-reset.dto';
 import { PasswordLoginDto } from './dto/password-login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { EmailCodePurposeDto, SendEmailCodeDto } from './dto/send-email-code.dto';
@@ -59,6 +60,7 @@ const TEXT_CAPTCHA_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 type ArithmeticCaptchaOperation = 'add' | 'subtract' | 'multiply' | 'divide';
 type CaptchaRandomInt = (min: number, max: number) => number;
+type EmailVerificationPurposeValue = EmailCodePurposeDto | 'PASSWORD_RESET';
 
 interface TextCaptchaChallenge {
   prompt: string;
@@ -235,13 +237,59 @@ export class AuthService {
 
   async sendEmailCode(dto: SendEmailCodeDto): Promise<void> {
     const email = dto.email.toLowerCase();
+    await this.createAndSendEmailCode(email, dto.purpose, true);
+  }
+
+  async sendPasswordResetCode(dto: PasswordResetCodeDto): Promise<void> {
+    const email = dto.email.toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.accountType !== 'EMAIL' || user.status !== 'ACTIVE' || !user.passwordHash) {
+      return;
+    }
+
+    await this.createAndSendEmailCode(email, 'PASSWORD_RESET', false);
+  }
+
+  async resetPassword(dto: PasswordResetDto): Promise<void> {
+    const email = dto.email.toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.accountType !== 'EMAIL' || user.status !== 'ACTIVE') {
+      throw new BadRequestException('Email, code, or new password is invalid');
+    }
+
+    try {
+      await this.consumeEmailCode(email, 'PASSWORD_RESET', dto.code);
+    } catch {
+      throw new BadRequestException('Email, code, or new password is invalid');
+    }
+
+    const passwordHash = await hashAuthSecret(dto.newPassword);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+    await this.prisma.session.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  private async createAndSendEmailCode(
+    email: string,
+    purpose: EmailVerificationPurposeValue,
+    throwOnResendLimit: boolean,
+  ): Promise<void> {
     const resendSeconds = this.getNumberConfig('EMAIL_CODE_RESEND_SECONDS');
     const latestCode = await this.prisma.emailVerificationCode.findFirst({
-      where: { email, purpose: dto.purpose, consumedAt: null },
+      where: { email, purpose, consumedAt: null },
       orderBy: { createdAt: 'desc' },
     });
 
     if (latestCode && Date.now() - latestCode.createdAt.getTime() < resendSeconds * 1000) {
+      if (!throwOnResendLimit) {
+        return;
+      }
+
       throw new HttpException(
         'Please wait before requesting another code',
         HttpStatus.TOO_MANY_REQUESTS,
@@ -256,7 +304,7 @@ export class AuthService {
       data: {
         email,
         codeHash,
-        purpose: dto.purpose,
+        purpose,
         expiresAt: this.addMinutes(new Date(), ttlMinutes),
       },
     });
@@ -549,7 +597,7 @@ export class AuthService {
 
   private async consumeEmailCode(
     email: string,
-    purpose: EmailCodePurposeDto,
+    purpose: EmailVerificationPurposeValue,
     code: string,
   ): Promise<void> {
     const verification = await this.prisma.emailVerificationCode.findFirst({

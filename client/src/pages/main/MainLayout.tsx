@@ -261,8 +261,8 @@ export function MainLayout(): JSX.Element {
     [conversations, friends],
   );
   const forwardTargets = useMemo(
-    () => buildForwardTargets(conversations, visibleFriends, t('chat.unknownPeer')),
-    [conversations, t, visibleFriends],
+    () => buildForwardTargets(conversations, visibleFriends, t('chat.unknownPeer'), selectedConversationId),
+    [conversations, selectedConversationId, t, visibleFriends],
   );
 
   async function handleSelectConversation(conversationId: string): Promise<void> {
@@ -1584,7 +1584,12 @@ function MessageList({
                       key={target.id}
                       onClick={() => toggleForwardTarget(target.id)}
                     >
-                      <span>{target.label}</span>
+                      <span className="forward-target-label">
+                        <span>{target.label}</span>
+                        {target.isCurrentChat ? (
+                          <em className="forward-current-badge">{t('chat.currentChat')}</em>
+                        ) : null}
+                      </span>
                       <small>{t('chat.direct')}</small>
                     </button>
                   );
@@ -2180,12 +2185,14 @@ interface ForwardTarget {
   label: string;
   conversationId: string;
   friendUserId: string;
+  isCurrentChat: boolean;
 }
 
 function buildForwardTargets(
   conversations: Conversation[],
   friendsWithoutConversation: FriendItem[],
   unknownPeerLabel: string,
+  selectedConversationId: string | null,
 ): ForwardTarget[] {
   return [
     ...conversations.map((conversation) => ({
@@ -2194,6 +2201,7 @@ function buildForwardTargets(
       label: conversation.peer?.displayName ?? unknownPeerLabel,
       conversationId: conversation.id,
       friendUserId: '',
+      isCurrentChat: conversation.id === selectedConversationId,
     })),
     ...friendsWithoutConversation.map((friend) => ({
       id: `friend:${friend.friend.id}`,
@@ -2201,6 +2209,7 @@ function buildForwardTargets(
       label: friend.friend.displayName,
       conversationId: '',
       friendUserId: friend.friend.id,
+      isCurrentChat: false,
     })),
   ];
 }

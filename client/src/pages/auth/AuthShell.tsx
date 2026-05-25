@@ -6,9 +6,15 @@ interface AuthShellProps {
   title: string;
   children: React.ReactNode;
   showLoginLink?: boolean;
+  registerLinkLabel?: string;
 }
 
-export function AuthShell({ title, children, showLoginLink = true }: AuthShellProps): JSX.Element {
+export function AuthShell({
+  title,
+  children,
+  showLoginLink = true,
+  registerLinkLabel,
+}: AuthShellProps): JSX.Element {
   const { t } = useI18n();
 
   return (
@@ -21,7 +27,7 @@ export function AuthShell({ title, children, showLoginLink = true }: AuthShellPr
         {children}
         <nav className="auth-links" aria-label="Auth navigation">
           {showLoginLink ? <Link to="/auth/login">{t('auth.toLogin')}</Link> : null}
-          <Link to="/auth/register">{t('auth.toRegister')}</Link>
+          <Link to="/auth/register">{registerLinkLabel ?? t('auth.toRegister')}</Link>
           <Link to="/auth/guest">{t('auth.toGuest')}</Link>
         </nav>
       </section>

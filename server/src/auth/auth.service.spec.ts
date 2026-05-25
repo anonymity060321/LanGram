@@ -27,6 +27,7 @@ interface MockPrisma {
   user: {
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     create: MockFunction<(args: unknown) => Promise<unknown>>;
+    update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   session: {
     updateMany: MockFunction<(args: unknown) => Promise<unknown>>;
@@ -57,6 +58,7 @@ function createMockPrisma(): MockPrisma {
     user: {
       findUnique: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     session: {
       updateMany: jest.fn(),
@@ -219,6 +221,114 @@ describe('AuthService', () => {
     expect(createArgs.data.email).toBe('user@example.com');
     expect(createArgs.data.codeHash).not.toBe(sentCode);
     await expect(bcrypt.compare(sentCode, createArgs.data.codeHash)).resolves.toBe(true);
+  });
+
+  it('sends password reset codes only for active email users without exposing plaintext codes', async () => {
+    const prisma = createMockPrisma();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-id',
+      email: 'user@example.com',
+      passwordHash: 'hashed-password',
+      accountType: 'EMAIL',
+      status: 'ACTIVE',
+    });
+    prisma.emailVerificationCode.findFirst.mockResolvedValue(null);
+    prisma.emailVerificationCode.create.mockResolvedValue({});
+    const { service, emailService } = createService(prisma);
+
+    await service.sendPasswordResetCode({ email: 'USER@example.com' });
+
+    const sentCode = emailService.sendVerificationCode.mock.calls[0][1];
+    const createArgs = prisma.emailVerificationCode.create.mock.calls[0][0] as {
+      data: { email: string; codeHash: string; purpose: string };
+    };
+    expect(createArgs.data).toMatchObject({
+      email: 'user@example.com',
+      purpose: 'PASSWORD_RESET',
+    });
+    expect(createArgs.data.codeHash).not.toBe(sentCode);
+    await expect(bcrypt.compare(sentCode, createArgs.data.codeHash)).resolves.toBe(true);
+  });
+
+  it('returns from password reset code requests for unknown emails without sending mail', async () => {
+    const prisma = createMockPrisma();
+    prisma.user.findUnique.mockResolvedValue(null);
+    const { service, emailService } = createService(prisma);
+
+    await service.sendPasswordResetCode({ email: 'missing@example.com' });
+
+    expect(emailService.sendVerificationCode).not.toHaveBeenCalled();
+    expect(prisma.emailVerificationCode.create).not.toHaveBeenCalled();
+  });
+
+  it('resets password with a valid password reset code and revokes active sessions', async () => {
+    const prisma = createMockPrisma();
+    const codeHash = await bcrypt.hash('123456', 4);
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-id',
+      email: 'user@example.com',
+      passwordHash: 'old-password-hash',
+      accountType: 'EMAIL',
+      status: 'ACTIVE',
+    });
+    prisma.emailVerificationCode.findFirst.mockResolvedValue({
+      id: 'code-id',
+      codeHash,
+      createdAt: new Date(),
+    });
+    prisma.emailVerificationCode.update.mockResolvedValue({});
+    prisma.user.update.mockResolvedValue({});
+    prisma.session.updateMany.mockResolvedValue({ count: 2 });
+    const { service } = createService(prisma);
+
+    await service.resetPassword({
+      email: 'USER@example.com',
+      code: '123456',
+      newPassword: 'new-password123',
+    });
+
+    const updateArgs = prisma.user.update.mock.calls[0][0] as {
+      where: { id: string };
+      data: { passwordHash: string };
+    };
+    expect(updateArgs.where.id).toBe('user-id');
+    expect(updateArgs.data.passwordHash).not.toBe('new-password123');
+    await expect(bcrypt.compare('new-password123', updateArgs.data.passwordHash)).resolves.toBe(true);
+    expect(prisma.emailVerificationCode.update).toHaveBeenCalledWith({
+      where: { id: 'code-id' },
+      data: { consumedAt: expect.any(Date) },
+    });
+    expect(prisma.session.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-id', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it('uses a generic reset failure for invalid password reset codes', async () => {
+    const prisma = createMockPrisma();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-id',
+      email: 'user@example.com',
+      passwordHash: 'old-password-hash',
+      accountType: 'EMAIL',
+      status: 'ACTIVE',
+    });
+    prisma.emailVerificationCode.findFirst.mockResolvedValue({
+      id: 'code-id',
+      codeHash: await bcrypt.hash('123456', 4),
+      createdAt: new Date(),
+    });
+    const { service } = createService(prisma);
+
+    await expect(
+      service.resetPassword({
+        email: 'user@example.com',
+        code: '654321',
+        newPassword: 'new-password123',
+      }),
+    ).rejects.toThrow('Email, code, or new password is invalid');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.session.updateMany).not.toHaveBeenCalled();
   });
 
   it('registers an email user and revokes old active sessions before issuing a new one', async () => {

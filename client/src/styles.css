@@ -269,6 +269,21 @@ button {
   font-size: 14px;
 }
 
+.auth-inline-link {
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-inline-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
 .sidebar-actions {
   display: flex;
   gap: 12px;
@@ -1292,13 +1307,34 @@ button {
   background: #dbeafe;
 }
 
-.forward-target span {
+.forward-target-label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.forward-target-label > span {
   min-width: 0;
   overflow: hidden;
   color: #172033;
   font-size: 13px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.forward-current-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .forward-target small {
@@ -2590,6 +2626,14 @@ button {
   color: #fca5a5;
 }
 
+:root[data-theme='dark'] .auth-inline-link {
+  color: #93c5fd;
+}
+
+:root[data-theme='dark'] .auth-inline-link:hover {
+  color: #bfdbfe;
+}
+
 :root[data-theme='dark'] .app-nav-menu-item.is-danger {
   color: #fca5a5;
 }
@@ -2660,8 +2704,13 @@ button {
   background: #172554;
 }
 
-:root[data-theme='dark'] .forward-target span {
+:root[data-theme='dark'] .forward-target-label > span {
   color: #f8fafc;
+}
+
+:root[data-theme='dark'] .forward-current-badge {
+  background: rgba(14, 165, 233, 0.18);
+  color: #7dd3fc;
 }
 
 :root[data-theme='dark'] .forward-target small {
