@@ -1,4 +1,13 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+} from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
 import {
@@ -82,9 +91,16 @@ export function MainLayout(): JSX.Element {
     () => (selectedConversationId ? messagesByConversation[selectedConversationId] ?? [] : []),
     [messagesByConversation, selectedConversationId],
   );
-  const visibleMessages = useMemo(
-    () => filterMessages(messages, searchQuery),
+  const searchResults = useMemo(
+    () => buildSearchResults(messages, searchQuery),
     [messages, searchQuery],
+  );
+  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1);
+  const activeSearchMessageId =
+    activeSearchResultIndex >= 0 ? searchResults[activeSearchResultIndex]?.messageId ?? null : null;
+  const searchMatchIds = useMemo(
+    () => new Set(searchResults.map((result) => result.messageId)),
+    [searchResults],
   );
   const displayedConversations = useMemo(
     () => buildDisplayedConversations(conversations, conversationUiState),
@@ -204,6 +220,22 @@ export function MainLayout(): JSX.Element {
       closeConversation();
     }
   }, [closeConversation, conversationUiState.hiddenConversations, selectedConversationId]);
+
+  useEffect(() => {
+    const hasSearchQuery = searchQuery.trim().length > 0;
+    if (!hasSearchQuery || searchResults.length === 0) {
+      setActiveSearchResultIndex(-1);
+      return;
+    }
+
+    setActiveSearchResultIndex((current) => {
+      if (current >= 0 && current < searchResults.length) {
+        return current;
+      }
+
+      return 0;
+    });
+  }, [searchQuery, searchResults.length]);
 
   useEffect(() => {
     setFriends((current) =>
@@ -560,6 +592,41 @@ export function MainLayout(): JSX.Element {
     }
   }
 
+  function goToNextSearchResult(): void {
+    if (searchResults.length === 0) {
+      return;
+    }
+
+    setActiveSearchResultIndex((current) => (current + 1 + searchResults.length) % searchResults.length);
+  }
+
+  function goToPreviousSearchResult(): void {
+    if (searchResults.length === 0) {
+      return;
+    }
+
+    setActiveSearchResultIndex((current) => (current - 1 + searchResults.length) % searchResults.length);
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
+    if (event.key !== 'Enter') {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.shiftKey) {
+      goToPreviousSearchResult();
+      return;
+    }
+
+    goToNextSearchResult();
+  }
+
+  function clearSearch(): void {
+    setSearchQuery('');
+    setActiveSearchResultIndex(-1);
+  }
+
   return (
     <main className="main-layout">
       <aside className="app-nav">
@@ -718,20 +785,55 @@ export function MainLayout(): JSX.Element {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder={t('chat.searchPlaceholder')}
               />
               {searchQuery.trim() ? (
-                <span>
-                  {visibleMessages.length} / {messages.length}
-                </span>
+                <div className="chat-search-actions">
+                  <span className={searchResults.length === 0 ? 'is-empty' : ''}>
+                    {searchResults.length === 0
+                      ? t('chat.searchNoResults')
+                      : `${Math.max(activeSearchResultIndex + 1, 1)} / ${searchResults.length}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="chat-search-button"
+                    aria-label={t('chat.searchPrevious')}
+                    title={t('chat.searchPrevious')}
+                    disabled={searchResults.length === 0}
+                    onClick={goToPreviousSearchResult}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-search-button"
+                    aria-label={t('chat.searchNext')}
+                    title={t('chat.searchNext')}
+                    disabled={searchResults.length === 0}
+                    onClick={goToNextSearchResult}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-search-button"
+                    aria-label={t('chat.searchClear')}
+                    title={t('chat.searchClear')}
+                    onClick={clearSearch}
+                  >
+                    ×
+                  </button>
+                </div>
               ) : null}
             </div>
             <MessageList
               conversationId={selectedConversation.id}
-              messages={visibleMessages}
+              messages={messages}
               isLoading={isLoadingMessages}
               searchQuery={searchQuery}
-              hasSearchQuery={searchQuery.trim().length > 0}
+              activeSearchMessageId={activeSearchMessageId}
+              searchMatchIds={searchMatchIds}
               onDeleteLocalMessage={handleDeleteLocalMessage}
               onRecallMessage={handleRecallMessage}
               onEditMessage={handleEditMessage}
@@ -1044,7 +1146,8 @@ function MessageList({
   messages,
   isLoading,
   searchQuery,
-  hasSearchQuery,
+  activeSearchMessageId,
+  searchMatchIds,
   onDeleteLocalMessage,
   onRecallMessage,
   onEditMessage,
@@ -1057,7 +1160,8 @@ function MessageList({
   messages: ChatMessage[];
   isLoading: boolean;
   searchQuery: string;
-  hasSearchQuery: boolean;
+  activeSearchMessageId: string | null;
+  searchMatchIds: Set<string>;
   onDeleteLocalMessage: (messageId: string) => void;
   onRecallMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, plaintext: string) => Promise<void>;
@@ -1076,6 +1180,7 @@ function MessageList({
   const [previewFile, setPreviewFile] = useState<FileMetadataResponse | null>(null);
   const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Record<string, HTMLElement | null>>({});
   const isAtBottomRef = useRef(true);
   const previousMessageCountRef = useRef(0);
   const previousConversationIdRef = useRef<string | null>(null);
@@ -1086,6 +1191,15 @@ function MessageList({
     setContextMenu(null);
     setPreviewFile(null);
   }, [messages]);
+
+  useEffect(() => {
+    if (!activeSearchMessageId) {
+      return;
+    }
+
+    const messageElement = messageRefs.current[activeSearchMessageId];
+    messageElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [activeSearchMessageId]);
 
   useEffect(() => {
     if (!forwardingMessage) {
@@ -1277,7 +1391,7 @@ function MessageList({
   if (messages.length === 0) {
     return (
       <div className="message-list empty-chat-state">
-        <p>{hasSearchQuery ? t('chat.searchNoResults') : t('chat.noMessages')}</p>
+        <p>{t('chat.noMessages')}</p>
       </div>
     );
   }
@@ -1286,7 +1400,15 @@ function MessageList({
     <div className="message-list-shell">
       <div ref={listRef} className="message-list" onScroll={handleListScroll}>
         {messages.map((message) => (
-          <article className={`message-row ${message.isOwn ? 'is-own' : ''}`} key={message.id}>
+          <article
+            className={`message-row ${message.isOwn ? 'is-own' : ''} ${
+              searchMatchIds.has(message.id) ? 'is-search-match' : ''
+            } ${activeSearchMessageId === message.id ? 'is-current-search-match' : ''}`}
+            key={message.id}
+            ref={(element) => {
+              messageRefs.current[message.id] = element;
+            }}
+          >
             <div
               className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
               onContextMenu={(event) => handleContextMenu(event, message)}
@@ -1318,7 +1440,15 @@ function MessageList({
                 <p>
                   {message.status === 'recalled'
                     ? t('chat.messageRecalled')
-                    : renderMessageBody(message, searchQuery, t, downloadStates, openImagePreview)}
+                    : renderMessageBody(
+                        message,
+                        searchQuery,
+                        t,
+                        downloadStates,
+                        openImagePreview,
+                        searchMatchIds.has(message.id),
+                        activeSearchMessageId === message.id,
+                      )}
                 </p>
               )}
               <div className="message-meta">
@@ -1585,15 +1715,21 @@ function renderMessageBody(
   t: ReturnType<typeof useI18n>['t'],
   downloadStates: Record<string, FileDownloadStatus>,
   onOpenImagePreview: (file: FileMetadataResponse) => void,
+  isSearchMatch: boolean,
+  isCurrentSearchMatch: boolean,
 ): Array<string | JSX.Element> | JSX.Element | string {
   if (message.messageType === 'IMAGE' && message.file) {
     const downloadStatus = downloadStates[message.file.id];
 
     return (
-      <span className="image-message-card">
+      <span
+        className={`image-message-card ${isSearchMatch ? 'is-search-match' : ''} ${
+          isCurrentSearchMatch ? 'is-current-search-match' : ''
+        }`}
+      >
         <ImageMessagePreview file={message.file} t={t} onOpenPreview={onOpenImagePreview} />
         <span className="image-message-details">
-          <strong>{message.file.originalName}</strong>
+          <strong>{renderHighlightedText(message.file.originalName, searchQuery)}</strong>
           <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
           {downloadStatus ? (
             <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
@@ -1610,9 +1746,13 @@ function renderMessageBody(
     const fileBadge = formatFileBadge(message.file.originalName);
 
     return (
-      <span className="file-message-card">
+      <span
+        className={`file-message-card ${isSearchMatch ? 'is-search-match' : ''} ${
+          isCurrentSearchMatch ? 'is-current-search-match' : ''
+        }`}
+      >
         <span className="file-message-details">
-          <strong>{message.file.originalName}</strong>
+          <strong>{renderHighlightedText(message.file.originalName, searchQuery)}</strong>
           <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
           {downloadStatus ? (
             <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
@@ -1867,6 +2007,9 @@ type ConversationMenuItem = {
   labelKey: Parameters<ReturnType<typeof useI18n>['t']>[0];
   isDanger?: boolean;
 };
+type SearchResult = {
+  messageId: string;
+};
 type ImagePreviewState =
   | { status: 'loading'; objectUrl: null }
   | { status: 'failed'; objectUrl: null }
@@ -2001,15 +2144,23 @@ function buildForwardTargets(
   ];
 }
 
-function filterMessages(messages: ChatMessage[], query: string): ChatMessage[] {
+function buildSearchResults(messages: ChatMessage[], query: string): SearchResult[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) {
-    return messages;
+    return [];
   }
 
-  return messages.filter((message) =>
-    message.plaintext.toLocaleLowerCase().includes(normalizedQuery),
-  );
+  return messages
+    .filter((message) => message.status !== 'recalled')
+    .filter((message) => {
+      const searchableText =
+        message.messageType === 'FILE' || message.messageType === 'IMAGE'
+          ? message.file?.originalName ?? ''
+          : message.plaintext;
+
+      return searchableText.toLocaleLowerCase().includes(normalizedQuery);
+    })
+    .map((message) => ({ messageId: message.id }));
 }
 
 function renderHighlightedText(text: string, query: string): Array<string | JSX.Element> | string {
