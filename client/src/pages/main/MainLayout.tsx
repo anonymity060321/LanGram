@@ -8,6 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Conversation } from '../../api/conversations.api';
 import {
@@ -65,6 +66,7 @@ export function MainLayout(): JSX.Element {
   const deleteLocalMessage = useChatStore((state) => state.deleteLocalMessage);
   const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
   const setSearchQuery = useChatStore((state) => state.setSearchQuery);
+  const localClearWatermarks = useChatStore((state) => state.localClearWatermarks);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
   const [messageLimitNotice, setMessageLimitNotice] = useState<string | null>(null);
@@ -73,8 +75,6 @@ export function MainLayout(): JSX.Element {
     notice: null,
     error: null,
   });
-  const [sendOriginalImage, setSendOriginalImage] = useState(false);
-  const [isImageOptionsOpen, setIsImageOptionsOpen] = useState(false);
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
   const [conversationUiState, setConversationUiState] = useState<ConversationUiState>(() =>
@@ -112,8 +112,8 @@ export function MainLayout(): JSX.Element {
     [searchResults],
   );
   const displayedConversations = useMemo(
-    () => buildDisplayedConversations(conversations, conversationUiState),
-    [conversationUiState, conversations],
+    () => buildDisplayedConversations(conversations, conversationUiState, messagesByConversation, localClearWatermarks),
+    [conversationUiState, conversations, localClearWatermarks, messagesByConversation],
   );
 
   useEffect(() => {
@@ -172,6 +172,21 @@ export function MainLayout(): JSX.Element {
   }, [messageLimitNotice]);
 
   useEffect(() => {
+    if (!uploadState.notice || uploadState.error) {
+      return undefined;
+    }
+
+    const currentNotice = uploadState.notice;
+    const timerId = window.setTimeout(() => {
+      setUploadState((current) =>
+        current.notice === currentNotice ? { ...current, notice: null } : current,
+      );
+    }, 3000);
+
+    return () => window.clearTimeout(timerId);
+  }, [uploadState.error, uploadState.notice]);
+
+  useEffect(() => {
     if (!conversationContextMenu) {
       return undefined;
     }
@@ -193,22 +208,6 @@ export function MainLayout(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [conversationContextMenu]);
-
-  useEffect(() => {
-    if (!isImageOptionsOpen) {
-      return undefined;
-    }
-
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') {
-        setIsImageOptionsOpen(false);
-        setSendOriginalImage(false);
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isImageOptionsOpen]);
 
   useEffect(() => {
     setConversationUiState((current) => {
@@ -391,7 +390,7 @@ export function MainLayout(): JSX.Element {
     let uploadImage: Awaited<ReturnType<typeof prepareImageUploadFile>> | null = null;
     if (requestedKind === 'IMAGE') {
       try {
-        uploadImage = await prepareImageUploadFile(file, sendOriginalImage);
+        uploadImage = await prepareImageUploadFile(file, true);
       } catch {
         setUploadState({
           isUploading: false,
@@ -422,27 +421,9 @@ export function MainLayout(): JSX.Element {
         notice: formatUploadNotice(metadata),
         error: null,
       });
-      if (requestedKind === 'IMAGE') {
-        setSendOriginalImage(false);
-      }
     } catch {
       setUploadState({ isUploading: false, notice: null, error: t('chat.uploadFailed') });
     }
-  }
-
-  function handleOpenImageOptions(): void {
-    setSendOriginalImage(false);
-    setIsImageOptionsOpen(true);
-  }
-
-  function handleChooseImageFromOptions(): void {
-    setIsImageOptionsOpen(false);
-    imageInputRef.current?.click();
-  }
-
-  function handleCancelImageOptions(): void {
-    setIsImageOptionsOpen(false);
-    setSendOriginalImage(false);
   }
 
   function handleDeleteLocalMessage(messageId: string): void {
@@ -507,13 +488,23 @@ export function MainLayout(): JSX.Element {
     }
 
     clearLocalConversation(selectedConversationId);
+    setConversationUiState((current) =>
+      saveConversationUiState({
+        ...current,
+        manualUnreadIds: current.manualUnreadIds.filter((id) => id !== selectedConversationId),
+      }),
+    );
+    setReadConversationOverrides((current) => ({
+      ...current,
+      [selectedConversationId]: new Date().toISOString(),
+    }));
   }
 
   function handleConversationContextMenu(event: MouseEvent, conversation: Conversation): void {
     event.preventDefault();
     setConversationContextMenu({
       conversation,
-      ...getContextMenuPosition(event.clientX, event.clientY),
+      ...getContextMenuPosition(event.clientX, event.clientY, 190, 150),
     });
   }
 
@@ -682,12 +673,22 @@ export function MainLayout(): JSX.Element {
       <aside className="app-nav">
         <AppLogo label={t('app.name')} size="sm" />
         <nav className="app-nav-links" aria-label={t('main.navigation')}>
-          <Link className="app-nav-link is-active" to="/">
-            <span>M</span>
+          <Link
+            className="app-nav-link is-active"
+            to="/"
+            aria-label={t('main.navMessages')}
+            title={t('main.navMessages')}
+          >
+            <NavIcon src={NAV_ICON_SOURCES.messages} fallback="M" label={t('main.navMessages')} />
             <strong>{t('main.navMessages')}</strong>
           </Link>
-          <Link className="app-nav-link" to="/friends">
-            <span>C</span>
+          <Link
+            className="app-nav-link"
+            to="/friends"
+            aria-label={t('main.navContacts')}
+            title={t('main.navContacts')}
+          >
+            <NavIcon src={NAV_ICON_SOURCES.contacts} fallback="C" label={t('main.navContacts')} />
             <strong>{t('main.navContacts')}</strong>
           </Link>
         </nav>
@@ -700,6 +701,7 @@ export function MainLayout(): JSX.Element {
                 className="app-nav-menu-item"
                 onClick={() => setIsAppMenuOpen(false)}
               >
+                <MenuItemIcon src={NAV_ICON_SOURCES.settings} fallback="S" label={t('main.navSettings')} />
                 {t('main.navSettings')}
               </Link>
               <button
@@ -711,6 +713,7 @@ export function MainLayout(): JSX.Element {
                   void handleLogout();
                 }}
               >
+                <MenuItemIcon src={NAV_ICON_SOURCES.logout} fallback="L" label={t('auth.logout')} />
                 {t('auth.logout')}
               </button>
             </div>
@@ -720,9 +723,10 @@ export function MainLayout(): JSX.Element {
             className="app-nav-link app-nav-menu-toggle"
             aria-label={t('main.moreMenu')}
             aria-expanded={isAppMenuOpen}
+            title={t('main.moreMenu')}
             onClick={() => setIsAppMenuOpen((isOpen) => !isOpen)}
           >
-            <span>☰</span>
+            <NavIcon src={NAV_ICON_SOURCES.more} fallback="..." label={t('main.moreMenu')} />
             <strong>{t('main.moreMenu')}</strong>
           </button>
         </div>
@@ -738,10 +742,13 @@ export function MainLayout(): JSX.Element {
           ) : null}
           <div className="conversation-list">
             {displayedConversations.map((conversation) => {
-              const unreadCount = getDisplayedUnreadCount(
+              const preview = getVisibleConversationPreview(
                 conversation,
+                messagesByConversation[conversation.id] ?? [],
+                localClearWatermarks,
                 conversationUiState.manualUnreadIds,
                 readConversationOverrides,
+                t,
               );
               const isPinned = conversationUiState.pinnedIds.includes(conversation.id);
               return (
@@ -762,48 +769,25 @@ export function MainLayout(): JSX.Element {
                   <span className="conversation-item-body">
                     <span className="conversation-item-header">
                       <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
-                      <time dateTime={conversation.lastMessageAt ?? conversation.updatedAt}>
-                        {formatConversationTime(conversation.lastMessageAt ?? conversation.updatedAt, t)}
-                      </time>
+                      {preview.time ? (
+                        <time dateTime={preview.time}>{formatConversationTime(preview.time, t)}</time>
+                      ) : null}
                     </span>
                     <span className="conversation-item-meta">
-                      <small>{formatConversationSummary(conversation, t)}</small>
-                      {isPinned ? <span className="conversation-pin">↑</span> : null}
-                      {unreadCount > 0 ? (
+                      <small>{preview.summary}</small>
+                      {isPinned ? <span className="conversation-pin">&uarr;</span> : null}
+                      {preview.unreadCount > 0 ? (
                         <span className="conversation-unread">
-                          {unreadCount > 99 ? '99+' : unreadCount}
+                          {preview.unreadCount > 99 ? '99+' : preview.unreadCount}
                         </span>
                       ) : null}
                     </span>
-                    <small className="conversation-presence">
-                      {conversation.peer
-                        ? formatPresence(conversation.peer.isOnline, conversation.peer.lastSeenAt, t)
-                        : t('chat.direct')}
-                    </small>
                   </span>
                 </button>
               );
             })}
           </div>
         </section>
-        {conversationContextMenu ? (
-          <ConversationContextMenu
-            conversation={conversationContextMenu.conversation}
-            isPinned={conversationUiState.pinnedIds.includes(conversationContextMenu.conversation.id)}
-            isUnread={
-              getDisplayedUnreadCount(
-                conversationContextMenu.conversation,
-                conversationUiState.manualUnreadIds,
-                readConversationOverrides,
-              ) > 0
-            }
-            x={conversationContextMenu.x}
-            y={conversationContextMenu.y}
-            t={t}
-            onAction={handleConversationMenuAction}
-            onClose={() => setConversationContextMenu(null)}
-          />
-        ) : null}
       </aside>
 
       <section className="chat-panel">
@@ -853,7 +837,7 @@ export function MainLayout(): JSX.Element {
                     disabled={searchResults.length === 0}
                     onClick={goToPreviousSearchResult}
                   >
-                    ↑
+                    &uarr;
                   </button>
                   <button
                     type="button"
@@ -863,7 +847,7 @@ export function MainLayout(): JSX.Element {
                     disabled={searchResults.length === 0}
                     onClick={goToNextSearchResult}
                   >
-                    ↓
+                    &darr;
                   </button>
                   <button
                     type="button"
@@ -872,7 +856,7 @@ export function MainLayout(): JSX.Element {
                     title={t('chat.searchClear')}
                     onClick={clearSearch}
                   >
-                    ×
+                    &times;
                   </button>
                 </div>
               ) : null}
@@ -916,7 +900,7 @@ export function MainLayout(): JSX.Element {
                   disabled={uploadState.isUploading}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <img src="/vector_icon/folder-closed.svg" alt="" aria-hidden="true" />
+                  <img src="/vector_icon/file.svg" alt="" aria-hidden="true" />
                   <span>{t('chat.sendFile')}</span>
                 </button>
                 <button
@@ -924,52 +908,12 @@ export function MainLayout(): JSX.Element {
                   className="composer-tool-button"
                   aria-label={t('chat.sendImage')}
                   title={t('chat.sendImage')}
-                  onClick={handleOpenImageOptions}
+                  onClick={() => imageInputRef.current?.click()}
                   disabled={uploadState.isUploading}
                 >
-                  <img src="/vector_icon/file-image.svg" alt="" aria-hidden="true" />
+                  <img src="/vector_icon/image.svg" alt="" aria-hidden="true" />
                   <span>{t('chat.sendImage')}</span>
                 </button>
-                {isImageOptionsOpen ? (
-                  <div
-                    className="image-options-backdrop"
-                    role="presentation"
-                    onMouseDown={(event) => {
-                      if (event.target === event.currentTarget) {
-                        handleCancelImageOptions();
-                      }
-                    }}
-                  >
-                    <section className="image-options-panel" role="dialog" aria-modal="true">
-                      <strong>{t('chat.imageOptionsTitle')}</strong>
-                      <label className="original-image-toggle">
-                        <input
-                          type="checkbox"
-                          checked={sendOriginalImage}
-                          onChange={(event) => setSendOriginalImage(event.target.checked)}
-                        />
-                        <span>{t('chat.sendOriginalImage')}</span>
-                      </label>
-                      <div className="image-options-actions">
-                        <button
-                          type="button"
-                          className="secondary-button compact-button"
-                          onClick={handleCancelImageOptions}
-                        >
-                          {t('chat.cancel')}
-                        </button>
-                        <button
-                          type="button"
-                          className="primary-button compact-button"
-                          disabled={uploadState.isUploading}
-                          onClick={handleChooseImageFromOptions}
-                        >
-                          {t('chat.chooseImage')}
-                        </button>
-                      </div>
-                    </section>
-                  </div>
-                ) : null}
                 <input
                   ref={fileInputRef}
                   className="hidden-file-input"
@@ -1059,6 +1003,30 @@ export function MainLayout(): JSX.Element {
           </div>
         </section>
       </aside>
+      {conversationContextMenu
+        ? createPortal(
+            <ConversationContextMenu
+              conversation={conversationContextMenu.conversation}
+              isPinned={conversationUiState.pinnedIds.includes(conversationContextMenu.conversation.id)}
+              isUnread={
+                getVisibleConversationPreview(
+                  conversationContextMenu.conversation,
+                  messagesByConversation[conversationContextMenu.conversation.id] ?? [],
+                  localClearWatermarks,
+                  conversationUiState.manualUnreadIds,
+                  readConversationOverrides,
+                  t,
+                ).unreadCount > 0
+              }
+              x={conversationContextMenu.x}
+              y={conversationContextMenu.y}
+              t={t}
+              onAction={handleConversationMenuAction}
+              onClose={() => setConversationContextMenu(null)}
+            />,
+            document.body,
+          )
+        : null}
     </main>
   );
 }
@@ -1123,16 +1091,29 @@ function formatConversationSummary(
   conversation: Conversation,
   t: ReturnType<typeof useI18n>['t'],
 ): string {
-  const message = conversation.lastMessage;
+  return formatConversationMessageSummary(
+    conversation.lastMessage,
+    conversation.lastMessagePlaintext ?? null,
+    conversation.lastMessageDecryptionFailed ?? false,
+    t,
+  );
+}
+
+function formatConversationMessageSummary(
+  message: Conversation['lastMessage'] | ChatMessage | null,
+  plaintext: string | null,
+  decryptionFailed: boolean,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
   if (!message) {
     return t('chat.noMessages');
   }
 
-  if (message.status === 'RECALLED') {
+  if (message.status === 'RECALLED' || message.status === 'recalled') {
     return t('chat.messageRecalled');
   }
 
-  if (conversation.lastMessageDecryptionFailed) {
+  if (decryptionFailed) {
     return t('chat.decryptFailed');
   }
 
@@ -1144,12 +1125,14 @@ function formatConversationSummary(
     return `[${t('chat.file')}] ${message.file?.originalName ?? t('chat.file')}`;
   }
 
-  return conversation.lastMessagePlaintext?.trim() || t('chat.noMessages');
+  return plaintext?.trim() || t('chat.noMessages');
 }
 
 function buildDisplayedConversations(
   conversations: Conversation[],
   uiState: ConversationUiState,
+  messagesByConversation: Record<string, ChatMessage[]>,
+  localClearWatermarks: Record<string, string>,
 ): Conversation[] {
   return [...conversations]
     .filter((conversation) => !uiState.hiddenConversations[conversation.id])
@@ -1160,12 +1143,29 @@ function buildDisplayedConversations(
         return leftPinned ? -1 : 1;
       }
 
-      return getConversationSortTime(right) - getConversationSortTime(left);
+      return (
+        getVisibleConversationSortTime(right, messagesByConversation, localClearWatermarks) -
+        getVisibleConversationSortTime(left, messagesByConversation, localClearWatermarks)
+      );
     });
 }
 
 function getConversationSortTime(conversation: Conversation): number {
   return new Date(conversation.lastMessageAt ?? conversation.updatedAt).getTime();
+}
+
+function getVisibleConversationSortTime(
+  conversation: Conversation,
+  messagesByConversation: Record<string, ChatMessage[]>,
+  localClearWatermarks: Record<string, string>,
+): number {
+  const preview = getVisibleConversationLastMessage(
+    conversation,
+    messagesByConversation[conversation.id] ?? [],
+    localClearWatermarks,
+  );
+
+  return preview?.createdAt ? new Date(preview.createdAt).getTime() : new Date(conversation.updatedAt).getTime();
 }
 
 function isConversationNewerThanHidden(conversation: Conversation, hiddenAt: string): boolean {
@@ -1187,6 +1187,99 @@ function getDisplayedUnreadCount(
   }
 
   return conversation.unreadCount;
+}
+
+function getVisibleConversationPreview(
+  conversation: Conversation,
+  localMessages: ChatMessage[],
+  localClearWatermarks: Record<string, string>,
+  manualUnreadIds: string[],
+  readConversationOverrides: Record<string, string>,
+  t: ReturnType<typeof useI18n>['t'],
+): ConversationPreview {
+  const visibleLastMessage = getVisibleConversationLastMessage(
+    conversation,
+    localMessages,
+    localClearWatermarks,
+  );
+  if (!visibleLastMessage) {
+    return {
+      summary: t('chat.noMessages'),
+      time: null,
+      unreadCount: 0,
+    };
+  }
+
+  const lastMessage = visibleLastMessage;
+  const summary =
+    'plaintext' in lastMessage
+      ? formatConversationMessageSummary(
+          lastMessage,
+          lastMessage.messageType === 'TEXT' ? lastMessage.plaintext : null,
+          lastMessage.plaintext === '[Unable to decrypt message]',
+          t,
+        )
+      : formatConversationSummary(conversation, t);
+
+  return {
+    summary,
+    time: lastMessage.createdAt,
+    unreadCount: getVisibleConversationUnreadCount(
+      conversation,
+      lastMessage,
+      manualUnreadIds,
+      readConversationOverrides,
+    ),
+  };
+}
+
+function getVisibleConversationUnreadCount(
+  conversation: Conversation,
+  visibleLastMessage: NonNullable<Conversation['lastMessage']> | ChatMessage,
+  manualUnreadIds: string[],
+  readConversationOverrides: Record<string, string>,
+): number {
+  if (manualUnreadIds.includes(conversation.id)) {
+    return Math.max(1, conversation.unreadCount);
+  }
+
+  if ('isOwn' in visibleLastMessage && visibleLastMessage.isOwn) {
+    return 0;
+  }
+
+  return getDisplayedUnreadCount(conversation, manualUnreadIds, readConversationOverrides);
+}
+
+function getVisibleConversationLastMessage(
+  conversation: Conversation,
+  localMessages: ChatMessage[],
+  localClearWatermarks: Record<string, string>,
+): Conversation['lastMessage'] | ChatMessage | null {
+  const latestLocalMessage = localMessages.at(-1);
+  if (latestLocalMessage) {
+    return latestLocalMessage;
+  }
+
+  if (
+    conversation.lastMessage &&
+    !isConversationLastMessageCleared(conversation, localClearWatermarks)
+  ) {
+    return conversation.lastMessage;
+  }
+
+  return null;
+}
+
+function isConversationLastMessageCleared(
+  conversation: Conversation,
+  localClearWatermarks: Record<string, string>,
+): boolean {
+  const clearedAt = localClearWatermarks[conversation.id];
+  if (!clearedAt || !conversation.lastMessage) {
+    return false;
+  }
+
+  return new Date(conversation.lastMessage.createdAt).getTime() <= new Date(clearedAt).getTime();
 }
 
 function formatConversationTime(
@@ -1251,6 +1344,7 @@ function MessageList({
   const [forwardError, setForwardError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<MessageContextMenuState | null>(null);
   const [previewFile, setPreviewFile] = useState<FileMetadataResponse | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -1440,9 +1534,30 @@ function MessageList({
     });
   }
 
-  function openImagePreview(file: FileMetadataResponse): void {
+  async function openImagePreview(file: FileMetadataResponse): Promise<void> {
     setContextMenu(null);
-    setPreviewFile(file);
+    setPreviewError(null);
+    if (!(await isTauriRuntime())) {
+      setPreviewFile(file);
+      return;
+    }
+
+    try {
+      const blob = await downloadFile(file.id);
+      if (!blob.type.toLowerCase().startsWith('image/')) {
+        throw new Error('Downloaded file is not an image');
+      }
+
+      const payload: ImagePreviewWindowPayload = {
+        id: file.id,
+        originalName: file.originalName,
+        dataUrl: await blobToDataUrl(blob),
+      };
+      await openImagePreviewWindow(payload);
+    } catch (error) {
+      console.error('Failed to open image preview window', error);
+      setPreviewError(t('chat.imagePreviewFailed'));
+    }
   }
 
   function scrollToMessageBottom(behavior: ScrollBehavior): void {
@@ -1574,18 +1689,21 @@ function MessageList({
             </div>
           </article>
         ))}
-        {contextMenu ? (
-          <MessageContextMenu
-            message={contextMenu.message}
-            x={contextMenu.x}
-            y={contextMenu.y}
-            t={t}
-            downloadStatus={contextMenu.message.file ? downloadStates[contextMenu.message.file.id] : undefined}
-            onAction={handleMenuAction}
-            onClose={() => setContextMenu(null)}
-          />
-        ) : null}
       </div>
+      {contextMenu
+        ? createPortal(
+            <MessageContextMenu
+              message={contextMenu.message}
+              x={contextMenu.x}
+              y={contextMenu.y}
+              t={t}
+              downloadStatus={contextMenu.message.file ? downloadStates[contextMenu.message.file.id] : undefined}
+              onAction={handleMenuAction}
+              onClose={() => setContextMenu(null)}
+            />,
+            document.body,
+          )
+        : null}
       {isJumpToBottomVisible ? (
         <button
           type="button"
@@ -1594,7 +1712,7 @@ function MessageList({
           title={t('chat.jumpToBottom')}
           onClick={() => scrollToMessageBottom('smooth')}
         >
-          ↓
+          &darr;
         </button>
       ) : null}
       {previewFile ? (
@@ -1605,6 +1723,7 @@ function MessageList({
           onDownload={() => void onDownloadFile(previewFile)}
         />
       ) : null}
+      {previewError ? <p className="chat-error">{previewError}</p> : null}
       {forwardingMessage ? (
         <div
           className="forward-dialog-backdrop"
@@ -1805,9 +1924,12 @@ function buildMessageMenuActions(
   return actions;
 }
 
-function getContextMenuPosition(clientX: number, clientY: number): { x: number; y: number } {
-  const menuWidth = 168;
-  const menuHeight = 190;
+function getContextMenuPosition(
+  clientX: number,
+  clientY: number,
+  menuWidth = 168,
+  menuHeight = 190,
+): { x: number; y: number } {
   const padding = 8;
 
   return {
@@ -2039,7 +2161,7 @@ function ImagePreviewDialog({
         <header className="image-lightbox-header">
           <strong id="image-preview-title">{file.originalName}</strong>
           <button type="button" className="image-lightbox-icon-button" aria-label={t('chat.closePreview')} onClick={onClose}>
-            ×
+            &times;
           </button>
         </header>
         <div className="image-lightbox-stage">
@@ -2092,6 +2214,69 @@ function ImagePreviewDialog({
   );
 }
 
+function NavIcon({
+  src,
+  fallback,
+  label,
+}: {
+  src: string | null;
+  fallback: string;
+  label: string;
+}): JSX.Element {
+  if (!src) {
+    return <span className="nav-icon-fallback">{fallback}</span>;
+  }
+
+  return (
+    <span className="nav-icon-shell">
+      <img
+        className="nav-icon-img"
+        src={src}
+        alt=""
+        aria-hidden="true"
+        onError={(event) => {
+          event.currentTarget.style.display = 'none';
+          event.currentTarget.parentElement?.setAttribute('data-icon-missing', 'true');
+        }}
+      />
+      <span className="nav-icon-fallback" aria-label={label}>
+        {fallback}
+      </span>
+    </span>
+  );
+}
+
+function MenuItemIcon({
+  src,
+  fallback,
+  label,
+}: {
+  src: string | null;
+  fallback: string;
+  label: string;
+}): JSX.Element {
+  if (!src) {
+    return <span className="menu-item-icon-fallback">{fallback}</span>;
+  }
+
+  return (
+    <span className="menu-item-icon">
+      <img
+        src={src}
+        alt=""
+        aria-hidden="true"
+        onError={(event) => {
+          event.currentTarget.style.display = 'none';
+          event.currentTarget.parentElement?.setAttribute('data-icon-missing', 'true');
+        }}
+      />
+      <span className="menu-item-icon-fallback" aria-label={label}>
+        {fallback}
+      </span>
+    </span>
+  );
+}
+
 interface FileUploadState {
   isUploading: boolean;
   notice: string | null;
@@ -2122,6 +2307,11 @@ type ConversationMenuItem = {
   labelKey: Parameters<ReturnType<typeof useI18n>['t']>[0];
   isDanger?: boolean;
 };
+type ConversationPreview = {
+  summary: string;
+  time: string | null;
+  unreadCount: number;
+};
 type SearchResult = {
   messageId: string;
 };
@@ -2129,6 +2319,14 @@ type ImagePreviewState =
   | { status: 'loading'; objectUrl: null }
   | { status: 'failed'; objectUrl: null }
   | { status: 'loaded'; objectUrl: string };
+type ImagePreviewWindowPayload = {
+  id: string;
+  originalName: string;
+  dataUrl: string;
+};
+type ImagePreviewReadyPayload = {
+  label: string;
+};
 type FileBadgeKind = 'word' | 'sheet' | 'slide' | 'pdf' | 'text' | 'archive' | 'image' | 'generic';
 type FileBadge = {
   label: string;
@@ -2150,6 +2348,13 @@ const FILE_UPLOAD_MIME_TYPES = new Set([
 ]);
 const IMAGE_UPLOAD_ACCEPT = Array.from(IMAGE_UPLOAD_MIME_TYPES).join(',');
 const FILE_UPLOAD_ACCEPT = Array.from(FILE_UPLOAD_MIME_TYPES).join(',');
+const NAV_ICON_SOURCES = {
+  messages: '/vector_icon/messages-square.svg',
+  contacts: '/vector_icon/users-round.svg',
+  more: '/vector_icon/menu.svg',
+  settings: '/vector_icon/settings.svg',
+  logout: '/vector_icon/log-out.svg',
+} as const;
 const FILE_ICON_SOURCES: Record<FileBadgeKind, string | null> = {
   word: '/file_icon/microsoft_word_macos_bigsur_icon_189948.png',
   sheet: '/file_icon/microsoft_excel_macos_bigsur_icon_189980.png',
@@ -2160,6 +2365,8 @@ const FILE_ICON_SOURCES: Record<FileBadgeKind, string | null> = {
   image: null,
   generic: null,
 };
+const IMAGE_PREVIEW_OPEN_EVENT = 'image-preview:open';
+const IMAGE_PREVIEW_READY_EVENT = 'image-preview:ready';
 
 function isSupportedUpload(file: File, requestedKind: FileKind): boolean {
   const mimeType = file.type.toLowerCase();
@@ -2217,6 +2424,75 @@ function triggerBrowserDownload(blob: Blob, originalName: string): void {
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+async function isTauriRuntime(): Promise<boolean> {
+  try {
+    const { isTauri } = await import('@tauri-apps/api/core');
+    return isTauri();
+  } catch {
+    return '__TAURI_INTERNALS__' in window;
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error('Image preview data is unavailable'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Image preview data failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function openImagePreviewWindow(payload: ImagePreviewWindowPayload): Promise<void> {
+  const label = `image-preview-${payload.id.replace(/[^a-zA-Z0-9-/:_]/g, '_')}-${Date.now()}`;
+  const [{ WebviewWindow }, { emitTo, listen }] = await Promise.all([
+    import('@tauri-apps/api/webviewWindow'),
+    import('@tauri-apps/api/event'),
+  ]);
+  let resolveReady: (() => void) | null = null;
+  let rejectReady: ((error: Error) => void) | null = null;
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  const timeoutId = window.setTimeout(() => {
+    unlistenReady();
+    rejectReady?.(new Error('Image preview window did not report ready'));
+  }, 5000);
+  const unlistenReady = await listen<ImagePreviewReadyPayload>(IMAGE_PREVIEW_READY_EVENT, (event) => {
+    if (event.payload.label !== label) {
+      return;
+    }
+
+    window.clearTimeout(timeoutId);
+    unlistenReady();
+    resolveReady?.();
+  });
+
+  const webview = new WebviewWindow(label, {
+    url: '/#/preview/image',
+    title: payload.originalName,
+    width: 900,
+    height: 720,
+    minWidth: 520,
+    minHeight: 420,
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    void webview.once('tauri://created', () => resolve());
+    void webview.once<string>('tauri://error', (event) => reject(new Error(event.payload)));
+  });
+
+  await readyPromise;
+  await emitTo(label, IMAGE_PREVIEW_OPEN_EVENT, payload);
 }
 
 function sanitizeDownloadName(originalName: string): string {

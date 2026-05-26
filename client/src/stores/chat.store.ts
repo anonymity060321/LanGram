@@ -30,6 +30,7 @@ import {
 export type LocalMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'recalled';
 const UNABLE_TO_DECRYPT_MESSAGE = '[Unable to decrypt message]';
 const MESSAGE_PAGE_SIZE = 50;
+const LOCAL_CLEAR_WATERMARKS_KEY = 'langram.localClearWatermarks';
 
 export interface ChatMessage {
   id: string;
@@ -58,6 +59,7 @@ interface ChatState {
   currentUserId: string | null;
   messagesByConversation: Record<string, ChatMessage[]>;
   messagePaginationByConversation: Record<string, MessagePaginationState>;
+  localClearWatermarks: Record<string, string>;
   presenceByUserId: Record<string, PresenceUpdatePayload>;
   error: string | null;
   searchQuery: string;
@@ -100,6 +102,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentUserId: null,
   messagesByConversation: {},
   messagePaginationByConversation: {},
+  localClearWatermarks: loadLocalClearWatermarks(),
   presenceByUserId: {},
   error: null,
   searchQuery: '',
@@ -135,9 +138,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      const messages = await Promise.all(
+      const loadedMessages = await Promise.all(
         result.messages.map((message) => toChatMessage(message, conversation, currentUserId)),
       );
+      const messages = filterMessagesAfterLocalClear(conversationId, loadedMessages, get().localClearWatermarks);
+      const reachedLocalClear = messages.length < loadedMessages.length;
 
       set((state) => ({
         messagesByConversation: {
@@ -146,8 +151,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         messagePaginationByConversation: {
           [conversationId]: {
-            hasMore: result.hasMore,
-            nextCursor: result.nextCursor,
+            hasMore: reachedLocalClear ? false : result.hasMore,
+            nextCursor: reachedLocalClear ? null : result.nextCursor,
             isLoadingOlder: false,
           },
         },
@@ -195,9 +200,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return false;
       }
 
-      const olderMessages = await Promise.all(
+      const loadedOlderMessages = await Promise.all(
         result.messages.map((message) => toChatMessage(message, conversation, currentUserId)),
       );
+      const olderMessages = filterMessagesAfterLocalClear(
+        conversationId,
+        loadedOlderMessages,
+        get().localClearWatermarks,
+      );
+      const reachedLocalClear = olderMessages.length < loadedOlderMessages.length;
 
       let didAddMessages = false;
       set((currentState) => {
@@ -213,8 +224,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messagePaginationByConversation: {
             ...currentState.messagePaginationByConversation,
             [conversationId]: {
-              hasMore: result.hasMore,
-              nextCursor: result.nextCursor,
+              hasMore: reachedLocalClear ? false : result.hasMore,
+              nextCursor: reachedLocalClear ? null : result.nextCursor,
               isLoadingOlder: false,
             },
           },
@@ -474,11 +485,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
   clearLocalConversation: (conversationId) => {
+    const clearedAt = new Date().toISOString();
+    const localClearWatermarks = {
+      ...get().localClearWatermarks,
+      [conversationId]: clearedAt,
+    };
+    saveLocalClearWatermarks(localClearWatermarks);
     set((state) => ({
+      localClearWatermarks,
       messagesByConversation: {
         ...state.messagesByConversation,
         [conversationId]: [],
       },
+      messagePaginationByConversation: {
+        ...state.messagePaginationByConversation,
+        [conversationId]: { hasMore: false, nextCursor: null, isLoadingOlder: false },
+      },
+      conversations: clearConversationUnread(state.conversations, conversationId),
     }));
   },
   setSearchQuery: (query) => {
@@ -781,6 +804,9 @@ async function handleIncomingMessage(
     recalledAt: null,
     isOwn: matched?.isOwn ?? false,
   };
+  if (isMessageClearedLocally(payload.conversationId, message.createdAt, state.localClearWatermarks)) {
+    return;
+  }
 
   set((currentState: ChatState) => ({
     messagesByConversation: upsertMessage(
@@ -813,12 +839,19 @@ function handleRead(
   payload: MessageReadPayload,
   set: ChatSet,
 ): void {
-  updateMessageStatus(payload.conversationId, payload.messageId, 'read', set);
-  set((state: ChatState) =>
-    payload.readerId === state.currentUserId
-      ? { conversations: clearConversationUnread(state.conversations, payload.conversationId) }
-      : {},
-  );
+  set((state: ChatState) => {
+    if (payload.readerId === state.currentUserId) {
+      return { conversations: clearConversationUnread(state.conversations, payload.conversationId) };
+    }
+
+    return {
+      messagesByConversation: markOwnMessagesReadThrough(
+        state.messagesByConversation,
+        payload.conversationId,
+        payload.messageId,
+      ),
+    };
+  });
 }
 
 function handleRecalled(
@@ -950,6 +983,70 @@ function appendMessage(
   };
 }
 
+function filterMessagesAfterLocalClear(
+  conversationId: string,
+  messages: ChatMessage[],
+  localClearWatermarks: Record<string, string>,
+): ChatMessage[] {
+  return messages.filter((message) =>
+    !isMessageClearedLocally(conversationId, message.createdAt, localClearWatermarks),
+  );
+}
+
+function isMessageClearedLocally(
+  conversationId: string,
+  createdAt: string,
+  localClearWatermarks: Record<string, string>,
+): boolean {
+  const clearedAt = localClearWatermarks[conversationId];
+  if (!clearedAt) {
+    return false;
+  }
+
+  return new Date(createdAt).getTime() <= new Date(clearedAt).getTime();
+}
+
+function loadLocalClearWatermarks(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_CLEAR_WATERMARKS_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[0] === 'string' &&
+          typeof entry[1] === 'string' &&
+          !Number.isNaN(new Date(entry[1]).getTime()),
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalClearWatermarks(localClearWatermarks: Record<string, string>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(LOCAL_CLEAR_WATERMARKS_KEY, JSON.stringify(localClearWatermarks));
+  } catch {
+    // Local clear remains effective for the current runtime state if persistence is unavailable.
+  }
+}
+
 function mergeOlderMessages(
   olderMessages: ChatMessage[],
   currentMessages: ChatMessage[],
@@ -1052,4 +1149,39 @@ function updateMessageStatus(
       ),
     },
   }));
+}
+
+function markOwnMessagesReadThrough(
+  messagesByConversation: Record<string, ChatMessage[]>,
+  conversationId: string,
+  messageId: string,
+): Record<string, ChatMessage[]> {
+  const messages = messagesByConversation[conversationId] ?? [];
+  const readMessage = messages.find(
+    (message) => message.id === messageId || message.clientMessageId === messageId,
+  );
+  if (!readMessage) {
+    return {
+      ...messagesByConversation,
+      [conversationId]: messages.map((message) =>
+        message.id === messageId || message.clientMessageId === messageId
+          ? { ...message, status: message.status === 'recalled' ? 'recalled' : 'read' }
+          : message,
+      ),
+    };
+  }
+
+  const readThroughTime = new Date(readMessage.createdAt).getTime();
+  return {
+    ...messagesByConversation,
+    [conversationId]: messages.map((message) => {
+      if (!message.isOwn || message.status === 'recalled') {
+        return message;
+      }
+
+      return new Date(message.createdAt).getTime() <= readThroughTime
+        ? { ...message, status: 'read' }
+        : message;
+    }),
+  };
 }

@@ -35,6 +35,7 @@ export function SettingsPage(): JSX.Element {
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isAvatarUploading, setIsAvatarUploading] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
 
   useEffect(() => {
     void load();
@@ -155,101 +156,213 @@ export function SettingsPage(): JSX.Element {
           </div>
           <Link to="/">{t('common.back')}</Link>
         </div>
-        <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
-          <label>
-            <span>{t('settings.serverUrl')}</span>
-            <span className="settings-inline-save">
-              <input
-                value={serverUrl}
-                onChange={(event) => {
-                  setServerUrl(event.target.value);
-                  setSaved(false);
-                }}
-              />
-              <button type="submit" className="secondary-button compact-button">
-                {t('settings.saveServerUrl')}
+        <div className="settings-shell">
+          <nav className="settings-nav" aria-label={t('settings.sections')}>
+            {SETTINGS_SECTIONS.map((section) => (
+              <button
+                type="button"
+                className={`settings-nav-item ${activeSection === section.id ? 'is-active' : ''}`}
+                aria-current={activeSection === section.id ? 'page' : undefined}
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+              >
+                <SettingsNavIcon src={section.iconSrc} fallback={section.fallback} />
+                <span>{t(section.labelKey)}</span>
               </button>
-            </span>
-          </label>
-          <label>
-            <span>{t('settings.theme')}</span>
-            <SettingsSelect<ThemePreference>
-              value={theme}
-              options={[
-                { value: 'system', label: t('theme.system') },
-                { value: 'light', label: t('theme.light') },
-                { value: 'dark', label: t('theme.dark') },
-              ]}
-              ariaLabel={t('settings.theme')}
-              onChange={handleThemeChange}
-            />
-          </label>
-          <label>
-            <span>{t('settings.language')}</span>
-            <SettingsSelect<LanguagePreference>
-              value={language}
-              options={[
-                { value: 'system', label: t('language.system') },
-                { value: 'zh-CN', label: t('language.zh-CN') },
-                { value: 'en-US', label: t('language.en-US') },
-              ]}
-              ariaLabel={t('settings.language')}
-              onChange={handleLanguageChange}
-            />
-          </label>
-          <label>
-            <span>{t('settings.deviceId')}</span>
-            <input value={config?.deviceId ?? ''} readOnly />
-          </label>
-          {saved ? <p className="form-success">{t('settings.saved')}</p> : null}
-        </form>
-        <section className="profile-editor">
-          <h2>{t('settings.profileTitle')}</h2>
-          <div className="profile-editor-header">
-            <UserAvatar
-              userId={user?.id}
-              displayName={user?.displayName}
-              avatarUrl={user?.avatarUrl}
-              size="lg"
-            />
-            <label className={`file-upload-button ${isAvatarUploading ? 'is-disabled' : ''}`}>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                disabled={isAvatarUploading}
-                onChange={(event) => void handleAvatarSelected(event)}
-              />
-              <span>{isAvatarUploading ? t('settings.avatarUploading') : t('settings.avatarUpload')}</span>
-            </label>
+            ))}
+          </nav>
+          <div className="settings-detail">
+            {activeSection === 'general' ? (
+              <section className="settings-section" aria-labelledby="settings-general-title">
+                <h2 id="settings-general-title">{t('settings.generalTitle')}</h2>
+                <form className="settings-section-stack" onSubmit={(event) => void handleSubmit(event)}>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.serverUrl')}</strong>
+                      <span>{t('settings.serverUrlHint')}</span>
+                    </div>
+                    <span className="settings-inline-save">
+                      <input
+                        value={serverUrl}
+                        onChange={(event) => {
+                          setServerUrl(event.target.value);
+                          setSaved(false);
+                        }}
+                      />
+                      <button type="submit" className="secondary-button compact-button">
+                        {t('settings.saveServerUrl')}
+                      </button>
+                    </span>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.theme')}</strong>
+                      <span>{t('settings.themeHint')}</span>
+                    </div>
+                    <SettingsSelect<ThemePreference>
+                      value={theme}
+                      options={[
+                        { value: 'system', label: t('theme.system') },
+                        { value: 'light', label: t('theme.light') },
+                        { value: 'dark', label: t('theme.dark') },
+                      ]}
+                      ariaLabel={t('settings.theme')}
+                      onChange={handleThemeChange}
+                    />
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.language')}</strong>
+                      <span>{t('settings.languageHint')}</span>
+                    </div>
+                    <SettingsSelect<LanguagePreference>
+                      value={language}
+                      options={[
+                        { value: 'system', label: t('language.system') },
+                        { value: 'zh-CN', label: t('language.zh-CN') },
+                        { value: 'en-US', label: t('language.en-US') },
+                      ]}
+                      ariaLabel={t('settings.language')}
+                      onChange={handleLanguageChange}
+                    />
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.deviceId')}</strong>
+                      <span>{t('settings.deviceIdHint')}</span>
+                    </div>
+                    <input value={config?.deviceId ?? ''} readOnly />
+                  </div>
+                  {saved ? <p className="form-success">{t('settings.saved')}</p> : null}
+                </form>
+              </section>
+            ) : null}
+
+            {activeSection === 'profile' ? (
+              <section className="settings-section" aria-labelledby="settings-profile-title">
+                <h2 id="settings-profile-title">{t('settings.profileTitle')}</h2>
+                <div className="profile-editor-header">
+                  <UserAvatar
+                    userId={user?.id}
+                    displayName={user?.displayName}
+                    avatarUrl={user?.avatarUrl}
+                    size="lg"
+                  />
+                  <label className={`avatar-upload-trigger ${isAvatarUploading ? 'is-disabled' : ''}`}>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={isAvatarUploading}
+                      onChange={(event) => void handleAvatarSelected(event)}
+                    />
+                    <span>{isAvatarUploading ? t('settings.avatarUploading') : t('settings.avatarChange')}</span>
+                  </label>
+                </div>
+                <form className="settings-section-stack" onSubmit={(event) => void handleProfileSubmit(event)}>
+                  <label className="settings-row">
+                    <span className="settings-row-text">
+                      <strong>{t('settings.displayName')}</strong>
+                      <span>{t('settings.displayNameHint')}</span>
+                    </span>
+                    <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+                  </label>
+                  <label className="settings-row">
+                    <span className="settings-row-text">
+                      <strong>{t('settings.statusMessage')}</strong>
+                      <span>{t('settings.statusMessageHint')}</span>
+                    </span>
+                    <input
+                      value={statusMessage}
+                      maxLength={160}
+                      onChange={(event) => setStatusMessage(event.target.value)}
+                    />
+                  </label>
+                  <div className="settings-actions-row">
+                    <button type="submit" className="primary-button" disabled={!displayName.trim()}>
+                      {t('settings.saveProfile')}
+                    </button>
+                    {profileError ? <p className="form-error">{profileError}</p> : null}
+                    {profileSaved ? <p className="form-success">{t('settings.profileSaved')}</p> : null}
+                  </div>
+                </form>
+              </section>
+            ) : null}
+
+            {activeSection === 'account' ? (
+              <section className="settings-section" aria-labelledby="settings-account-title">
+                <h2 id="settings-account-title">{t('settings.accountTitle')}</h2>
+                <div className="settings-section-stack">
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.currentAccount')}</strong>
+                      <span>{user?.email ?? t('settings.accountNoEmail')}</span>
+                    </div>
+                    <span className="settings-account-badge">{user?.accountType ?? '-'}</span>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('auth.logout')}</strong>
+                      <span>{t('settings.logoutHint')}</span>
+                    </div>
+                    <button type="button" className="secondary-button danger-button" onClick={() => void handleLogout()}>
+                      {t('auth.logout')}
+                    </button>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.accountSecurity')}</strong>
+                      <span>{t('settings.accountSecurityHint')}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {activeSection === 'about' ? (
+              <section className="settings-section" aria-labelledby="settings-about-title">
+                <h2 id="settings-about-title">{t('settings.aboutTitle')}</h2>
+                <div className="settings-section-stack">
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('app.name')}</strong>
+                      <span>{t('settings.aboutDescription')}</span>
+                    </div>
+                    <span className="settings-account-badge">v0.1.0</span>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.localData')}</strong>
+                      <span>{t('settings.localDataHint')}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
           </div>
-          <form className="form-stack" onSubmit={(event) => void handleProfileSubmit(event)}>
-            <label>
-              <span>{t('settings.displayName')}</span>
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-            </label>
-            <label>
-              <span>{t('settings.statusMessage')}</span>
-              <input
-                value={statusMessage}
-                maxLength={160}
-                onChange={(event) => setStatusMessage(event.target.value)}
-              />
-            </label>
-            <button type="submit" className="primary-button" disabled={!displayName.trim()}>
-              {t('settings.saveProfile')}
-            </button>
-            {profileError ? <p className="form-error">{profileError}</p> : null}
-            {profileSaved ? <p className="form-success">{t('settings.profileSaved')}</p> : null}
-          </form>
-        </section>
-        <section className="profile-editor">
-          <h2>{t('settings.accountTitle')}</h2>
-          <button type="button" className="secondary-button danger-button" onClick={() => void handleLogout()}>
-            {t('auth.logout')}
-          </button>
-        </section>
+        </div>
       </section>
     </main>
+  );
+}
+
+function SettingsNavIcon({ src, fallback }: { src: string | null; fallback: string }): JSX.Element {
+  if (!src) {
+    return <span className="settings-nav-icon-fallback">{fallback}</span>;
+  }
+
+  return (
+    <span className="settings-nav-icon">
+      <img
+        src={src}
+        alt=""
+        aria-hidden="true"
+        onError={(event) => {
+          event.currentTarget.style.display = 'none';
+          event.currentTarget.parentElement?.setAttribute('data-icon-missing', 'true');
+        }}
+      />
+      <span className="settings-nav-icon-fallback">{fallback}</span>
+    </span>
   );
 }
 
@@ -340,3 +453,38 @@ function SettingsSelect<TValue extends string>({
     </div>
   );
 }
+
+type SettingsSection = 'general' | 'profile' | 'account' | 'about';
+type TranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
+
+const SETTINGS_SECTIONS: Array<{
+  id: SettingsSection;
+  labelKey: TranslationKey;
+  iconSrc: string | null;
+  fallback: string;
+}> = [
+  {
+    id: 'general',
+    labelKey: 'settings.generalTitle',
+    iconSrc: '/vector_icon/sliders-horizontal.svg',
+    fallback: 'G',
+  },
+  {
+    id: 'profile',
+    labelKey: 'settings.profileTitle',
+    iconSrc: '/vector_icon/id-card.svg',
+    fallback: 'P',
+  },
+  {
+    id: 'account',
+    labelKey: 'settings.accountTitle',
+    iconSrc: '/vector_icon/user-key.svg',
+    fallback: 'A',
+  },
+  {
+    id: 'about',
+    labelKey: 'settings.aboutTitle',
+    iconSrc: '/vector_icon/info.svg',
+    fallback: 'I',
+  },
+];

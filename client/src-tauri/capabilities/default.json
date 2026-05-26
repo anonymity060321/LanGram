@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default LanGram desktop permissions for the main window and image preview windows.",
+  "windows": ["main", "image-preview-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-create",
+    "core:window:allow-close",
+    "core:webview:allow-create-webview-window"
+  ]
+}
