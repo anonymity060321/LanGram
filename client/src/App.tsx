@@ -5,6 +5,7 @@ import { AppRoutes } from './routes';
 import { useI18n } from './i18n';
 import { useAuthStore } from './stores/auth.store';
 import { useChatStore } from './stores/chat.store';
+import { isTauriRuntime } from './utils/desktopNotification';
 
 type EditableTarget = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
 
@@ -22,6 +23,7 @@ export function App(): JSX.Element {
   const { t } = useI18n();
   const navigate = useNavigate();
   const isSessionReplaced = useAuthStore((state) => state.isSessionReplaced);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const notifySessionReplaced = useAuthStore((state) => state.notifySessionReplaced);
   const acknowledgeSessionReplaced = useAuthStore((state) => state.acknowledgeSessionReplaced);
   const clearSession = useAuthStore((state) => state.clearSession);
@@ -84,6 +86,39 @@ export function App(): JSX.Element {
     setSessionRevokedHandler(() => notifySessionReplaced());
     return () => setSessionRevokedHandler(null);
   }, [notifySessionReplaced]);
+
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    let isCancelled = false;
+
+    async function listenForTraySettings(): Promise<void> {
+      if (!(await isTauriRuntime())) {
+        return;
+      }
+
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlisten = await listen('tray-open-settings', () => {
+        navigate('/settings');
+      });
+
+      if (isCancelled) {
+        unlisten();
+        return;
+      }
+
+      cleanup = unlisten;
+    }
+
+    void listenForTraySettings().catch(() => undefined);
+    return () => {
+      isCancelled = true;
+      cleanup?.();
+    };
+  }, [navigate]);
+
+  useEffect(() => {
+    void updateTrayAuthenticated(isAuthenticated);
+  }, [isAuthenticated]);
 
   function handleConfirmSessionReplaced(): void {
     acknowledgeSessionReplaced();
@@ -346,4 +381,17 @@ function getContextMenuPosition(clientX: number, clientY: number): { x: number; 
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected action: ${String(value)}`);
+}
+
+async function updateTrayAuthenticated(authenticated: boolean): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    return;
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('update_tray_authenticated', { authenticated });
+  } catch {
+    // Tray state is desktop-only and should never affect the web app or auth flow.
+  }
 }

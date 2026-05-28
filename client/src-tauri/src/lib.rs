@@ -3,7 +3,7 @@ use std::{
     fs, io,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -11,13 +11,16 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State, WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ID: &str = "langram-main-tray";
 const TRAY_MENU_SHOW_ID: &str = "tray-show";
+const TRAY_MENU_SETTINGS_ID: &str = "tray-settings";
+const TRAY_MENU_UNREAD_ID: &str = "tray-unread";
 const TRAY_MENU_QUIT_ID: &str = "tray-quit";
+const TRAY_OPEN_SETTINGS_EVENT: &str = "tray-open-settings";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +47,8 @@ struct DeviceIdentity {
 struct AppRuntimeState {
     is_quitting: Arc<AtomicBool>,
     close_to_tray: Arc<AtomicBool>,
+    is_authenticated: Arc<AtomicBool>,
+    unread_count: Arc<AtomicU32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,8 +96,43 @@ fn get_device_identity(app: AppHandle) -> Result<DeviceIdentity, String> {
 }
 
 #[tauri::command]
-fn update_tray_unread_count(app: AppHandle, unread_count: u32) -> Result<(), String> {
-    update_tray_tooltip(&app, unread_count).map_err(|error| error.to_string())
+fn update_tray_unread_count(
+    app: AppHandle,
+    state: State<'_, AppRuntimeState>,
+    unread_count: u32,
+) -> Result<(), String> {
+    let next_unread_count = unread_count.min(9999);
+    state
+        .unread_count
+        .store(next_unread_count, Ordering::SeqCst);
+
+    update_tray_state(
+        &app,
+        state.is_authenticated.load(Ordering::SeqCst),
+        next_unread_count,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn update_tray_authenticated(
+    app: AppHandle,
+    state: State<'_, AppRuntimeState>,
+    authenticated: bool,
+) -> Result<(), String> {
+    state
+        .is_authenticated
+        .store(authenticated, Ordering::SeqCst);
+    if !authenticated {
+        state.unread_count.store(0, Ordering::SeqCst);
+    }
+
+    update_tray_state(
+        &app,
+        authenticated,
+        state.unread_count.load(Ordering::SeqCst),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -110,6 +150,8 @@ pub fn run() {
             let runtime_state = AppRuntimeState {
                 is_quitting: Arc::new(AtomicBool::new(false)),
                 close_to_tray: Arc::new(AtomicBool::new(close_to_tray)),
+                is_authenticated: Arc::new(AtomicBool::new(false)),
+                unread_count: Arc::new(AtomicU32::new(0)),
             };
             setup_tray(app.handle(), runtime_state.is_quitting.clone())?;
             setup_main_window_close_handler(
@@ -125,6 +167,7 @@ pub fn run() {
             save_client_config,
             get_device_identity,
             update_tray_unread_count,
+            update_tray_authenticated,
             update_close_to_tray
         ])
         .run(tauri::generate_context!())
@@ -132,9 +175,7 @@ pub fn run() {
 }
 
 fn setup_tray(app: &AppHandle, is_quitting: Arc<AtomicBool>) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW_ID, "显示 LanGram", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "退出程序", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    let menu = build_tray_menu(app, false, 0)?;
     let icon = app
         .default_window_icon()
         .cloned()
@@ -151,6 +192,10 @@ fn setup_tray(app: &AppHandle, is_quitting: Arc<AtomicBool>) -> tauri::Result<()
         .on_menu_event(move |app, event| match event.id().as_ref() {
             TRAY_MENU_SHOW_ID => {
                 let _ = show_main_window(app);
+            }
+            TRAY_MENU_SETTINGS_ID => {
+                let _ = show_main_window(app);
+                let _ = app.emit_to(MAIN_WINDOW_LABEL, TRAY_OPEN_SETTINGS_EVENT, ());
             }
             TRAY_MENU_QUIT_ID => {
                 is_quitting.store(true, Ordering::SeqCst);
@@ -180,6 +225,30 @@ fn setup_tray(app: &AppHandle, is_quitting: Arc<AtomicBool>) -> tauri::Result<()
         .build(app)?;
 
     Ok(())
+}
+
+fn build_tray_menu(
+    app: &AppHandle,
+    authenticated: bool,
+    unread_count: u32,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "退出程序", true, None::<&str>)?;
+    if !authenticated {
+        return Menu::with_items(app, &[&quit_item]);
+    }
+
+    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW_ID, "显示 LanGram", true, None::<&str>)?;
+    let settings_item =
+        MenuItem::with_id(app, TRAY_MENU_SETTINGS_ID, "打开设置", true, None::<&str>)?;
+    let unread_item = MenuItem::with_id(
+        app,
+        TRAY_MENU_UNREAD_ID,
+        format_tray_unread_menu_text(unread_count),
+        false,
+        None::<&str>,
+    )?;
+
+    Menu::with_items(app, &[&show_item, &settings_item, &unread_item, &quit_item])
 }
 
 fn setup_main_window_close_handler(
@@ -216,19 +285,31 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn update_tray_tooltip(app: &AppHandle, unread_count: u32) -> tauri::Result<()> {
+fn update_tray_state(app: &AppHandle, authenticated: bool, unread_count: u32) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        tray.set_tooltip(Some(format_tray_tooltip(unread_count)))?;
+        tray.set_tooltip(Some(format_tray_tooltip(authenticated, unread_count)))?;
+        tray.set_menu(Some(build_tray_menu(app, authenticated, unread_count)?))?;
     }
 
     Ok(())
 }
 
-fn format_tray_tooltip(unread_count: u32) -> String {
+fn format_tray_tooltip(authenticated: bool, unread_count: u32) -> String {
+    if !authenticated {
+        return String::from("LanGram");
+    }
+
     match unread_count {
         0 => String::from("LanGram"),
         1..=99 => format!("({unread_count}) LanGram"),
         _ => String::from("(99+) LanGram"),
+    }
+}
+
+fn format_tray_unread_menu_text(unread_count: u32) -> String {
+    match unread_count {
+        0..=99 => format!("未读消息：{unread_count}"),
+        _ => String::from("未读消息：99+"),
     }
 }
 

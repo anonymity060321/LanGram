@@ -213,7 +213,7 @@ function getWebNotificationPermission(): NotificationPermissionState {
   return Notification.permission;
 }
 
-async function isTauriRuntime(): Promise<boolean> {
+export async function isTauriRuntime(): Promise<boolean> {
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     return true;
   }

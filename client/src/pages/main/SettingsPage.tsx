@@ -266,7 +266,7 @@ export function SettingsPage(): JSX.Element {
                       <strong>{t('settings.theme')}</strong>
                       <span>{t('settings.themeHint')}</span>
                     </div>
-                    <SettingsSelect<ThemePreference>
+                    <SettingsSegmentedControl<ThemePreference>
                       value={theme}
                       options={[
                         { value: 'system', label: t('theme.system') },
@@ -335,20 +335,42 @@ export function SettingsPage(): JSX.Element {
                     </span>
                   </div>
                   {notificationPermissionNotice ? <p className="form-error">{notificationPermissionNotice}</p> : null}
-                  <div className="settings-row">
-                    <div className="settings-row-text">
-                      <strong>{t('settings.closeToTray')}</strong>
-                      <span>{t('settings.closeToTrayHint')}</span>
+                  <div
+                    className="settings-choice-card"
+                    role="radiogroup"
+                    aria-labelledby="settings-close-behavior-title"
+                  >
+                    <strong className="settings-choice-title" id="settings-close-behavior-title">
+                      {t('settings.closeBehaviorTitle')}
+                    </strong>
+                    <p className="settings-choice-description">{t('settings.closeToTrayHint')}</p>
+                    <div className="settings-radio-list">
+                      <label
+                        className={`settings-radio-option ${closeToTray === 'enabled' ? 'is-selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="closeBehavior"
+                          value="enabled"
+                          checked={closeToTray === 'enabled'}
+                          onChange={() => void handleCloseToTrayChange('enabled')}
+                        />
+                        <span>{t('settings.closeToTrayOption')}</span>
+                        <span className="settings-recommend-badge">{t('common.recommended')}</span>
+                      </label>
+                      <label
+                        className={`settings-radio-option ${closeToTray === 'disabled' ? 'is-selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="closeBehavior"
+                          value="disabled"
+                          checked={closeToTray === 'disabled'}
+                          onChange={() => void handleCloseToTrayChange('disabled')}
+                        />
+                        <span>{t('settings.closeAppOption')}</span>
+                      </label>
                     </div>
-                    <SettingsSelect<TrayCloseSetting>
-                      value={closeToTray}
-                      options={[
-                        { value: 'enabled', label: t('common.enabled') },
-                        { value: 'disabled', label: t('common.disabled') },
-                      ]}
-                      ariaLabel={t('settings.closeToTray')}
-                      onChange={handleCloseToTrayChange}
-                    />
                   </div>
                   <div className="settings-row">
                     <div className="settings-row-text">
@@ -487,6 +509,54 @@ function SettingsNavIcon({ src, fallback }: { src: string | null; fallback: stri
       />
       <span className="settings-nav-icon-fallback">{fallback}</span>
     </span>
+  );
+}
+
+function SettingsSegmentedControl<TValue extends string>({
+  value,
+  options,
+  ariaLabel,
+  onChange,
+}: {
+  value: TValue;
+  options: Array<{ value: TValue; label: string }>;
+  ariaLabel: string;
+  onChange: (value: TValue) => Promise<void>;
+}): JSX.Element {
+  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, optionIndex: number): void {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+      return;
+    }
+
+    event.preventDefault();
+    const direction = event.key === 'ArrowRight' ? 1 : -1;
+    const nextIndex = (optionIndex + direction + options.length) % options.length;
+    const nextValue = options[nextIndex]?.value;
+    if (nextValue && nextValue !== value) {
+      void onChange(nextValue);
+    }
+  }
+
+  return (
+    <div className="settings-segmented-control" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((option, index) => (
+        <button
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          className={`settings-segmented-option ${option.value === value ? 'is-selected' : ''}`}
+          key={option.value}
+          onClick={() => {
+            if (option.value !== value) {
+              void onChange(option.value);
+            }
+          }}
+          onKeyDown={(event) => handleKeyDown(event, index)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
