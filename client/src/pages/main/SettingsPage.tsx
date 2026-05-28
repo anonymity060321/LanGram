@@ -15,6 +15,7 @@ import {
   type LanguagePreference,
   type ThemePreference,
 } from '../../stores/settings.store';
+import { updateCloseToTrayRuntime } from '../../utils/localConfig';
 import {
   getNotificationRuntimeStatus,
   requestWebNotificationPermission,
@@ -36,6 +37,7 @@ export function SettingsPage(): JSX.Element {
   const [theme, setTheme] = useState<ThemePreference>('system');
   const [language, setLanguage] = useState<LanguagePreference>('system');
   const [notifications, setNotifications] = useState<NotificationSetting>('enabled');
+  const [closeToTray, setCloseToTray] = useState<TrayCloseSetting>('enabled');
   const [displayName, setDisplayName] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [saved, setSaved] = useState(false);
@@ -63,6 +65,7 @@ export function SettingsPage(): JSX.Element {
     setTheme(config.theme);
     setLanguage(config.language);
     setNotifications(config.enableNotifications ? 'enabled' : 'disabled');
+    setCloseToTray(config.closeToTray ? 'enabled' : 'disabled');
   }, [config]);
 
   useEffect(() => {
@@ -105,6 +108,14 @@ export function SettingsPage(): JSX.Element {
   async function handleNotificationsChange(nextNotifications: NotificationSetting): Promise<void> {
     setNotifications(nextNotifications);
     await updateConfig({ enableNotifications: nextNotifications === 'enabled' });
+    setSaved(false);
+  }
+
+  async function handleCloseToTrayChange(nextCloseToTray: TrayCloseSetting): Promise<void> {
+    const enabled = nextCloseToTray === 'enabled';
+    setCloseToTray(nextCloseToTray);
+    await updateConfig({ closeToTray: enabled });
+    await updateCloseToTrayRuntime(enabled);
     setSaved(false);
   }
 
@@ -324,6 +335,21 @@ export function SettingsPage(): JSX.Element {
                     </span>
                   </div>
                   {notificationPermissionNotice ? <p className="form-error">{notificationPermissionNotice}</p> : null}
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.closeToTray')}</strong>
+                      <span>{t('settings.closeToTrayHint')}</span>
+                    </div>
+                    <SettingsSelect<TrayCloseSetting>
+                      value={closeToTray}
+                      options={[
+                        { value: 'enabled', label: t('common.enabled') },
+                        { value: 'disabled', label: t('common.disabled') },
+                      ]}
+                      ariaLabel={t('settings.closeToTray')}
+                      onChange={handleCloseToTrayChange}
+                    />
+                  </div>
                   <div className="settings-row">
                     <div className="settings-row-text">
                       <strong>{t('settings.deviceId')}</strong>
@@ -554,6 +580,7 @@ function SettingsSelect<TValue extends string>({
 
 type SettingsSection = 'general' | 'profile' | 'account' | 'about';
 type NotificationSetting = 'enabled' | 'disabled';
+type TrayCloseSetting = 'enabled' | 'disabled';
 type TranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
 
 function getNotificationPermissionLabelKey(

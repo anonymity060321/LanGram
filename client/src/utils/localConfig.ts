@@ -9,6 +9,7 @@ const fallbackConfig: ClientConfig = {
   language: 'system',
   deviceId: '',
   enableNotifications: true,
+  closeToTray: true,
 };
 
 export async function loadClientConfig(): Promise<ClientConfig> {
@@ -33,6 +34,14 @@ export async function saveClientConfig(config: ClientConfig): Promise<ClientConf
 
   window.localStorage.setItem(storageKey, JSON.stringify(config));
   return config;
+}
+
+export async function updateCloseToTrayRuntime(enabled: boolean): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  await invoke('update_close_to_tray', { enabled });
 }
 
 function createBrowserDeviceId(): string {

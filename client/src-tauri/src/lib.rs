@@ -11,7 +11,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WindowEvent,
+    AppHandle, Manager, State, WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -28,6 +28,8 @@ struct ClientConfig {
     device_id: String,
     #[serde(default = "default_enable_notifications")]
     enable_notifications: bool,
+    #[serde(default = "default_close_to_tray")]
+    close_to_tray: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,9 +40,10 @@ struct DeviceIdentity {
     platform: Option<String>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct AppRuntimeState {
     is_quitting: Arc<AtomicBool>,
+    close_to_tray: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,13 +95,28 @@ fn update_tray_unread_count(app: AppHandle, unread_count: u32) -> Result<(), Str
     update_tray_tooltip(&app, unread_count).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn update_close_to_tray(state: State<'_, AppRuntimeState>, enabled: bool) {
+    state.close_to_tray.store(enabled, Ordering::SeqCst);
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let runtime_state = AppRuntimeState::default();
+            let close_to_tray = read_or_create_config(app.handle())
+                .map(|config| config.close_to_tray)
+                .unwrap_or_else(|_| default_close_to_tray());
+            let runtime_state = AppRuntimeState {
+                is_quitting: Arc::new(AtomicBool::new(false)),
+                close_to_tray: Arc::new(AtomicBool::new(close_to_tray)),
+            };
             setup_tray(app.handle(), runtime_state.is_quitting.clone())?;
-            setup_main_window_close_handler(app.handle(), runtime_state.is_quitting.clone());
+            setup_main_window_close_handler(
+                app.handle(),
+                runtime_state.is_quitting.clone(),
+                runtime_state.close_to_tray.clone(),
+            );
             app.manage(runtime_state);
             Ok(())
         })
@@ -106,7 +124,8 @@ pub fn run() {
             get_client_config,
             save_client_config,
             get_device_identity,
-            update_tray_unread_count
+            update_tray_unread_count,
+            update_close_to_tray
         ])
         .run(tauri::generate_context!())
         .expect("failed to run LanGram client");
@@ -163,14 +182,24 @@ fn setup_tray(app: &AppHandle, is_quitting: Arc<AtomicBool>) -> tauri::Result<()
     Ok(())
 }
 
-fn setup_main_window_close_handler(app: &AppHandle, is_quitting: Arc<AtomicBool>) {
+fn setup_main_window_close_handler(
+    app: &AppHandle,
+    is_quitting: Arc<AtomicBool>,
+    close_to_tray: Arc<AtomicBool>,
+) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let main_window = window.clone();
+        let app_handle = app.clone();
         window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if !is_quitting.load(Ordering::SeqCst) {
-                    api.prevent_close();
-                    let _ = main_window.hide();
+                    if close_to_tray.load(Ordering::SeqCst) {
+                        api.prevent_close();
+                        let _ = main_window.hide();
+                    } else {
+                        is_quitting.store(true, Ordering::SeqCst);
+                        app_handle.exit(0);
+                    }
                 }
             }
         });
@@ -210,10 +239,15 @@ fn default_config() -> ClientConfig {
         language: LanguagePreference::System,
         device_id: create_device_id(),
         enable_notifications: default_enable_notifications(),
+        close_to_tray: default_close_to_tray(),
     }
 }
 
 fn default_enable_notifications() -> bool {
+    true
+}
+
+fn default_close_to_tray() -> bool {
     true
 }
 

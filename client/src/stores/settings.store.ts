@@ -11,6 +11,7 @@ export interface ClientConfig {
   language: LanguagePreference;
   deviceId: string;
   enableNotifications: boolean;
+  closeToTray: boolean;
 }
 
 interface SettingsState {

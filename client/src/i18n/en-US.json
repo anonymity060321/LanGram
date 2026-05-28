@@ -203,6 +203,8 @@
   "settings.notificationPermissionDeniedHint": "Allow notifications in the browser site permissions.",
   "settings.notificationPermissionDefaultHint": "Enable browser notifications before sending a test notification.",
   "settings.notificationPermissionUnsupportedHint": "Notifications are not supported in this runtime.",
+  "settings.closeToTray": "Minimize to tray on close",
+  "settings.closeToTrayHint": "When enabled, closing the main window hides it to the tray. You can restore it from the tray menu.",
   "settings.deviceId": "Device ID",
   "settings.deviceIdHint": "Local client identifier used for this device.",
   "settings.save": "Save",
