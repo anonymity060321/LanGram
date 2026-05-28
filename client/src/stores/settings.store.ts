@@ -10,6 +10,7 @@ export interface ClientConfig {
   theme: ThemePreference;
   language: LanguagePreference;
   deviceId: string;
+  enableNotifications: boolean;
 }
 
 interface SettingsState {

@@ -1,6 +1,7 @@
 import {
   ChangeEvent,
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -24,12 +25,14 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
+import { useSettingsStore } from '../../stores/settings.store';
 import {
   loadConversationUiState,
   saveConversationUiState,
   unhideConversationInUiState,
   type ConversationUiState,
 } from '../../utils/conversationUiState';
+import { focusMainWindow, showDesktopNotification } from '../../utils/desktopNotification';
 import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
 
 export function MainLayout(): JSX.Element {
@@ -42,6 +45,7 @@ export function MainLayout(): JSX.Element {
   const conversations = useChatStore((state) => state.conversations);
   const selectedConversationId = useChatStore((state) => state.selectedConversationId);
   const messagesByConversation = useChatStore((state) => state.messagesByConversation);
+  const latestIncomingMessage = useChatStore((state) => state.latestIncomingMessage);
   const messagePaginationByConversation = useChatStore(
     (state) => state.messagePaginationByConversation,
   );
@@ -67,6 +71,7 @@ export function MainLayout(): JSX.Element {
   const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
   const setSearchQuery = useChatStore((state) => state.setSearchQuery);
   const localClearWatermarks = useChatStore((state) => state.localClearWatermarks);
+  const enableNotifications = useSettingsStore((state) => state.config?.enableNotifications ?? true);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
   const [messageLimitNotice, setMessageLimitNotice] = useState<string | null>(null);
@@ -87,6 +92,8 @@ export function MainLayout(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const isMessageComposingRef = useRef(false);
+  const lastNotificationMessageRef = useRef<string | null>(null);
+  const hasRequestedNotificationPermissionRef = useRef(false);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const profileUser = selectedConversation?.peer ?? user ?? null;
@@ -114,6 +121,29 @@ export function MainLayout(): JSX.Element {
   const displayedConversations = useMemo(
     () => buildDisplayedConversations(conversations, conversationUiState, messagesByConversation, localClearWatermarks),
     [conversationUiState, conversations, localClearWatermarks, messagesByConversation],
+  );
+  const totalUnreadCount = useMemo(
+    () =>
+      displayedConversations.reduce((total, conversation) => {
+        const preview = getVisibleConversationPreview(
+          conversation,
+          messagesByConversation[conversation.id] ?? [],
+          localClearWatermarks,
+          conversationUiState.manualUnreadIds,
+          readConversationOverrides,
+          t,
+        );
+
+        return total + preview.unreadCount;
+      }, 0),
+    [
+      conversationUiState.manualUnreadIds,
+      displayedConversations,
+      localClearWatermarks,
+      messagesByConversation,
+      readConversationOverrides,
+      t,
+    ],
   );
 
   useEffect(() => {
@@ -170,6 +200,12 @@ export function MainLayout(): JSX.Element {
     const timerId = window.setTimeout(() => setMessageLimitNotice(null), 1800);
     return () => window.clearTimeout(timerId);
   }, [messageLimitNotice]);
+
+  useEffect(() => {
+    document.title = totalUnreadCount > 0
+      ? `(${formatUnreadCount(totalUnreadCount)}) LanGram`
+      : 'LanGram';
+  }, [totalUnreadCount]);
 
   useEffect(() => {
     if (!uploadState.notice || uploadState.error) {
@@ -275,7 +311,7 @@ export function MainLayout(): JSX.Element {
     [conversations, selectedConversationId, t, visibleFriends],
   );
 
-  async function handleSelectConversation(conversationId: string): Promise<void> {
+  const handleSelectConversation = useCallback(async (conversationId: string): Promise<void> => {
     if (!user) {
       return;
     }
@@ -299,7 +335,40 @@ export function MainLayout(): JSX.Element {
     }
 
     await selectConversation(conversationId, user.id);
-  }
+  }, [closeConversation, selectConversation, selectedConversationId, setSearchQuery, user]);
+
+  useEffect(() => {
+    if (!enableNotifications || !latestIncomingMessage || selectedConversationId === latestIncomingMessage.conversationId) {
+      return;
+    }
+
+    const notificationKey = latestIncomingMessage.clientMessageId ?? latestIncomingMessage.id;
+    if (lastNotificationMessageRef.current === notificationKey) {
+      return;
+    }
+    lastNotificationMessageRef.current = notificationKey;
+
+    const conversation = conversations.find((item) => item.id === latestIncomingMessage.conversationId);
+    const title = conversation?.peer?.displayName ?? t('chat.unknownPeer');
+    const body = formatNotificationMessage(latestIncomingMessage, t);
+    void showDesktopNotification({
+      title,
+      body,
+      conversationId: latestIncomingMessage.conversationId,
+      hasRequestedPermissionRef: hasRequestedNotificationPermissionRef,
+      onClick: (conversationId) => {
+        void focusMainWindow();
+        void handleSelectConversation(conversationId);
+      },
+    });
+  }, [
+    conversations,
+    enableNotifications,
+    handleSelectConversation,
+    latestIncomingMessage,
+    selectedConversationId,
+    t,
+  ]);
 
   async function handleLogout(): Promise<void> {
     if (!window.confirm(t('auth.logoutConfirm'))) {
@@ -681,6 +750,11 @@ export function MainLayout(): JSX.Element {
           >
             <NavIcon src={NAV_ICON_SOURCES.messages} fallback="M" label={t('main.navMessages')} />
             <strong>{t('main.navMessages')}</strong>
+            {totalUnreadCount > 0 ? (
+              <span className="app-nav-unread" aria-label={`${t('main.navMessages')} ${formatUnreadCount(totalUnreadCount)}`}>
+                {formatUnreadCount(totalUnreadCount)}
+              </span>
+            ) : null}
           </Link>
           <Link
             className="app-nav-link"
@@ -1126,6 +1200,22 @@ function formatConversationMessageSummary(
   }
 
   return plaintext?.trim() || t('chat.noMessages');
+}
+
+function formatNotificationMessage(
+  message: ChatMessage,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  return formatConversationMessageSummary(
+    message,
+    message.messageType === 'TEXT' ? message.plaintext : null,
+    message.plaintext === '[Unable to decrypt message]',
+    t,
+  );
+}
+
+function formatUnreadCount(unreadCount: number): string {
+  return unreadCount > 99 ? '99+' : String(unreadCount);
 }
 
 function buildDisplayedConversations(

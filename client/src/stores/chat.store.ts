@@ -60,6 +60,7 @@ interface ChatState {
   messagesByConversation: Record<string, ChatMessage[]>;
   messagePaginationByConversation: Record<string, MessagePaginationState>;
   localClearWatermarks: Record<string, string>;
+  latestIncomingMessage: ChatMessage | null;
   presenceByUserId: Record<string, PresenceUpdatePayload>;
   error: string | null;
   searchQuery: string;
@@ -103,6 +104,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messagesByConversation: {},
   messagePaginationByConversation: {},
   localClearWatermarks: loadLocalClearWatermarks(),
+  latestIncomingMessage: null,
   presenceByUserId: {},
   error: null,
   searchQuery: '',
@@ -802,7 +804,7 @@ async function handleIncomingMessage(
     createdAt: payload.createdAt,
     editedAt: null,
     recalledAt: null,
-    isOwn: matched?.isOwn ?? false,
+    isOwn: matched?.isOwn ?? payload.senderId === state.currentUserId,
   };
   if (isMessageClearedLocally(payload.conversationId, message.createdAt, state.localClearWatermarks)) {
     return;
@@ -821,6 +823,10 @@ async function handleIncomingMessage(
       currentState.selectedConversationId,
       currentState.currentUserId,
     ),
+    latestIncomingMessage:
+      !message.isOwn && currentState.selectedConversationId !== payload.conversationId
+        ? message
+        : currentState.latestIncomingMessage,
   }));
 
   if (!message.isOwn && state.selectedConversationId === payload.conversationId) {

@@ -8,6 +8,7 @@ const fallbackConfig: ClientConfig = {
   theme: 'system',
   language: 'system',
   deviceId: '',
+  enableNotifications: true,
 };
 
 export async function loadClientConfig(): Promise<ClientConfig> {

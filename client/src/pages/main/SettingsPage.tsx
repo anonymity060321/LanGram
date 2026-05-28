@@ -29,6 +29,7 @@ export function SettingsPage(): JSX.Element {
   const [serverUrl, setServerUrl] = useState('');
   const [theme, setTheme] = useState<ThemePreference>('system');
   const [language, setLanguage] = useState<LanguagePreference>('system');
+  const [notifications, setNotifications] = useState<NotificationSetting>('enabled');
   const [displayName, setDisplayName] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [saved, setSaved] = useState(false);
@@ -49,6 +50,7 @@ export function SettingsPage(): JSX.Element {
     setServerUrl(config.serverUrl);
     setTheme(config.theme);
     setLanguage(config.language);
+    setNotifications(config.enableNotifications ? 'enabled' : 'disabled');
   }, [config]);
 
   useEffect(() => {
@@ -85,6 +87,12 @@ export function SettingsPage(): JSX.Element {
   async function handleLanguageChange(nextLanguage: LanguagePreference): Promise<void> {
     setLanguage(nextLanguage);
     await updateConfig({ language: nextLanguage });
+    setSaved(false);
+  }
+
+  async function handleNotificationsChange(nextNotifications: NotificationSetting): Promise<void> {
+    setNotifications(nextNotifications);
+    await updateConfig({ enableNotifications: nextNotifications === 'enabled' });
     setSaved(false);
   }
 
@@ -224,6 +232,21 @@ export function SettingsPage(): JSX.Element {
                       ]}
                       ariaLabel={t('settings.language')}
                       onChange={handleLanguageChange}
+                    />
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.notifications')}</strong>
+                      <span>{t('settings.notificationsHint')}</span>
+                    </div>
+                    <SettingsSelect<NotificationSetting>
+                      value={notifications}
+                      options={[
+                        { value: 'enabled', label: t('common.enabled') },
+                        { value: 'disabled', label: t('common.disabled') },
+                      ]}
+                      ariaLabel={t('settings.notifications')}
+                      onChange={handleNotificationsChange}
                     />
                   </div>
                   <div className="settings-row">
@@ -455,6 +478,7 @@ function SettingsSelect<TValue extends string>({
 }
 
 type SettingsSection = 'general' | 'profile' | 'account' | 'about';
+type NotificationSetting = 'enabled' | 'disabled';
 type TranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
 
 const SETTINGS_SECTIONS: Array<{

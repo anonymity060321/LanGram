@@ -388,6 +388,7 @@ textarea,
 }
 
 .app-nav-link {
+  position: relative;
   min-width: 0;
   min-height: 54px;
   display: grid;
@@ -448,6 +449,24 @@ textarea,
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.app-nav-unread {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .app-nav-link:hover,
@@ -3074,6 +3093,10 @@ textarea,
 :root[data-theme='dark'] .app-nav-menu-item:hover {
   border-color: #3b82f6;
   background: #1e293b;
+}
+
+:root[data-theme='dark'] .app-nav-unread {
+  border-color: #0f172a;
 }
 
 :root[data-theme='dark'] .app-nav-link .nav-icon-shell,

@@ -13,6 +13,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.62.8",
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
-    io,
+    fs, io,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -14,6 +13,8 @@ struct ClientConfig {
     theme: ThemePreference,
     language: LanguagePreference,
     device_id: String,
+    #[serde(default = "default_enable_notifications")]
+    enable_notifications: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +71,7 @@ fn get_device_identity(app: AppHandle) -> Result<DeviceIdentity, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             get_client_config,
             save_client_config,
@@ -85,7 +87,12 @@ fn default_config() -> ClientConfig {
         theme: ThemePreference::System,
         language: LanguagePreference::System,
         device_id: create_device_id(),
+        enable_notifications: default_enable_notifications(),
     }
+}
+
+fn default_enable_notifications() -> bool {
+    true
 }
 
 fn read_or_create_config(app: &AppHandle) -> Result<ClientConfig, ConfigError> {
