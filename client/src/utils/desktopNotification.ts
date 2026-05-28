@@ -109,7 +109,10 @@ export function debugNotificationDiagnostic(
 export async function focusMainWindow(): Promise<void> {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    await getCurrentWindow().setFocus();
+    const currentWindow = getCurrentWindow();
+    await currentWindow.show();
+    await currentWindow.unminimize();
+    await currentWindow.setFocus();
   } catch {
     window.focus();
   }

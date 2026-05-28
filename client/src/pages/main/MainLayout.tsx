@@ -213,6 +213,10 @@ export function MainLayout(): JSX.Element {
   }, [totalUnreadCount]);
 
   useEffect(() => {
+    void updateTrayUnreadCount(totalUnreadCount);
+  }, [totalUnreadCount]);
+
+  useEffect(() => {
     if (!uploadState.notice || uploadState.error) {
       return undefined;
     }
@@ -2565,11 +2569,30 @@ function triggerBrowserDownload(blob: Blob, originalName: string): void {
 }
 
 async function isTauriRuntime(): Promise<boolean> {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    return true;
+  }
+
   try {
     const { isTauri } = await import('@tauri-apps/api/core');
     return isTauri();
   } catch {
-    return '__TAURI_INTERNALS__' in window;
+    return false;
+  }
+}
+
+async function updateTrayUnreadCount(unreadCount: number): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    return;
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('update_tray_unread_count', {
+      unreadCount: Math.max(0, Math.min(unreadCount, 9999)),
+    });
+  } catch {
+    // Tray updates are best-effort and should never affect chat rendering.
   }
 }
 
