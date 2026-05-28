@@ -32,7 +32,11 @@ import {
   unhideConversationInUiState,
   type ConversationUiState,
 } from '../../utils/conversationUiState';
-import { focusMainWindow, showDesktopNotification } from '../../utils/desktopNotification';
+import {
+  debugNotificationDiagnostic,
+  focusMainWindow,
+  showDesktopNotification,
+} from '../../utils/desktopNotification';
 import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
 
 export function MainLayout(): JSX.Element {
@@ -88,6 +92,7 @@ export function MainLayout(): JSX.Element {
   const [readConversationOverrides, setReadConversationOverrides] = useState<Record<string, string>>({});
   const [conversationContextMenu, setConversationContextMenu] =
     useState<ConversationContextMenuState | null>(null);
+  const [pageAttentionKey, setPageAttentionKey] = useState(0);
   const appMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -275,6 +280,21 @@ export function MainLayout(): JSX.Element {
   }, [closeConversation, conversationUiState.hiddenConversations, selectedConversationId]);
 
   useEffect(() => {
+    function notifyVisibilityChange(): void {
+      setPageAttentionKey((current) => current + 1);
+    }
+
+    window.addEventListener('focus', notifyVisibilityChange);
+    window.addEventListener('blur', notifyVisibilityChange);
+    document.addEventListener('visibilitychange', notifyVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', notifyVisibilityChange);
+      window.removeEventListener('blur', notifyVisibilityChange);
+      document.removeEventListener('visibilitychange', notifyVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const hasSearchQuery = searchQuery.trim().length > 0;
     if (!hasSearchQuery || searchResults.length === 0) {
       setActiveSearchResultIndex(-1);
@@ -338,7 +358,15 @@ export function MainLayout(): JSX.Element {
   }, [closeConversation, selectConversation, selectedConversationId, setSearchQuery, user]);
 
   useEffect(() => {
-    if (!enableNotifications || !latestIncomingMessage || selectedConversationId === latestIncomingMessage.conversationId) {
+    if (!latestIncomingMessage) {
+      return;
+    }
+
+    if (!enableNotifications) {
+      debugNotificationDiagnostic('message-notification-skipped', {
+        reason: 'disabled',
+        conversationId: latestIncomingMessage.conversationId,
+      });
       return;
     }
 
@@ -347,6 +375,18 @@ export function MainLayout(): JSX.Element {
       return;
     }
     lastNotificationMessageRef.current = notificationKey;
+
+    const isViewingConversation =
+      selectedConversationId === latestIncomingMessage.conversationId &&
+      document.visibilityState === 'visible' &&
+      document.hasFocus();
+    if (isViewingConversation) {
+      debugNotificationDiagnostic('message-notification-skipped', {
+        reason: 'viewing',
+        conversationId: latestIncomingMessage.conversationId,
+      });
+      return;
+    }
 
     const conversation = conversations.find((item) => item.id === latestIncomingMessage.conversationId);
     const title = conversation?.peer?.displayName ?? t('chat.unknownPeer');
@@ -360,12 +400,20 @@ export function MainLayout(): JSX.Element {
         void focusMainWindow();
         void handleSelectConversation(conversationId);
       },
+    }).then((result) => {
+      debugNotificationDiagnostic('message-notification-result', {
+        runtime: result.runtime,
+        permission: result.permission,
+        reason: result.reason,
+        conversationId: latestIncomingMessage.conversationId,
+      });
     });
   }, [
     conversations,
     enableNotifications,
     handleSelectConversation,
     latestIncomingMessage,
+    pageAttentionKey,
     selectedConversationId,
     t,
   ]);

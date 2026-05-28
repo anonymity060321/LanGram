@@ -15,6 +15,12 @@ import {
   type LanguagePreference,
   type ThemePreference,
 } from '../../stores/settings.store';
+import {
+  getNotificationRuntimeStatus,
+  requestWebNotificationPermission,
+  showTestNotification,
+  type NotificationRuntimeStatus,
+} from '../../utils/desktopNotification';
 
 export function SettingsPage(): JSX.Element {
   const { t } = useI18n();
@@ -37,10 +43,16 @@ export function SettingsPage(): JSX.Element {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isAvatarUploading, setIsAvatarUploading] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const [notificationStatus, setNotificationStatus] = useState<NotificationRuntimeStatus | null>(null);
+  const [notificationPermissionNotice, setNotificationPermissionNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void refreshNotificationStatus();
+  }, []);
 
   useEffect(() => {
     if (!config) {
@@ -94,6 +106,42 @@ export function SettingsPage(): JSX.Element {
     setNotifications(nextNotifications);
     await updateConfig({ enableNotifications: nextNotifications === 'enabled' });
     setSaved(false);
+  }
+
+  async function refreshNotificationStatus(): Promise<void> {
+    const status = await getNotificationRuntimeStatus();
+    setNotificationStatus(status);
+  }
+
+  async function handleRequestNotificationPermission(): Promise<void> {
+    setNotificationPermissionNotice(null);
+    const status = await requestWebNotificationPermission();
+    setNotificationStatus(status);
+    if (status.permission === 'denied') {
+      setNotificationPermissionNotice(t('settings.notificationPermissionDeniedHint'));
+    }
+  }
+
+  async function handleTestNotification(): Promise<void> {
+    setNotificationPermissionNotice(null);
+    const result = await showTestNotification(
+      t('settings.notificationTestTitle'),
+      t('settings.notificationTestBody'),
+    );
+    setNotificationStatus({ runtime: result.runtime, permission: result.permission });
+    if (result.reason === 'denied') {
+      setNotificationPermissionNotice(t('settings.notificationPermissionDeniedHint'));
+      return;
+    }
+
+    if (result.reason === 'default') {
+      setNotificationPermissionNotice(t('settings.notificationPermissionDefaultHint'));
+      return;
+    }
+
+    if (result.reason === 'unsupported') {
+      setNotificationPermissionNotice(t('settings.notificationPermissionUnsupportedHint'));
+    }
   }
 
   async function handleProfileSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -249,6 +297,33 @@ export function SettingsPage(): JSX.Element {
                       onChange={handleNotificationsChange}
                     />
                   </div>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <strong>{t('settings.notificationPermission')}</strong>
+                      <span>
+                        {notificationStatus
+                          ? t(getNotificationPermissionLabelKey(notificationStatus.permission))
+                          : t('settings.notificationPermissionUnsupported')}
+                      </span>
+                    </div>
+                    <span className="settings-inline-save">
+                      <button
+                        type="button"
+                        className="secondary-button compact-button"
+                        onClick={() => void handleRequestNotificationPermission()}
+                      >
+                        {t('settings.enableBrowserNotifications')}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button compact-button"
+                        onClick={() => void handleTestNotification()}
+                      >
+                        {t('settings.sendTestNotification')}
+                      </button>
+                    </span>
+                  </div>
+                  {notificationPermissionNotice ? <p className="form-error">{notificationPermissionNotice}</p> : null}
                   <div className="settings-row">
                     <div className="settings-row-text">
                       <strong>{t('settings.deviceId')}</strong>
@@ -480,6 +555,24 @@ function SettingsSelect<TValue extends string>({
 type SettingsSection = 'general' | 'profile' | 'account' | 'about';
 type NotificationSetting = 'enabled' | 'disabled';
 type TranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
+
+function getNotificationPermissionLabelKey(
+  permission: NotificationRuntimeStatus['permission'],
+): TranslationKey {
+  if (permission === 'granted') {
+    return 'settings.notificationPermissionGranted';
+  }
+
+  if (permission === 'denied') {
+    return 'settings.notificationPermissionDenied';
+  }
+
+  if (permission === 'default') {
+    return 'settings.notificationPermissionDefault';
+  }
+
+  return 'settings.notificationPermissionUnsupported';
+}
 
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;

@@ -823,10 +823,7 @@ async function handleIncomingMessage(
       currentState.selectedConversationId,
       currentState.currentUserId,
     ),
-    latestIncomingMessage:
-      !message.isOwn && currentState.selectedConversationId !== payload.conversationId
-        ? message
-        : currentState.latestIncomingMessage,
+    latestIncomingMessage: !message.isOwn ? message : currentState.latestIncomingMessage,
   }));
 
   if (!message.isOwn && state.selectedConversationId === payload.conversationId) {
