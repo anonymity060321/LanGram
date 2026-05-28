@@ -4,6 +4,7 @@ import { guestLogin } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { getDeviceIdentity } from '../../utils/device';
+import { reportAuthNetworkError } from '../../utils/serverHealth';
 import { AuthShell } from './AuthShell';
 
 const DISPLAY_NAME_MAX_LENGTH = 80;
@@ -24,7 +25,10 @@ export function GuestLoginPage(): JSX.Element {
       const result = await guestLogin({ displayName: displayName || undefined, device });
       setSession(result);
       navigate('/', { replace: true });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.submitFailed'));
     }
   }

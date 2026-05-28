@@ -10,6 +10,7 @@ import {
 import { forwardFile, type FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
 import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
+import { useNetworkStore } from './network.store';
 import {
   connectRealtime,
   disconnectRealtime,
@@ -268,6 +269,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   connect: (accessToken, onSessionKicked) => {
+    useNetworkStore.getState().setStatus('connecting');
     connectRealtime(getApiBaseUrl(), accessToken, {
       onMessageNew: (payload) => {
         void handleIncomingMessage(payload, get, set);
@@ -291,10 +293,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onError: (payload) => {
         handleRealtimeError(payload, set);
       },
+      onConnectionStatusChange: (status) => {
+        useNetworkStore.getState().setStatus(status);
+      },
     });
   },
   disconnect: () => {
     disconnectRealtime();
+    useNetworkStore.getState().reset();
   },
   sendTextMessage: async (conversationId, plaintext, senderId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);

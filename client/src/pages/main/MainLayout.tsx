@@ -25,6 +25,7 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
+import { useNetworkStore, type NetworkStatus } from '../../stores/network.store';
 import { useSettingsStore } from '../../stores/settings.store';
 import {
   loadConversationUiState,
@@ -56,6 +57,8 @@ export function MainLayout(): JSX.Element {
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
   const chatError = useChatStore((state) => state.error);
   const searchQuery = useChatStore((state) => state.searchQuery);
+  const networkStatus = useNetworkStore((state) => state.status);
+  const isNetworkOnline = useNetworkStore((state) => state.online);
   const isLoadingConversations = useChatStore((state) => state.isLoadingConversations);
   const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
@@ -79,6 +82,7 @@ export function MainLayout(): JSX.Element {
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
   const [messageLimitNotice, setMessageLimitNotice] = useState<string | null>(null);
+  const [reconnectedNoticeVisible, setReconnectedNoticeVisible] = useState(false);
   const [uploadState, setUploadState] = useState<FileUploadState>({
     isUploading: false,
     notice: null,
@@ -99,6 +103,8 @@ export function MainLayout(): JSX.Element {
   const isMessageComposingRef = useRef(false);
   const lastNotificationMessageRef = useRef<string | null>(null);
   const hasRequestedNotificationPermissionRef = useRef(false);
+  const hasSeenOnlineRef = useRef(false);
+  const previousNetworkStatusRef = useRef<NetworkStatus>(networkStatus);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const profileUser = selectedConversation?.peer ?? user ?? null;
@@ -207,10 +213,31 @@ export function MainLayout(): JSX.Element {
   }, [messageLimitNotice]);
 
   useEffect(() => {
-    document.title = totalUnreadCount > 0
-      ? `(${formatUnreadCount(totalUnreadCount)}) LanGram`
-      : 'LanGram';
-  }, [totalUnreadCount]);
+    const unreadPrefix = totalUnreadCount > 0 ? `(${formatUnreadCount(totalUnreadCount)}) ` : '';
+    const statusSuffix = networkStatus === 'reconnecting' ? ` - ${t('network.reconnectingTitle')}` : '';
+    document.title = `${unreadPrefix}LanGram${statusSuffix}`;
+  }, [networkStatus, t, totalUnreadCount]);
+
+  useEffect(() => {
+    const previousStatus = previousNetworkStatusRef.current;
+    previousNetworkStatusRef.current = networkStatus;
+
+    if (networkStatus === 'online') {
+      if (hasSeenOnlineRef.current && previousStatus !== 'online') {
+        setReconnectedNoticeVisible(true);
+      }
+      hasSeenOnlineRef.current = true;
+    }
+  }, [networkStatus]);
+
+  useEffect(() => {
+    if (!reconnectedNoticeVisible) {
+      return undefined;
+    }
+
+    const timerId = window.setTimeout(() => setReconnectedNoticeVisible(false), 2000);
+    return () => window.clearTimeout(timerId);
+  }, [reconnectedNoticeVisible]);
 
   useEffect(() => {
     void updateTrayUnreadCount(totalUnreadCount);
@@ -459,6 +486,11 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
+    if (!isNetworkOnline) {
+      setMessageLimitNotice(t('network.unavailableSend'));
+      return;
+    }
+
     const plaintext = messageDraft.trim();
     setMessageDraft('');
     setMessageLimitNotice(null);
@@ -494,6 +526,11 @@ export function MainLayout(): JSX.Element {
     event.target.value = '';
 
     if (!user || !selectedConversationId || !file) {
+      return;
+    }
+
+    if (!isNetworkOnline) {
+      setUploadState({ isUploading: false, notice: null, error: t('network.unavailableSend') });
       return;
     }
 
@@ -940,6 +977,13 @@ export function MainLayout(): JSX.Element {
           ) : null}
         </header>
         {selectedConversation ? (
+          <NetworkStatusBanner
+            status={networkStatus}
+            showReconnected={reconnectedNoticeVisible}
+            t={t}
+          />
+        ) : null}
+        {selectedConversation ? (
           <>
             <div className="chat-search-bar">
               <input
@@ -1154,6 +1198,41 @@ export function MainLayout(): JSX.Element {
           )
         : null}
     </main>
+  );
+}
+
+function NetworkStatusBanner({
+  status,
+  showReconnected,
+  t,
+}: {
+  status: NetworkStatus;
+  showReconnected: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+}): JSX.Element | null {
+  if (showReconnected) {
+    return (
+      <div className="network-status-banner is-online" role="status">
+        {t('network.reconnected')}
+      </div>
+    );
+  }
+
+  if (status === 'online') {
+    return null;
+  }
+
+  const labelByStatus: Record<Exclude<NetworkStatus, 'online'>, string> = {
+    connecting: t('network.connecting'),
+    disconnected: t('network.disconnected'),
+    reconnecting: t('network.reconnecting'),
+    failed: t('network.reconnectFailed'),
+  };
+
+  return (
+    <div className={`network-status-banner is-${status}`} role="status">
+      {labelByStatus[status]}
+    </div>
   );
 }
 

@@ -97,6 +97,13 @@ export interface SessionKickedPayload {
   reason: 'new_device_login';
 }
 
+export type RealtimeConnectionStatus =
+  | 'online'
+  | 'connecting'
+  | 'disconnected'
+  | 'reconnecting'
+  | 'failed';
+
 interface RealtimeHandlers {
   onMessageNew: (payload: MessageNewPayload) => void;
   onMessageDelivered: (payload: MessageDeliveredPayload) => void;
@@ -106,6 +113,7 @@ interface RealtimeHandlers {
   onPresenceUpdate: (payload: PresenceUpdatePayload) => void;
   onSessionKicked: (payload: SessionKickedPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
+  onConnectionStatusChange?: (status: RealtimeConnectionStatus) => void;
 }
 
 let socket: Socket | null = null;
@@ -116,6 +124,7 @@ export function connectRealtime(
   handlers: RealtimeHandlers,
 ): void {
   disconnectRealtime();
+  handlers.onConnectionStatusChange?.('connecting');
 
   socket = io(resolveSocketUrl(apiBaseUrl), {
     path: '/ws',
@@ -123,6 +132,14 @@ export function connectRealtime(
     auth: { token: accessToken },
   });
 
+  socket.on('connect', () => {
+    handlers.onConnectionStatusChange?.('online');
+  });
+  socket.on('disconnect', (reason) => {
+    handlers.onConnectionStatusChange?.(
+      reason === 'io client disconnect' ? 'disconnected' : 'reconnecting',
+    );
+  });
   socket.on(REALTIME_EVENTS.MESSAGE_NEW, handlers.onMessageNew);
   socket.on(REALTIME_EVENTS.MESSAGE_DELIVERED, handlers.onMessageDelivered);
   socket.on(REALTIME_EVENTS.MESSAGE_READ, handlers.onMessageRead);
@@ -132,7 +149,17 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.SESSION_KICKED, handlers.onSessionKicked);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
   socket.on('connect_error', (error) => {
+    handlers.onConnectionStatusChange?.('failed');
     handlers.onError({ code: 'WS_CONNECT_ERROR', message: error.message });
+  });
+  socket.io.on('reconnect_attempt', () => {
+    handlers.onConnectionStatusChange?.('reconnecting');
+  });
+  socket.io.on('reconnect', () => {
+    handlers.onConnectionStatusChange?.('online');
+  });
+  socket.io.on('reconnect_failed', () => {
+    handlers.onConnectionStatusChange?.('failed');
   });
 }
 

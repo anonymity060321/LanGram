@@ -4,6 +4,7 @@ import { register, registerTemporary, sendEmailCode } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { getDeviceIdentity } from '../../utils/device';
+import { reportAuthNetworkError } from '../../utils/serverHealth';
 import { AuthShell } from './AuthShell';
 
 const EMAIL_MAX_LENGTH = 254;
@@ -36,7 +37,10 @@ export function RegisterPage(): JSX.Element {
       });
       setSession(result);
       navigate('/', { replace: true });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.submitFailed'));
     }
   }
@@ -48,7 +52,10 @@ export function RegisterPage(): JSX.Element {
 
     try {
       await sendEmailCode({ email, purpose: 'REGISTER' });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.submitFailed'));
     }
   }
@@ -69,7 +76,10 @@ export function RegisterPage(): JSX.Element {
       });
       setSession(result);
       navigate('/', { replace: true });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.submitFailed'));
     }
   }

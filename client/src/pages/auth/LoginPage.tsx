@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   loginWithEmailCode,
@@ -11,7 +11,9 @@ import {
 } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
+import { useNetworkStore } from '../../stores/network.store';
 import { getDeviceIdentity } from '../../utils/device';
+import { reportAuthNetworkError } from '../../utils/serverHealth';
 import { AuthShell } from './AuthShell';
 
 type LoginMode = 'password' | 'emailCode' | 'forgotPassword';
@@ -25,6 +27,7 @@ export function LoginPage(): JSX.Element {
   const { t } = useI18n();
   const navigate = useNavigate();
   const setSession = useAuthStore((state) => state.setSession);
+  const networkStatus = useNetworkStore((state) => state.status);
   const [mode, setMode] = useState<LoginMode>('password');
   const [identifier, setIdentifier] = useState('');
   const [emailCodeEmail, setEmailCodeEmail] = useState('');
@@ -41,6 +44,7 @@ export function LoginPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
+  const shouldRefreshCaptchaAfterReconnectRef = useRef(false);
 
   const refreshCaptcha = useCallback(async (): Promise<void> => {
     setIsLoadingCaptcha(true);
@@ -51,7 +55,10 @@ export function LoginPage(): JSX.Element {
       const nextCaptcha = await requestTextCaptcha();
       setCaptcha(nextCaptcha);
       setCaptchaAnswer('');
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.submitFailed'));
     } finally {
       setIsLoadingCaptcha(false);
@@ -63,6 +70,22 @@ export function LoginPage(): JSX.Element {
       void refreshCaptcha();
     }
   }, [captcha, mode, refreshCaptcha]);
+
+  useEffect(() => {
+    if (networkStatus === 'reconnecting' || networkStatus === 'failed') {
+      shouldRefreshCaptchaAfterReconnectRef.current = true;
+      return;
+    }
+
+    if (networkStatus !== 'online' || !shouldRefreshCaptchaAfterReconnectRef.current) {
+      return;
+    }
+
+    shouldRefreshCaptchaAfterReconnectRef.current = false;
+    if (mode === 'password') {
+      void refreshCaptcha();
+    }
+  }, [mode, networkStatus, refreshCaptcha]);
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -85,7 +108,10 @@ export function LoginPage(): JSX.Element {
       });
       setSession(result);
       navigate('/', { replace: true });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setPassword('');
       setCaptchaAnswer('');
       await refreshCaptcha();
@@ -110,7 +136,10 @@ export function LoginPage(): JSX.Element {
       });
       setSession(result);
       navigate('/', { replace: true });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.emailLoginFailed'));
     } finally {
       setIsSubmitting(false);
@@ -128,7 +157,10 @@ export function LoginPage(): JSX.Element {
 
     try {
       await sendEmailCode({ email: emailCodeEmail, purpose: 'LOGIN' });
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.submitFailed'));
     } finally {
       setIsSendingCode(false);
@@ -147,7 +179,10 @@ export function LoginPage(): JSX.Element {
     try {
       await requestPasswordResetCode({ email: resetEmail });
       setNotice(t('auth.passwordResetCodeSent'));
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setNotice(t('auth.passwordResetCodeSent'));
     } finally {
       setIsSendingCode(false);
@@ -176,7 +211,10 @@ export function LoginPage(): JSX.Element {
       setResetPasswordConfirm('');
       setMode('password');
       setNotice(t('auth.passwordResetSuccess'));
-    } catch {
+    } catch (error) {
+      if (reportAuthNetworkError(error)) {
+        return;
+      }
       setError(t('auth.passwordResetFailed'));
     } finally {
       setIsSubmitting(false);
