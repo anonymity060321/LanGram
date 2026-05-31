@@ -10,6 +10,7 @@ import {
 import { forwardFile, type FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
 import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
+import { isNetworkRequestError } from '../utils/serverHealth';
 import { useNetworkStore } from './network.store';
 import {
   connectRealtime,
@@ -118,7 +119,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userId = currentUserId ?? get().currentUserId;
       const conversations = userId ? await enrichConversations(result.conversations) : result.conversations;
       set({ conversations, currentUserId: userId ?? null, isLoadingConversations: false });
-    } catch {
+    } catch (error) {
+      if (handleNetworkLoadError(error, () => set({ isLoadingConversations: false }))) {
+        return;
+      }
+
       set({ error: 'Failed to load conversations', isLoadingConversations: false });
     }
   },
@@ -167,7 +172,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (lastIncoming) {
         get().markRead(conversationId, lastIncoming.id);
       }
-    } catch {
+    } catch (error) {
+      if (handleNetworkLoadError(error, () => set({ isLoadingMessages: false }))) {
+        return;
+      }
+
       set({ error: 'Failed to load messages', isLoadingMessages: false });
     }
   },
@@ -236,7 +245,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       return didAddMessages;
-    } catch {
+    } catch (error) {
+      if (isNetworkRequestError(error)) {
+        useNetworkStore.getState().setStatus('reconnecting');
+        set((currentState) => ({
+          messagePaginationByConversation: {
+            ...currentState.messagePaginationByConversation,
+            [conversationId]: {
+              hasMore: currentState.messagePaginationByConversation[conversationId]?.hasMore ?? false,
+              nextCursor: currentState.messagePaginationByConversation[conversationId]?.nextCursor ?? null,
+              isLoadingOlder: false,
+            },
+          },
+        }));
+        return false;
+      }
+
       set((currentState) => ({
         error: 'Failed to load messages',
         messagePaginationByConversation: {
@@ -952,7 +976,21 @@ function handleRealtimeError(
   payload: RealtimeErrorPayload,
   set: ChatSet,
 ): void {
+  if (payload.code === 'WS_CONNECT_ERROR') {
+    return;
+  }
+
   set({ error: payload.message });
+}
+
+function handleNetworkLoadError(error: unknown, cleanup: () => void): boolean {
+  if (!isNetworkRequestError(error)) {
+    return false;
+  }
+
+  useNetworkStore.getState().setStatus('reconnecting');
+  cleanup();
+  return true;
 }
 
 async function decryptSafely(

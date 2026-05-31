@@ -58,6 +58,7 @@ export function MainLayout(): JSX.Element {
   const chatError = useChatStore((state) => state.error);
   const searchQuery = useChatStore((state) => state.searchQuery);
   const networkStatus = useNetworkStore((state) => state.status);
+  const networkLastChangedAt = useNetworkStore((state) => state.lastChangedAt);
   const isNetworkOnline = useNetworkStore((state) => state.online);
   const isLoadingConversations = useChatStore((state) => state.isLoadingConversations);
   const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
@@ -105,10 +106,15 @@ export function MainLayout(): JSX.Element {
   const hasRequestedNotificationPermissionRef = useRef(false);
   const hasSeenOnlineRef = useRef(false);
   const previousNetworkStatusRef = useRef<NetworkStatus>(networkStatus);
+  const hasObservedOnlineForSyncRef = useRef(networkStatus === 'online');
+  const previousNetworkStatusForSyncRef = useRef<NetworkStatus>(networkStatus);
+  const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const profileUser = selectedConversation?.peer ?? user ?? null;
-  const profilePresence = selectedConversation?.peer
+  const profilePresence = !isNetworkOnline
+    ? t('presence.offline')
+    : selectedConversation?.peer
     ? formatPresence(selectedConversation.peer.isOnline, selectedConversation.peer.lastSeenAt, t)
     : t('presence.online');
   const messages = useMemo(
@@ -238,6 +244,41 @@ export function MainLayout(): JSX.Element {
     const timerId = window.setTimeout(() => setReconnectedNoticeVisible(false), 2000);
     return () => window.clearTimeout(timerId);
   }, [reconnectedNoticeVisible]);
+
+  useEffect(() => {
+    const previousStatus = previousNetworkStatusForSyncRef.current;
+    previousNetworkStatusForSyncRef.current = networkStatus;
+
+    if (networkStatus !== 'online') {
+      return;
+    }
+
+    if (!hasObservedOnlineForSyncRef.current) {
+      hasObservedOnlineForSyncRef.current = true;
+      return;
+    }
+
+    if (
+      previousStatus === 'online' ||
+      !user?.id ||
+      lastSyncedNetworkChangedAtRef.current === networkLastChangedAt
+    ) {
+      return;
+    }
+
+    lastSyncedNetworkChangedAtRef.current = networkLastChangedAt;
+    void loadConversations(user.id);
+    if (selectedConversationId) {
+      void selectConversation(selectedConversationId, user.id);
+    }
+  }, [
+    loadConversations,
+    networkLastChangedAt,
+    networkStatus,
+    selectConversation,
+    selectedConversationId,
+    user?.id,
+  ]);
 
   useEffect(() => {
     void updateTrayUnreadCount(totalUnreadCount);
@@ -977,14 +1018,14 @@ export function MainLayout(): JSX.Element {
           ) : null}
         </header>
         {selectedConversation ? (
-          <NetworkStatusBanner
-            status={networkStatus}
-            showReconnected={reconnectedNoticeVisible}
-            t={t}
-          />
-        ) : null}
-        {selectedConversation ? (
-          <>
+          <div className="chat-conversation-body">
+            <div className="chat-network-slot">
+              <NetworkStatusBanner
+                status={networkStatus}
+                showReconnected={reconnectedNoticeVisible}
+                t={t}
+              />
+            </div>
             <div className="chat-search-bar">
               <input
                 value={searchQuery}
@@ -1031,24 +1072,26 @@ export function MainLayout(): JSX.Element {
                 </div>
               ) : null}
             </div>
-            <MessageList
-              conversationId={selectedConversation.id}
-              messages={messages}
-              isLoading={isLoadingMessages}
-              hasMoreMessages={selectedMessagePagination?.hasMore ?? false}
-              isLoadingOlderMessages={selectedMessagePagination?.isLoadingOlder ?? false}
-              searchQuery={searchQuery}
-              activeSearchMessageId={activeSearchMessageId}
-              searchMatchIds={searchMatchIds}
-              onLoadOlderMessages={handleLoadOlderMessages}
-              onDeleteLocalMessage={handleDeleteLocalMessage}
-              onRecallMessage={handleRecallMessage}
-              onEditMessage={handleEditMessage}
-              onForwardMessage={handleForwardMessage}
-              onDownloadFile={handleDownloadFile}
-              forwardTargets={forwardTargets}
-              downloadStates={downloadStates}
-            />
+            <div className="chat-message-area">
+              <MessageList
+                conversationId={selectedConversation.id}
+                messages={messages}
+                isLoading={isLoadingMessages}
+                hasMoreMessages={selectedMessagePagination?.hasMore ?? false}
+                isLoadingOlderMessages={selectedMessagePagination?.isLoadingOlder ?? false}
+                searchQuery={searchQuery}
+                activeSearchMessageId={activeSearchMessageId}
+                searchMatchIds={searchMatchIds}
+                onLoadOlderMessages={handleLoadOlderMessages}
+                onDeleteLocalMessage={handleDeleteLocalMessage}
+                onRecallMessage={handleRecallMessage}
+                onEditMessage={handleEditMessage}
+                onForwardMessage={handleForwardMessage}
+                onDownloadFile={handleDownloadFile}
+                forwardTargets={forwardTargets}
+                downloadStates={downloadStates}
+              />
+            </div>
             {uploadState.notice || uploadState.error ? (
               <div className={`file-upload-status ${uploadState.error ? 'is-error' : ''}`}>
                 <span>{uploadState.error ?? t('chat.uploadSuccess')}</span>
@@ -1125,7 +1168,7 @@ export function MainLayout(): JSX.Element {
                 </button>
               </div>
             </form>
-          </>
+          </div>
         ) : (
           <div className="empty-chat-state">
             <h1>{t('main.emptyTitle')}</h1>
