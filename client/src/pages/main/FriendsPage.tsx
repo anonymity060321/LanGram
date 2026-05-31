@@ -19,7 +19,7 @@ import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore } from '../../stores/chat.store';
 import { unhideConversationInUiState } from '../../utils/conversationUiState';
 
-type FriendsTab = 'list' | 'add' | 'requests';
+type ContactsPanel = 'empty' | 'friend' | 'add' | 'requests';
 
 export function FriendsPage(): JSX.Element {
   const navigate = useNavigate();
@@ -61,7 +61,7 @@ export function FriendsWorkspace({
   const user = useAuthStore((state) => state.user);
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
-  const [activeTab, setActiveTab] = useState<FriendsTab>('list');
+  const [activePanel, setActivePanel] = useState<ContactsPanel>('empty');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState('');
@@ -164,7 +164,8 @@ export function FriendsWorkspace({
       setInputCode('');
       setNotice(t('friends.requestSent'));
       await refreshFriendsData();
-      setActiveTab('requests');
+      setSelectedFriendshipId(null);
+      setActivePanel('requests');
     } catch {
       setError(t('friends.actionFailed'));
     } finally {
@@ -217,6 +218,7 @@ export function FriendsWorkspace({
       setNotice(t('friends.deleteSuccess'));
       if (selectedFriendshipId === item.id) {
         setSelectedFriendshipId(null);
+        setActivePanel('empty');
       }
       await refreshFriendsData();
     } catch {
@@ -245,131 +247,145 @@ export function FriendsWorkspace({
     }
   }
 
+  function handleSelectFriend(friendshipId: string): void {
+    if (activePanel === 'friend' && selectedFriendshipId === friendshipId) {
+      setSelectedFriendshipId(null);
+      setActivePanel('empty');
+      return;
+    }
+
+    setSelectedFriendshipId(friendshipId);
+    setActivePanel('friend');
+  }
+
   const canClearRequests = useMemo(
     () => [...incoming, ...outgoing].some((request) => request.status !== 'PENDING'),
     [incoming, outgoing],
   );
 
   return (
-    <section className={`friends-shell ${className}`.trim()}>
-        <header className="settings-header">
+    <section className={`friends-main-layout ${className}`.trim()}>
+      <aside className="conversation-panel friends-conversation-panel">
+        <header className="sidebar-header friends-list-header">
           <h1>{t('friends.title')}</h1>
           {showBackLink ? <Link to="/">{t('common.back')}</Link> : null}
         </header>
 
-        <div className="contacts-workspace">
-          <aside className="contacts-sidebar">
-            <div className="contacts-search-row">
-              <label className="contacts-search-field">
-                <span>{t('friends.searchPlaceholder')}</span>
-                <input
-                  value={friendSearchQuery}
-                  onChange={(event) => setFriendSearchQuery(event.target.value)}
-                  placeholder={t('friends.searchPlaceholder')}
-                />
-              </label>
-              <div className="contacts-add-menu" ref={addMenuRef}>
+        <div className="friends-search-row">
+          <label className="friends-search-field">
+            <span>{t('friends.searchPlaceholder')}</span>
+            <input
+              value={friendSearchQuery}
+              onChange={(event) => setFriendSearchQuery(event.target.value)}
+              placeholder={t('friends.searchPlaceholder')}
+            />
+          </label>
+          <div className="friends-add-menu" ref={addMenuRef}>
+            <button
+              type="button"
+              className="friends-add-button"
+              aria-label={t('friends.addMenu')}
+              title={t('friends.addMenu')}
+              aria-expanded={isAddMenuOpen}
+              onClick={() => setIsAddMenuOpen((isOpen) => !isOpen)}
+            >
+              <img src="/vector_icon/plus.svg" alt="" aria-hidden="true" />
+            </button>
+            {isAddMenuOpen ? (
+              <div className="friends-add-popover" role="menu">
                 <button
                   type="button"
-                  className="contacts-add-button"
-                  aria-label={t('friends.addMenu')}
-                  title={t('friends.addMenu')}
-                  aria-expanded={isAddMenuOpen}
-                  onClick={() => setIsAddMenuOpen((isOpen) => !isOpen)}
+                  role="menuitem"
+                  onClick={() => {
+                    setIsAddMenuOpen(false);
+                    setSelectedFriendshipId(null);
+                    setActivePanel('add');
+                  }}
                 >
-                  <img src="/vector_icon/plus.svg" alt="" aria-hidden="true" />
+                  {t('friends.addTitle')}
                 </button>
-                {isAddMenuOpen ? (
-                  <div className="contacts-add-popover" role="menu">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setIsAddMenuOpen(false);
-                        setActiveTab('add');
-                      }}
-                    >
-                      {t('friends.addTitle')}
-                    </button>
-                  </div>
-                ) : null}
               </div>
-            </div>
-            <button
-              type="button"
-              className={`contacts-notice-entry ${activeTab === 'requests' ? 'is-active' : ''}`}
-              onClick={() => setActiveTab('requests')}
-            >
-              <span>{t('friends.notifications')}</span>
-              {pendingRequestCount > 0 ? <strong>{pendingRequestCount}</strong> : null}
-            </button>
-            <button
-              type="button"
-              className={`contacts-list-entry ${activeTab === 'list' ? 'is-active' : ''}`}
-              onClick={() => setActiveTab('list')}
-            >
-              <strong>{t('friends.listTitle')}</strong>
-              <span>{filteredFriends.length}</span>
-            </button>
-            {activeTab === 'list' ? (
-              <FriendListSection
-                friends={filteredFriends}
-                selectedFriend={selectedFriend}
-                t={t}
-                onSelectFriend={(friendshipId) => {
-                  setSelectedFriendshipId(friendshipId);
-                  setActiveTab('list');
-                }}
-              />
-            ) : (
-              <div className="contacts-sidebar-hint">
-                {activeTab === 'requests' ? t('friends.notifications') : t('friends.addTitle')}
-              </div>
-            )}
-          </aside>
-
-          <section className="contacts-main">
-            {error ? <p className="form-error">{error}</p> : null}
-            {notice ? <p className="form-success">{notice}</p> : null}
-
-            <div className="friends-tab-panel" key={activeTab}>
-              {activeTab === 'list' ? (
-                <FriendProfileCard
-                  selectedFriend={selectedFriend}
-                  isBusy={isBusy}
-                  t={t}
-                  onOpenChat={handleOpenChat}
-                  onDeleteFriend={handleDeleteFriend}
-                />
-              ) : null}
-
-              {activeTab === 'add' ? (
-                <AddFriendSection
-                  pairingCode={pairingCode}
-                  pairingCodeExpiresAt={pairingCodeExpiresAt}
-                  inputCode={inputCode}
-                  isBusy={isBusy}
-                  t={t}
-                  onInputCodeChange={setInputCode}
-                  onGenerateCode={handleGenerateCode}
-                  onSubmitRequest={handleSubmitRequest}
-                />
-              ) : null}
-
-              {activeTab === 'requests' ? (
-                <FriendRequestsSection
-                  incoming={incoming}
-                  outgoing={outgoing}
-                  isBusy={isBusy}
-                  canClearRequests={canClearRequests}
-                  t={t}
-                  onRespond={handleRespond}
-                  onClearRequests={handleClearRequests}
-                />
-              ) : null}
-            </div>
-          </section>
+            ) : null}
+          </div>
         </div>
+
+        <button
+          type="button"
+          className={`friends-nav-entry ${activePanel === 'requests' ? 'is-active' : ''}`}
+          onClick={() => {
+            setSelectedFriendshipId(null);
+            setActivePanel('requests');
+          }}
+        >
+          <span>{t('friends.notifications')}</span>
+          {pendingRequestCount > 0 ? (
+            <strong className="friends-nav-badge friends-nav-badge--alert">
+              {pendingRequestCount}
+            </strong>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          className={`friends-nav-entry ${
+            activePanel === 'empty' || activePanel === 'friend' ? 'is-active' : ''
+          }`}
+          onClick={() => {
+            setSelectedFriendshipId(null);
+            setActivePanel('empty');
+          }}
+        >
+          <strong>{t('friends.listTitle')}</strong>
+          <span className="friends-nav-badge">{filteredFriends.length}</span>
+        </button>
+        <FriendListSection
+          friends={filteredFriends}
+          selectedFriend={activePanel === 'friend' ? selectedFriend : null}
+          t={t}
+          onSelectFriend={handleSelectFriend}
+        />
+      </aside>
+
+      <section className="chat-panel friends-detail-panel">
+        {error ? <p className="form-error">{error}</p> : null}
+        {notice ? <p className="form-success">{notice}</p> : null}
+
+        {activePanel === 'empty' ? <ContactsEmptyState t={t} /> : null}
+
+        {activePanel === 'friend' ? (
+          <FriendProfileCard
+            selectedFriend={selectedFriend}
+            isBusy={isBusy}
+            t={t}
+            onOpenChat={handleOpenChat}
+            onDeleteFriend={handleDeleteFriend}
+          />
+        ) : null}
+
+        {activePanel === 'add' ? (
+          <AddFriendSection
+            pairingCode={pairingCode}
+            pairingCodeExpiresAt={pairingCodeExpiresAt}
+            inputCode={inputCode}
+            isBusy={isBusy}
+            t={t}
+            onInputCodeChange={setInputCode}
+            onGenerateCode={handleGenerateCode}
+            onSubmitRequest={handleSubmitRequest}
+          />
+        ) : null}
+
+        {activePanel === 'requests' ? (
+          <FriendRequestsSection
+            incoming={incoming}
+            outgoing={outgoing}
+            isBusy={isBusy}
+            canClearRequests={canClearRequests}
+            t={t}
+            onRespond={handleRespond}
+            onClearRequests={handleClearRequests}
+          />
+        ) : null}
+      </section>
     </section>
   );
 }
@@ -386,7 +402,7 @@ function FriendListSection({
   onSelectFriend: (friendshipId: string) => void;
 }): JSX.Element {
   return (
-    <section className="contacts-list-panel">
+    <section className="friends-list-scroll">
         {friends.length === 0 ? <p className="empty-list">{t('friends.noFriends')}</p> : null}
         <div className="request-list">
           {friends.map((item) => (
@@ -407,6 +423,15 @@ function FriendListSection({
   );
 }
 
+function ContactsEmptyState({ t }: { t: ReturnType<typeof useI18n>['t'] }): JSX.Element {
+  return (
+    <section className="friends-detail-empty">
+      <h2>{t('friends.profileTitle')}</h2>
+      <p>{t('friends.noProfileSelected')}</p>
+    </section>
+  );
+}
+
 function FriendProfileCard({
   selectedFriend,
   isBusy,
@@ -421,16 +446,11 @@ function FriendProfileCard({
   onDeleteFriend: (item: FriendItem) => Promise<void>;
 }): JSX.Element {
   if (!selectedFriend) {
-    return (
-      <aside className="friends-panel friend-profile-card friend-detail-empty">
-        <h2>{t('friends.profileTitle')}</h2>
-        <p className="empty-list">{t('friends.noProfileSelected')}</p>
-      </aside>
-    );
+    return <ContactsEmptyState t={t} />;
   }
 
   return (
-    <aside className="friends-panel friend-profile-card">
+    <aside className="friend-profile-card">
       <UserAvatar
         userId={selectedFriend.friend.id}
         displayName={selectedFriend.friend.displayName}
@@ -493,42 +513,44 @@ function AddFriendSection({
   onSubmitRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 }): JSX.Element {
   return (
-    <section className="friends-grid contacts-add-section">
-      <div className="friends-panel">
-        <h2>{t('friends.generateTitle')}</h2>
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => void onGenerateCode()}
-          disabled={isBusy}
-        >
-          {t('friends.generateCode')}
-        </button>
-        {pairingCode ? (
-          <div className="pairing-code-box">
-            <strong>{pairingCode}</strong>
-            <span>
-              {t('friends.expiresAt')}: {formatDateTime(pairingCodeExpiresAt)}
-            </span>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="friends-panel">
-        <h2>{t('friends.addTitle')}</h2>
-        <form className="form-stack" onSubmit={(event) => void onSubmitRequest(event)}>
-          <label>
-            <span>{t('friends.pairingCode')}</span>
-            <input
-              value={inputCode}
-              inputMode="numeric"
-              onChange={(event) => onInputCodeChange(event.target.value)}
-            />
-          </label>
-          <button type="submit" className="primary-button" disabled={isBusy || !inputCode.trim()}>
-            {t('friends.sendRequest')}
+    <section className="friends-add-page">
+      <div className="friends-add-section">
+        <div className="friends-panel friends-add-card">
+          <h2>{t('friends.generateTitle')}</h2>
+          <button
+            type="button"
+            className="primary-button friends-generate-code-button"
+            onClick={() => void onGenerateCode()}
+            disabled={isBusy}
+          >
+            {t('friends.generateCode')}
           </button>
-        </form>
+          {pairingCode ? (
+            <div className="pairing-code-box">
+              <strong>{pairingCode}</strong>
+              <span>
+                {t('friends.expiresAt')}: {formatDateTime(pairingCodeExpiresAt)}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="friends-panel friends-add-card">
+          <h2>{t('friends.addTitle')}</h2>
+          <form className="form-stack" onSubmit={(event) => void onSubmitRequest(event)}>
+            <label>
+              <span>{t('friends.pairingCode')}</span>
+              <input
+                value={inputCode}
+                inputMode="numeric"
+                onChange={(event) => onInputCodeChange(event.target.value)}
+              />
+            </label>
+            <button type="submit" className="primary-button" disabled={isBusy || !inputCode.trim()}>
+              {t('friends.sendRequest')}
+            </button>
+          </form>
+        </div>
       </div>
     </section>
   );
@@ -552,9 +574,12 @@ function FriendRequestsSection({
   onClearRequests: () => Promise<void>;
 }): JSX.Element {
   return (
-    <section className="friends-panel">
-      <div className="friends-panel-header">
-        <h2>{t('friends.requestsTitle')}</h2>
+    <section className="friends-notification-page">
+      <header className="friends-page-header">
+        <div>
+          <h2>{t('friends.notifications')}</h2>
+          <span>{t('friends.requestsTitle')}</span>
+        </div>
         {incoming.length > 0 || outgoing.length > 0 ? (
           <button
             type="button"
@@ -565,44 +590,54 @@ function FriendRequestsSection({
             {t('friends.clearRequests')}
           </button>
         ) : null}
-      </div>
-      {incoming.length === 0 && outgoing.length === 0 ? (
-        <p className="empty-list">{t('friends.noRequests')}</p>
-      ) : null}
-      <div className="request-list">
-        {incoming.map((request) => (
-          <article className="friend-row" key={request.id}>
-            <FriendSummary user={request.requester} presenceLabel={request.status} />
-            {request.status === 'PENDING' ? (
-              <div className="row-actions">
-                <button
-                  type="button"
-                  className="secondary-button compact-button"
-                  disabled={isBusy}
-                  onClick={() => void onRespond(request.id, 'reject')}
-                >
-                  {t('friends.reject')}
-                </button>
-                <button
-                  type="button"
-                  className="primary-button compact-button"
-                  disabled={isBusy}
-                  onClick={() => void onRespond(request.id, 'accept')}
-                >
-                  {t('friends.accept')}
-                </button>
-              </div>
-            ) : null}
-          </article>
-        ))}
-        {outgoing.map((request) => (
-          <article className="friend-row" key={request.id}>
-            <FriendSummary
-              user={request.addressee}
-              presenceLabel={`${t('friends.outgoing')}: ${request.status}`}
-            />
-          </article>
-        ))}
+      </header>
+      <div
+        className={`friends-notification-body ${
+          incoming.length === 0 && outgoing.length === 0 ? 'is-empty' : ''
+        }`}
+      >
+        {incoming.length === 0 && outgoing.length === 0 ? (
+          <div className="friends-notification-empty">
+            <span aria-hidden="true">!</span>
+            <p>{t('friends.noRequests')}</p>
+          </div>
+        ) : (
+          <div className="friends-notification-list">
+            {incoming.map((request) => (
+              <article className="friends-notification-row" key={request.id}>
+                <FriendSummary user={request.requester} presenceLabel={request.status} />
+                {request.status === 'PENDING' ? (
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="secondary-button compact-button"
+                      disabled={isBusy}
+                      onClick={() => void onRespond(request.id, 'reject')}
+                    >
+                      {t('friends.reject')}
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button compact-button"
+                      disabled={isBusy}
+                      onClick={() => void onRespond(request.id, 'accept')}
+                    >
+                      {t('friends.accept')}
+                    </button>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+            {outgoing.map((request) => (
+              <article className="friends-notification-row" key={request.id}>
+                <FriendSummary
+                  user={request.addressee}
+                  presenceLabel={`${t('friends.outgoing')}: ${request.status}`}
+                />
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
