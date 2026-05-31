@@ -1,5 +1,6 @@
 import {
   ChangeEvent,
+  Fragment,
   FormEvent,
   useCallback,
   useEffect,
@@ -946,7 +947,7 @@ export function MainLayout(): JSX.Element {
       </aside>
       {activeView === 'contacts' ? (
         <FriendsWorkspace
-          className="main-contacts-shell"
+          className="main-friends-shell"
           onConversationOpened={() => setActiveView('messages')}
         />
       ) : (
@@ -1893,7 +1894,10 @@ function MessageList({
   if (messages.length === 0) {
     return (
       <div className="message-list empty-chat-state">
-        <p>{t('chat.noMessages')}</p>
+        <div className="message-empty-card">
+          <strong>{t('chat.noMessages')}</strong>
+          <p>{t('chat.noMessagesHint')}</p>
+        </div>
       </div>
     );
   }
@@ -1906,71 +1910,87 @@ function MessageList({
             {isLoadingOlderMessages ? t('chat.loadingOlderMessages') : t('chat.allMessagesLoaded')}
           </div>
         ) : null}
-        {messages.map((message) => (
-          <article
-            className={`message-row ${message.isOwn ? 'is-own' : ''} ${
-              searchMatchIds.has(message.id) ? 'is-search-match' : ''
-            } ${activeSearchMessageId === message.id ? 'is-current-search-match' : ''}`}
-            key={message.id}
-            ref={(element) => {
-              messageRefs.current[message.id] = element;
-            }}
-          >
-            <div
-              className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
-              onContextMenu={(event) => handleContextMenu(event, message)}
-            >
-              {editingMessageId === message.id ? (
-                <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
-                  <input
-                    value={editDraft}
-                    onChange={(event) => setEditDraft(event.target.value)}
-                    autoFocus
-                  />
-                  <div className="message-edit-actions">
-                    <button type="submit" className="message-action" disabled={!editDraft.trim()}>
-                      {t('chat.saveEdit')}
-                    </button>
-                    <button
-                      type="button"
-                      className="message-action"
-                      onClick={() => {
-                        setEditingMessageId(null);
-                        setEditDraft('');
-                      }}
-                    >
-                      {t('chat.cancel')}
-                    </button>
+        {messages.map((message, index) => {
+          const previousMessage = messages[index - 1] ?? null;
+          const showTimeDivider = shouldShowMessageTimeDivider(previousMessage, message);
+          const isSameDirectionGroup = Boolean(
+            previousMessage && !showTimeDivider && previousMessage.isOwn === message.isOwn,
+          );
+
+          return (
+            <Fragment key={message.id}>
+              {showTimeDivider ? (
+                <div className="message-time-divider" role="separator">
+                  <time dateTime={message.createdAt}>{formatMessageTimeDivider(message.createdAt, t)}</time>
+                </div>
+              ) : null}
+              <article
+                className={`message-row ${message.isOwn ? 'is-own' : ''} ${
+                  isSameDirectionGroup ? 'is-compact' : ''
+                } ${showTimeDivider ? 'is-after-divider' : ''} ${
+                  searchMatchIds.has(message.id) ? 'is-search-match' : ''
+                } ${activeSearchMessageId === message.id ? 'is-current-search-match' : ''}`}
+                ref={(element) => {
+                  messageRefs.current[message.id] = element;
+                }}
+              >
+                <div
+                  className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
+                  onContextMenu={(event) => handleContextMenu(event, message)}
+                >
+                  {editingMessageId === message.id ? (
+                    <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
+                      <input
+                        value={editDraft}
+                        onChange={(event) => setEditDraft(event.target.value)}
+                        autoFocus
+                      />
+                      <div className="message-edit-actions">
+                        <button type="submit" className="message-action" disabled={!editDraft.trim()}>
+                          {t('chat.saveEdit')}
+                        </button>
+                        <button
+                          type="button"
+                          className="message-action"
+                          onClick={() => {
+                            setEditingMessageId(null);
+                            setEditDraft('');
+                          }}
+                        >
+                          {t('chat.cancel')}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <p>
+                      {message.status === 'recalled'
+                        ? t('chat.messageRecalled')
+                        : renderMessageBody(
+                            message,
+                            searchQuery,
+                            t,
+                            downloadStates,
+                            openImagePreview,
+                            searchMatchIds.has(message.id),
+                            activeSearchMessageId === message.id,
+                          )}
+                    </p>
+                  )}
+                  <div className="message-meta">
+                    <span>
+                      {message.isOwn && message.status !== 'recalled'
+                        ? t(`chat.status.${message.status}`)
+                        : formatTime(message.recalledAt ?? message.createdAt)}
+                    </span>
+                    {message.editedAt && message.status !== 'recalled' ? (
+                      <span>{t('chat.edited')}</span>
+                    ) : null}
                   </div>
-                </form>
-              ) : (
-                <p>
-                  {message.status === 'recalled'
-                    ? t('chat.messageRecalled')
-                    : renderMessageBody(
-                        message,
-                        searchQuery,
-                        t,
-                        downloadStates,
-                        openImagePreview,
-                        searchMatchIds.has(message.id),
-                        activeSearchMessageId === message.id,
-                      )}
-                </p>
-              )}
-              <div className="message-meta">
-                <span>
-                  {message.isOwn && message.status !== 'recalled'
-                    ? t(`chat.status.${message.status}`)
-                    : formatTime(message.recalledAt ?? message.createdAt)}
-                </span>
-                {message.editedAt && message.status !== 'recalled' ? (
-                  <span>{t('chat.edited')}</span>
-                ) : null}
-              </div>
-            </div>
-          </article>
-        ))}
+                </div>
+              </article>
+            </Fragment>
+          );
+        })}
       </div>
       {contextMenu
         ? createPortal(
@@ -2069,6 +2089,63 @@ function MessageList({
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function shouldShowMessageTimeDivider(previousMessage: ChatMessage | null, message: ChatMessage): boolean {
+  if (!previousMessage) {
+    return true;
+  }
+
+  const previousTime = new Date(previousMessage.createdAt).getTime();
+  const currentTime = new Date(message.createdAt).getTime();
+  if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime)) {
+    return false;
+  }
+
+  return currentTime - previousTime > MESSAGE_TIME_DIVIDER_INTERVAL_MS;
+}
+
+function formatMessageTimeDivider(
+  value: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const time = formatTime(value);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (isSameCalendarDate(date, today)) {
+    return `${t('chat.today')} ${time}`;
+  }
+
+  if (isSameCalendarDate(date, yesterday)) {
+    return `${t('chat.yesterday')} ${time}`;
+  }
+
+  const month = padDatePart(date.getMonth() + 1);
+  const day = padDatePart(date.getDate());
+  if (date.getFullYear() === today.getFullYear()) {
+    return `${month}/${day} ${time}`;
+  }
+
+  return `${date.getFullYear()}/${month}/${day} ${time}`;
+}
+
+function isSameCalendarDate(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 function MessageContextMenu({
@@ -2619,6 +2696,7 @@ type FileBadge = {
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const MESSAGE_DRAFT_MAX_LENGTH = 5000;
+const MESSAGE_TIME_DIVIDER_INTERVAL_MS = 5 * 60 * 1000;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_UPLOAD_MIME_TYPES = new Set([
   'application/pdf',
