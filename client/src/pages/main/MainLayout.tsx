@@ -39,6 +39,7 @@ import {
   showDesktopNotification,
 } from '../../utils/desktopNotification';
 import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
+import { FriendsWorkspace } from './FriendsPage';
 
 export function MainLayout(): JSX.Element {
   const { t } = useI18n();
@@ -89,6 +90,7 @@ export function MainLayout(): JSX.Element {
     notice: null,
     error: null,
   });
+  const [activeView, setActiveView] = useState<MainView>('messages');
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
   const [conversationUiState, setConversationUiState] = useState<ConversationUiState>(() =>
@@ -408,6 +410,7 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
+    setActiveView('messages');
     setConversationContextMenu(null);
     setSearchQuery('');
     setConversationUiState((current) => {
@@ -514,6 +517,7 @@ export function MainLayout(): JSX.Element {
     const conversationId = await openDirectConversation(friendUserId, user.id);
     if (conversationId) {
       unhideConversation(conversationId);
+      setActiveView('messages');
     }
   }
 
@@ -868,15 +872,16 @@ export function MainLayout(): JSX.Element {
   }
 
   return (
-    <main className="main-layout">
+    <main className={`main-layout ${activeView === 'contacts' ? 'main-layout--contacts' : ''}`}>
       <aside className="app-nav">
         <AppLogo label={t('app.name')} size="sm" />
         <nav className="app-nav-links" aria-label={t('main.navigation')}>
-          <Link
-            className="app-nav-link is-active"
-            to="/"
+          <button
+            type="button"
+            className={`app-nav-link ${activeView === 'messages' ? 'is-active' : ''}`}
             aria-label={t('main.navMessages')}
             title={t('main.navMessages')}
+            onClick={() => setActiveView('messages')}
           >
             <NavIcon src={NAV_ICON_SOURCES.messages} fallback="M" label={t('main.navMessages')} />
             <strong>{t('main.navMessages')}</strong>
@@ -885,16 +890,20 @@ export function MainLayout(): JSX.Element {
                 {formatUnreadCount(totalUnreadCount)}
               </span>
             ) : null}
-          </Link>
-          <Link
-            className="app-nav-link"
-            to="/friends"
+          </button>
+          <button
+            type="button"
+            className={`app-nav-link ${activeView === 'contacts' ? 'is-active' : ''}`}
             aria-label={t('main.navContacts')}
             title={t('main.navContacts')}
+            onClick={() => {
+              setConversationContextMenu(null);
+              setActiveView('contacts');
+            }}
           >
             <NavIcon src={NAV_ICON_SOURCES.contacts} fallback="C" label={t('main.navContacts')} />
             <strong>{t('main.navContacts')}</strong>
-          </Link>
+          </button>
         </nav>
         <div className="app-nav-menu" ref={appMenuRef}>
           {isAppMenuOpen ? (
@@ -935,6 +944,13 @@ export function MainLayout(): JSX.Element {
           </button>
         </div>
       </aside>
+      {activeView === 'contacts' ? (
+        <FriendsWorkspace
+          className="main-contacts-shell"
+          onConversationOpened={() => setActiveView('messages')}
+        />
+      ) : (
+        <>
       <aside className="conversation-panel">
         <div className="sidebar-header">
           <strong>{t('main.sidebarChats')}</strong>
@@ -1216,7 +1232,9 @@ export function MainLayout(): JSX.Element {
           </div>
         </section>
       </aside>
-      {conversationContextMenu
+        </>
+      )}
+      {activeView === 'messages' && conversationContextMenu
         ? createPortal(
             <ConversationContextMenu
               conversation={conversationContextMenu.conversation}
@@ -2548,6 +2566,7 @@ interface FileUploadState {
 }
 
 type FileDownloadStatus = 'downloading' | 'failed';
+type MainView = 'messages' | 'contacts';
 type MessageMenuAction = 'download' | 'forward' | 'edit' | 'recall' | 'deleteLocal';
 type MessageContextMenuState = {
   message: ChatMessage;

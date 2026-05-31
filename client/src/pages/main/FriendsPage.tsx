@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   acceptFriendRequest,
@@ -22,30 +22,11 @@ import { unhideConversationInUiState } from '../../utils/conversationUiState';
 type FriendsTab = 'list' | 'add' | 'requests';
 
 export function FriendsPage(): JSX.Element {
-  const { t } = useI18n();
   const navigate = useNavigate();
-  const user = useAuthStore((state) => state.user);
   const accessToken = useAuthStore((state) => state.accessToken);
   const notifySessionReplaced = useAuthStore((state) => state.notifySessionReplaced);
   const connect = useChatStore((state) => state.connect);
   const disconnect = useChatStore((state) => state.disconnect);
-  const openDirectConversation = useChatStore((state) => state.openDirectConversation);
-  const presenceByUserId = useChatStore((state) => state.presenceByUserId);
-  const [activeTab, setActiveTab] = useState<FriendsTab>('list');
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
-  const [inputCode, setInputCode] = useState('');
-  const [incoming, setIncoming] = useState<FriendRequest[]>([]);
-  const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
-  const [friends, setFriends] = useState<FriendItem[]>([]);
-  const [selectedFriendshipId, setSelectedFriendshipId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-
-  useEffect(() => {
-    void refreshFriendsData().catch(() => setError(t('friends.actionFailed')));
-  }, [t]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -57,6 +38,48 @@ export function FriendsPage(): JSX.Element {
     return () => disconnect();
   }, [accessToken, connect, disconnect, notifySessionReplaced]);
 
+  return (
+    <main className="friends-page">
+      <FriendsWorkspace
+        showBackLink
+        onConversationOpened={() => navigate('/')}
+      />
+    </main>
+  );
+}
+
+export function FriendsWorkspace({
+  className = '',
+  showBackLink = false,
+  onConversationOpened,
+}: {
+  className?: string;
+  showBackLink?: boolean;
+  onConversationOpened?: (conversationId: string) => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const user = useAuthStore((state) => state.user);
+  const openDirectConversation = useChatStore((state) => state.openDirectConversation);
+  const presenceByUserId = useChatStore((state) => state.presenceByUserId);
+  const [activeTab, setActiveTab] = useState<FriendsTab>('list');
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
+  const [inputCode, setInputCode] = useState('');
+  const [incoming, setIncoming] = useState<FriendRequest[]>([]);
+  const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [selectedFriendshipId, setSelectedFriendshipId] = useState<string | null>(null);
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void refreshFriendsData().catch(() => setError(t('friends.actionFailed')));
+  }, [t]);
+
   useEffect(() => {
     setFriends((current) =>
       current.map((item) => ({
@@ -66,9 +89,44 @@ export function FriendsPage(): JSX.Element {
     );
   }, [presenceByUserId]);
 
+  useEffect(() => {
+    if (!isAddMenuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      if (addMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsAddMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setIsAddMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAddMenuOpen]);
+
+  const filteredFriends = useMemo(
+    () => filterFriends(friends, friendSearchQuery),
+    [friendSearchQuery, friends],
+  );
   const selectedFriend = useMemo(
-    () => friends.find((item) => item.id === selectedFriendshipId) ?? friends[0] ?? null,
+    () => friends.find((item) => item.id === selectedFriendshipId) ?? null,
     [friends, selectedFriendshipId],
+  );
+  const pendingRequestCount = useMemo(
+    () => incoming.filter((request) => request.status === 'PENDING').length,
+    [incoming],
   );
 
   async function refreshFriendsData(): Promise<void> {
@@ -142,7 +200,7 @@ export function FriendsPage(): JSX.Element {
     const conversationId = await openDirectConversation(friendUserId, user.id);
     if (conversationId) {
       unhideConversationInUiState(conversationId);
-      navigate('/');
+      onConversationOpened?.(conversationId);
     }
   }
 
@@ -193,150 +251,178 @@ export function FriendsPage(): JSX.Element {
   );
 
   return (
-    <main className="friends-page">
-      <section className="friends-shell">
+    <section className={`friends-shell ${className}`.trim()}>
         <header className="settings-header">
           <h1>{t('friends.title')}</h1>
-          <Link to="/">{t('common.back')}</Link>
+          {showBackLink ? <Link to="/">{t('common.back')}</Link> : null}
         </header>
 
-        <div className="friends-tabs" role="tablist" aria-label={t('friends.title')}>
-          {(['list', 'add', 'requests'] as const).map((tab) => (
+        <div className="contacts-workspace">
+          <aside className="contacts-sidebar">
+            <div className="contacts-search-row">
+              <label className="contacts-search-field">
+                <span>{t('friends.searchPlaceholder')}</span>
+                <input
+                  value={friendSearchQuery}
+                  onChange={(event) => setFriendSearchQuery(event.target.value)}
+                  placeholder={t('friends.searchPlaceholder')}
+                />
+              </label>
+              <div className="contacts-add-menu" ref={addMenuRef}>
+                <button
+                  type="button"
+                  className="contacts-add-button"
+                  aria-label={t('friends.addMenu')}
+                  title={t('friends.addMenu')}
+                  aria-expanded={isAddMenuOpen}
+                  onClick={() => setIsAddMenuOpen((isOpen) => !isOpen)}
+                >
+                  <img src="/vector_icon/plus.svg" alt="" aria-hidden="true" />
+                </button>
+                {isAddMenuOpen ? (
+                  <div className="contacts-add-popover" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsAddMenuOpen(false);
+                        setActiveTab('add');
+                      }}
+                    >
+                      {t('friends.addTitle')}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
             <button
               type="button"
-              role="tab"
-              aria-selected={activeTab === tab}
-              className={activeTab === tab ? 'is-active' : ''}
-              key={tab}
-              onClick={() => setActiveTab(tab)}
+              className={`contacts-notice-entry ${activeTab === 'requests' ? 'is-active' : ''}`}
+              onClick={() => setActiveTab('requests')}
             >
-              {t(`friends.tab.${tab}`)}
+              <span>{t('friends.notifications')}</span>
+              {pendingRequestCount > 0 ? <strong>{pendingRequestCount}</strong> : null}
             </button>
-          ))}
+            <button
+              type="button"
+              className={`contacts-list-entry ${activeTab === 'list' ? 'is-active' : ''}`}
+              onClick={() => setActiveTab('list')}
+            >
+              <strong>{t('friends.listTitle')}</strong>
+              <span>{filteredFriends.length}</span>
+            </button>
+            {activeTab === 'list' ? (
+              <FriendListSection
+                friends={filteredFriends}
+                selectedFriend={selectedFriend}
+                t={t}
+                onSelectFriend={(friendshipId) => {
+                  setSelectedFriendshipId(friendshipId);
+                  setActiveTab('list');
+                }}
+              />
+            ) : (
+              <div className="contacts-sidebar-hint">
+                {activeTab === 'requests' ? t('friends.notifications') : t('friends.addTitle')}
+              </div>
+            )}
+          </aside>
+
+          <section className="contacts-main">
+            {error ? <p className="form-error">{error}</p> : null}
+            {notice ? <p className="form-success">{notice}</p> : null}
+
+            <div className="friends-tab-panel" key={activeTab}>
+              {activeTab === 'list' ? (
+                <FriendProfileCard
+                  selectedFriend={selectedFriend}
+                  isBusy={isBusy}
+                  t={t}
+                  onOpenChat={handleOpenChat}
+                  onDeleteFriend={handleDeleteFriend}
+                />
+              ) : null}
+
+              {activeTab === 'add' ? (
+                <AddFriendSection
+                  pairingCode={pairingCode}
+                  pairingCodeExpiresAt={pairingCodeExpiresAt}
+                  inputCode={inputCode}
+                  isBusy={isBusy}
+                  t={t}
+                  onInputCodeChange={setInputCode}
+                  onGenerateCode={handleGenerateCode}
+                  onSubmitRequest={handleSubmitRequest}
+                />
+              ) : null}
+
+              {activeTab === 'requests' ? (
+                <FriendRequestsSection
+                  incoming={incoming}
+                  outgoing={outgoing}
+                  isBusy={isBusy}
+                  canClearRequests={canClearRequests}
+                  t={t}
+                  onRespond={handleRespond}
+                  onClearRequests={handleClearRequests}
+                />
+              ) : null}
+            </div>
+          </section>
         </div>
-
-        {error ? <p className="form-error">{error}</p> : null}
-        {notice ? <p className="form-success">{notice}</p> : null}
-
-        <div className="friends-tab-panel" key={activeTab}>
-          {activeTab === 'list' ? (
-            <FriendListSection
-              friends={friends}
-              selectedFriend={selectedFriend}
-              isBusy={isBusy}
-              t={t}
-              onSelectFriend={setSelectedFriendshipId}
-              onOpenChat={handleOpenChat}
-              onDeleteFriend={handleDeleteFriend}
-            />
-          ) : null}
-
-          {activeTab === 'add' ? (
-            <AddFriendSection
-              pairingCode={pairingCode}
-              pairingCodeExpiresAt={pairingCodeExpiresAt}
-              inputCode={inputCode}
-              isBusy={isBusy}
-              t={t}
-              onInputCodeChange={setInputCode}
-              onGenerateCode={handleGenerateCode}
-              onSubmitRequest={handleSubmitRequest}
-            />
-          ) : null}
-
-          {activeTab === 'requests' ? (
-            <FriendRequestsSection
-              incoming={incoming}
-              outgoing={outgoing}
-              isBusy={isBusy}
-              canClearRequests={canClearRequests}
-              t={t}
-              onRespond={handleRespond}
-              onClearRequests={handleClearRequests}
-            />
-          ) : null}
-        </div>
-      </section>
-    </main>
+    </section>
   );
 }
 
 function FriendListSection({
   friends,
   selectedFriend,
-  isBusy,
   t,
   onSelectFriend,
-  onOpenChat,
-  onDeleteFriend,
 }: {
   friends: FriendItem[];
   selectedFriend: FriendItem | null;
-  isBusy: boolean;
   t: ReturnType<typeof useI18n>['t'];
   onSelectFriend: (friendshipId: string) => void;
-  onOpenChat: (friendUserId: string) => Promise<void>;
-  onDeleteFriend: (item: FriendItem) => Promise<void>;
 }): JSX.Element {
   return (
-    <section className="friends-content-grid">
-      <div className="friends-panel">
-        <h2>{t('friends.listTitle')}</h2>
+    <section className="contacts-list-panel">
         {friends.length === 0 ? <p className="empty-list">{t('friends.noFriends')}</p> : null}
         <div className="request-list">
           {friends.map((item) => (
-            <article
+            <button
+              type="button"
               className={`friend-row ${selectedFriend?.id === item.id ? 'is-selected' : ''}`}
               key={item.id}
+              onClick={() => onSelectFriend(item.id)}
             >
-              <button
-                type="button"
-                className="friend-row-button"
-                onClick={() => onSelectFriend(item.id)}
-              >
-                <FriendSummary
-                  user={item.friend}
-                  presenceLabel={formatPresence(item.friend.isOnline, item.friend.lastSeenAt, t)}
-                />
-              </button>
-              <div className="row-actions">
-                <button
-                  type="button"
-                  className="secondary-button compact-button"
-                  disabled={isBusy}
-                  onClick={() => void onOpenChat(item.friend.id)}
-                >
-                  {t('friends.openChat')}
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button compact-button danger-button"
-                  disabled={isBusy}
-                  onClick={() => void onDeleteFriend(item)}
-                >
-                  {t('friends.deleteFriend')}
-                </button>
-              </div>
-            </article>
+              <FriendSummary
+                user={item.friend}
+                presenceLabel={formatPresence(item.friend.isOnline, item.friend.lastSeenAt, t)}
+              />
+            </button>
           ))}
         </div>
-      </div>
-
-      <FriendProfileCard selectedFriend={selectedFriend} t={t} />
     </section>
   );
 }
 
 function FriendProfileCard({
   selectedFriend,
+  isBusy,
   t,
+  onOpenChat,
+  onDeleteFriend,
 }: {
   selectedFriend: FriendItem | null;
+  isBusy: boolean;
   t: ReturnType<typeof useI18n>['t'];
+  onOpenChat: (friendUserId: string) => Promise<void>;
+  onDeleteFriend: (item: FriendItem) => Promise<void>;
 }): JSX.Element {
   if (!selectedFriend) {
     return (
-      <aside className="friends-panel friend-profile-card">
+      <aside className="friends-panel friend-profile-card friend-detail-empty">
         <h2>{t('friends.profileTitle')}</h2>
         <p className="empty-list">{t('friends.noProfileSelected')}</p>
       </aside>
@@ -365,6 +451,24 @@ function FriendProfileCard({
           <dd>{selectedFriend.friend.statusMessage || selectedFriend.friend.accountType}</dd>
         </div>
       </dl>
+      <div className="friend-profile-actions">
+        <button
+          type="button"
+          className="primary-button"
+          disabled={isBusy}
+          onClick={() => void onOpenChat(selectedFriend.friend.id)}
+        >
+          {t('friends.openChat')}
+        </button>
+        <button
+          type="button"
+          className="secondary-button danger-button"
+          disabled={isBusy}
+          onClick={() => void onDeleteFriend(selectedFriend)}
+        >
+          {t('friends.deleteFriend')}
+        </button>
+      </div>
     </aside>
   );
 }
@@ -389,7 +493,7 @@ function AddFriendSection({
   onSubmitRequest: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 }): JSX.Element {
   return (
-    <section className="friends-grid">
+    <section className="friends-grid contacts-add-section">
       <div className="friends-panel">
         <h2>{t('friends.generateTitle')}</h2>
         <button
@@ -521,11 +625,30 @@ function FriendSummary({
       />
       <span className="friend-summary-text">
         <strong className="friend-summary-name">{user.displayName}</strong>
-        <span className="friend-summary-meta">{user.statusMessage || user.email || user.accountType}</span>
         <span className="friend-presence-line">{presenceLabel}</span>
       </span>
     </div>
   );
+}
+
+function filterFriends(friends: FriendItem[], query: string): FriendItem[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) {
+    return friends;
+  }
+
+  return friends.filter((item) => {
+    const searchableText = [
+      item.friend.displayName,
+      item.friend.email ?? '',
+      item.friend.statusMessage ?? '',
+      item.friend.accountType,
+    ]
+      .join(' ')
+      .toLocaleLowerCase();
+
+    return searchableText.includes(normalizedQuery);
+  });
 }
 
 function formatDateTime(value: string | null): string {
