@@ -1649,6 +1649,7 @@ function MessageList({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
   const [hasNewMessagesPrompt, setHasNewMessagesPrompt] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<CopyNoticeState | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLElement | null>>({});
   const isAtBottomRef = useRef(true);
@@ -1693,6 +1694,15 @@ function MessageList({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [forwardingMessage]);
+
+  useEffect(() => {
+    if (!copyNotice) {
+      return undefined;
+    }
+
+    const timerId = window.setTimeout(() => setCopyNotice(null), 3000);
+    return () => window.clearTimeout(timerId);
+  }, [copyNotice]);
 
   useEffect(() => {
     const conversationChanged = previousConversationIdRef.current !== conversationId;
@@ -1891,9 +1901,25 @@ function MessageList({
     setHasNewMessagesPrompt(false);
   }
 
+  async function copyMessageText(message: ChatMessage): Promise<void> {
+    if (!canCopyMessage(message)) {
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(message.plaintext);
+      setCopyNotice({ message: t('chat.copied'), isError: false });
+    } catch {
+      setCopyNotice({ message: t('chat.copyFailed'), isError: true });
+    }
+  }
+
   function handleMenuAction(action: MessageMenuAction, message: ChatMessage): void {
     setContextMenu(null);
     switch (action) {
+      case 'copy':
+        void copyMessageText(message);
+        break;
       case 'download':
         if (message.file) {
           void onDownloadFile(message.file);
@@ -2076,6 +2102,11 @@ function MessageList({
         />
       ) : null}
       {previewError ? <p className="chat-error">{previewError}</p> : null}
+      {copyNotice ? (
+        <div className={`message-copy-toast ${copyNotice.isError ? 'is-error' : ''}`} role="status" aria-live="polite">
+          {copyNotice.message}
+        </div>
+      ) : null}
       {forwardingMessage ? (
         <div
           className="forward-dialog-backdrop"
@@ -2311,6 +2342,10 @@ function buildMessageMenuActions(
   }
 
   const actions: MessageMenuItem[] = [];
+  if (canCopyMessage(message)) {
+    actions.push({ action: 'copy', labelKey: 'chat.copy' });
+  }
+
   if (message.file) {
     actions.push({
       action: 'download',
@@ -2337,11 +2372,19 @@ function buildMessageMenuActions(
   return actions;
 }
 
+function canCopyMessage(message: ChatMessage): boolean {
+  return (
+    message.messageType === 'TEXT' &&
+    message.status !== 'recalled' &&
+    message.plaintext.trim().length > 0
+  );
+}
+
 function getContextMenuPosition(
   clientX: number,
   clientY: number,
   menuWidth = 168,
-  menuHeight = 190,
+  menuHeight = 226,
 ): { x: number; y: number } {
   const padding = 8;
 
@@ -2698,11 +2741,15 @@ interface FileUploadState {
 
 type FileDownloadStatus = 'downloading' | 'failed';
 type MainView = 'messages' | 'contacts';
-type MessageMenuAction = 'download' | 'forward' | 'retry' | 'edit' | 'recall' | 'deleteLocal';
+type MessageMenuAction = 'copy' | 'download' | 'forward' | 'retry' | 'edit' | 'recall' | 'deleteLocal';
 type MessageContextMenuState = {
   message: ChatMessage;
   x: number;
   y: number;
+};
+type CopyNoticeState = {
+  message: string;
+  isError: boolean;
 };
 type ConversationContextMenuState = {
   conversation: Conversation;
@@ -2839,6 +2886,32 @@ function triggerBrowserDownload(blob: Blob, originalName: string): void {
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    const didCopy = document.execCommand('copy');
+    if (!didCopy) {
+      throw new Error('Copy command failed');
+    }
+  } finally {
+    textarea.remove();
+  }
 }
 
 async function isTauriRuntime(): Promise<boolean> {
