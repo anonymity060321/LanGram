@@ -21,7 +21,8 @@ type LoginMode = 'password' | 'emailCode' | 'forgotPassword';
 const EMAIL_MAX_LENGTH = 254;
 const PASSWORD_MAX_LENGTH = 128;
 const EMAIL_CODE_MAX_LENGTH = 6;
-const CAPTCHA_ANSWER_MAX_LENGTH = 32;
+const CAPTCHA_ANSWER_MAX_LENGTH = 6;
+const CAPTCHA_AUTO_REFRESH_MS = 30_000;
 
 export function LoginPage(): JSX.Element {
   const { t } = useI18n();
@@ -69,6 +70,18 @@ export function LoginPage(): JSX.Element {
     if (mode === 'password' && !captcha) {
       void refreshCaptcha();
     }
+  }, [captcha, mode, refreshCaptcha]);
+
+  useEffect(() => {
+    if (mode !== 'password' || !captcha) {
+      return undefined;
+    }
+
+    const timerId = window.setInterval(() => {
+      void refreshCaptcha();
+    }, CAPTCHA_AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(timerId);
   }, [captcha, mode, refreshCaptcha]);
 
   useEffect(() => {
@@ -227,6 +240,11 @@ export function LoginPage(): JSX.Element {
     setNotice(null);
   }
 
+  function handleCaptchaAnswerChange(value: string): void {
+    const nextValue = captcha?.captchaType === 'TEXT' ? value.toUpperCase() : value;
+    setCaptchaAnswer(nextValue.slice(0, CAPTCHA_ANSWER_MAX_LENGTH));
+  }
+
   return (
     <AuthShell
       title={mode === 'forgotPassword' ? t('auth.forgotPasswordTitle') : t('auth.loginTitle')}
@@ -298,7 +316,7 @@ export function LoginPage(): JSX.Element {
               value={captchaAnswer}
               inputMode={captcha?.captchaType === 'TEXT' ? 'text' : 'numeric'}
               maxLength={CAPTCHA_ANSWER_MAX_LENGTH}
-              onChange={(event) => setCaptchaAnswer(event.target.value)}
+              onChange={(event) => handleCaptchaAnswerChange(event.target.value)}
             />
           </label>
           <button

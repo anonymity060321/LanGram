@@ -542,6 +542,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
+    if (isLocalPendingTextMessage(existing)) {
+      updateLocalPendingTextMessage(conversationId, existing.id, newPlaintext, set);
+      return;
+    }
+
     try {
       const encrypted = await encryptMessage(newPlaintext, conversation);
       sendRealtimeEdit({
@@ -1129,6 +1134,42 @@ function appendMessage(
     ...messagesByConversation,
     [conversationId]: [...(messagesByConversation[conversationId] ?? []), message],
   };
+}
+
+function isLocalPendingTextMessage(message: ChatMessage): boolean {
+  return (
+    message.isOwn &&
+    message.messageType === 'TEXT' &&
+    Boolean(message.clientMessageId) &&
+    (message.status === 'failed' || message.status === 'sending')
+  );
+}
+
+function updateLocalPendingTextMessage(
+  conversationId: string,
+  messageId: string,
+  plaintext: string,
+  set: ChatSet,
+): void {
+  set((state: ChatState) => {
+    const messages = (state.messagesByConversation[conversationId] ?? []).map((message) =>
+      message.id === messageId || message.clientMessageId === messageId
+        ? {
+            ...message,
+            plaintext,
+            editedAt: new Date().toISOString(),
+          }
+        : message,
+    );
+
+    return {
+      messagesByConversation: {
+        ...state.messagesByConversation,
+        [conversationId]: messages,
+      },
+      conversations: updateConversationFromMessages(state.conversations, conversationId, messages),
+    };
+  });
 }
 
 function filterMessagesAfterLocalClear(
