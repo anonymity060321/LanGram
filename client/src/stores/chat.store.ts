@@ -76,6 +76,8 @@ interface ChatState {
   connect: (accessToken: string, onSessionKicked: (payload: SessionKickedPayload) => void) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
+  createFailedTextMessage: (conversationId: string, plaintext: string, senderId: string) => void;
+  retryTextMessage: (conversationId: string, messageId: string) => Promise<boolean>;
   sendFileMessage: (
     conversationId: string,
     file: FileMetadataResponse,
@@ -151,24 +153,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
       const messages = filterMessagesAfterLocalClear(conversationId, loadedMessages, get().localClearWatermarks);
       const reachedLocalClear = messages.length < loadedMessages.length;
+      let mergedMessages = messages;
 
-      set((state) => ({
-        messagesByConversation: {
-          ...state.messagesByConversation,
-          [conversationId]: messages,
-        },
-        messagePaginationByConversation: {
-          [conversationId]: {
-            hasMore: reachedLocalClear ? false : result.hasMore,
-            nextCursor: reachedLocalClear ? null : result.nextCursor,
-            isLoadingOlder: false,
+      set((state) => {
+        mergedMessages = mergeLoadedMessagesWithPendingLocal(
+          messages,
+          state.messagesByConversation[conversationId] ?? [],
+          conversationId,
+          state.localClearWatermarks,
+        );
+
+        return {
+          messagesByConversation: {
+            ...state.messagesByConversation,
+            [conversationId]: mergedMessages,
           },
-        },
-        conversations: updateConversationFromMessages(state.conversations, conversationId, messages),
-        isLoadingMessages: false,
-      }));
+          messagePaginationByConversation: {
+            [conversationId]: {
+              hasMore: reachedLocalClear ? false : result.hasMore,
+              nextCursor: reachedLocalClear ? null : result.nextCursor,
+              isLoadingOlder: false,
+            },
+          },
+          conversations: updateConversationFromMessages(state.conversations, conversationId, mergedMessages),
+          isLoadingMessages: false,
+        };
+      });
 
-      const lastIncoming = [...messages].reverse().find((message) => !message.isOwn);
+      const lastIncoming = [...mergedMessages].reverse().find((message) => !message.isOwn);
       if (lastIncoming) {
         get().markRead(conversationId, lastIncoming.id);
       }
@@ -373,6 +385,95 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } catch {
       updateMessageStatus(conversationId, clientMessageId, 'failed', set);
+    }
+  },
+  createFailedTextMessage: (conversationId, plaintext, senderId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      set({ error: 'Conversation not found' });
+      return;
+    }
+
+    const clientMessageId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const failedMessage: ChatMessage = {
+      id: clientMessageId,
+      clientMessageId,
+      conversationId,
+      senderId,
+      messageType: 'TEXT',
+      plaintext,
+      file: null,
+      status: 'failed',
+      createdAt,
+      editedAt: null,
+      recalledAt: null,
+      isOwn: true,
+    };
+
+    set((state) => ({
+      messagesByConversation: appendMessage(
+        state.messagesByConversation,
+        conversationId,
+        failedMessage,
+      ),
+    }));
+  },
+  retryTextMessage: async (conversationId, messageId) => {
+    if (!useNetworkStore.getState().online) {
+      return false;
+    }
+
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    const existing = get().messagesByConversation[conversationId]?.find(
+      (message) => message.id === messageId || message.clientMessageId === messageId,
+    );
+    if (
+      !conversation ||
+      !existing ||
+      !existing.isOwn ||
+      existing.status !== 'failed' ||
+      existing.messageType !== 'TEXT'
+    ) {
+      return false;
+    }
+
+    const clientMessageId = existing.clientMessageId ?? existing.id;
+    const createdAt = new Date().toISOString();
+    set((state) => ({
+      messagesByConversation: {
+        ...state.messagesByConversation,
+        [conversationId]: (state.messagesByConversation[conversationId] ?? []).map((message) =>
+          message.id === existing.id || message.clientMessageId === clientMessageId
+            ? {
+                ...message,
+                id: clientMessageId,
+                clientMessageId,
+                status: 'sending',
+                createdAt,
+              }
+            : message,
+        ),
+      },
+    }));
+
+    try {
+      const encrypted = await encryptMessage(existing.plaintext, conversation);
+      sendRealtimeMessage({
+        clientMessageId,
+        conversationId,
+        messageType: 'TEXT',
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce,
+        encryptionVersion: encrypted.encryptionVersion,
+        fileId: null,
+        replyToMessageId: null,
+        createdAt,
+      });
+      return true;
+    } catch {
+      updateMessageStatus(conversationId, clientMessageId, 'failed', set);
+      return false;
     }
   },
   sendFileMessage: async (conversationId, file, senderId) => {
@@ -1108,6 +1209,45 @@ function mergeOlderMessages(
   );
 
   return [...uniqueOlderMessages, ...currentMessages];
+}
+
+function mergeLoadedMessagesWithPendingLocal(
+  loadedMessages: ChatMessage[],
+  currentMessages: ChatMessage[],
+  conversationId: string,
+  localClearWatermarks: Record<string, string>,
+): ChatMessage[] {
+  const loadedIds = new Set(
+    loadedMessages.flatMap((message) =>
+      message.clientMessageId ? [message.id, message.clientMessageId] : [message.id],
+    ),
+  );
+  const pendingLocalMessages = currentMessages.filter((message) => {
+    if (
+      !message.isOwn ||
+      message.conversationId !== conversationId ||
+      message.messageType !== 'TEXT' ||
+      (message.status !== 'failed' && message.status !== 'sending') ||
+      !message.clientMessageId ||
+      !message.plaintext
+    ) {
+      return false;
+    }
+
+    if (isMessageClearedLocally(conversationId, message.createdAt, localClearWatermarks)) {
+      return false;
+    }
+
+    return !loadedIds.has(message.id) && !loadedIds.has(message.clientMessageId);
+  });
+
+  if (pendingLocalMessages.length === 0) {
+    return loadedMessages;
+  }
+
+  return [...loadedMessages, ...pendingLocalMessages].sort(
+    (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+  );
 }
 
 function upsertConversation(

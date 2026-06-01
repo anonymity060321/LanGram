@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   acceptFriendRequest,
@@ -17,6 +17,7 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore } from '../../stores/chat.store';
+import { useNetworkStore } from '../../stores/network.store';
 import { unhideConversationInUiState } from '../../utils/conversationUiState';
 
 type ContactsPanel = 'empty' | 'friend' | 'add' | 'requests';
@@ -61,6 +62,7 @@ export function FriendsWorkspace({
   const user = useAuthStore((state) => state.user);
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
+  const isNetworkOnline = useNetworkStore((state) => state.online);
   const [activePanel, setActivePanel] = useState<ContactsPanel>('empty');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
@@ -76,9 +78,28 @@ export function FriendsWorkspace({
   const [isBusy, setIsBusy] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    void refreshFriendsData().catch(() => setError(t('friends.actionFailed')));
+  const refreshFriendsData = useCallback(async (): Promise<void> => {
+    const [requestsResult, friendsResult] = await Promise.all([
+      listFriendRequests(),
+      listFriends(),
+    ]);
+    setIncoming(requestsResult.incoming);
+    setOutgoing(requestsResult.outgoing);
+    setFriends(friendsResult.friends);
+    setError((current) => (current === t('friends.networkUnavailable') ? null : current));
   }, [t]);
+
+  useEffect(() => {
+    void refreshFriendsData().catch(() =>
+      setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable')),
+    );
+  }, [isNetworkOnline, refreshFriendsData, t]);
+
+  useEffect(() => {
+    if (isNetworkOnline && error === t('friends.networkUnavailable')) {
+      setError(null);
+    }
+  }, [error, isNetworkOnline, t]);
 
   useEffect(() => {
     setFriends((current) =>
@@ -129,16 +150,6 @@ export function FriendsWorkspace({
     [incoming],
   );
 
-  async function refreshFriendsData(): Promise<void> {
-    const [requestsResult, friendsResult] = await Promise.all([
-      listFriendRequests(),
-      listFriends(),
-    ]);
-    setIncoming(requestsResult.incoming);
-    setOutgoing(requestsResult.outgoing);
-    setFriends(friendsResult.friends);
-  }
-
   async function handleGenerateCode(): Promise<void> {
     setIsBusy(true);
     setError(null);
@@ -148,7 +159,7 @@ export function FriendsWorkspace({
       setPairingCode(result.pairingCode);
       setPairingCodeExpiresAt(result.expiresAt);
     } catch {
-      setError(t('friends.actionFailed'));
+      setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable'));
     } finally {
       setIsBusy(false);
     }
@@ -167,7 +178,7 @@ export function FriendsWorkspace({
       setSelectedFriendshipId(null);
       setActivePanel('requests');
     } catch {
-      setError(t('friends.actionFailed'));
+      setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable'));
     } finally {
       setIsBusy(false);
     }
@@ -187,7 +198,7 @@ export function FriendsWorkspace({
       }
       await refreshFriendsData();
     } catch {
-      setError(t('friends.actionFailed'));
+      setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable'));
     } finally {
       setIsBusy(false);
     }
@@ -195,6 +206,11 @@ export function FriendsWorkspace({
 
   async function handleOpenChat(friendUserId: string): Promise<void> {
     if (!user) {
+      return;
+    }
+
+    if (!isNetworkOnline) {
+      setError(t('friends.networkUnavailable'));
       return;
     }
 
@@ -222,7 +238,7 @@ export function FriendsWorkspace({
       }
       await refreshFriendsData();
     } catch {
-      setError(t('friends.deleteFailed'));
+      setError(isNetworkOnline ? t('friends.deleteFailed') : t('friends.networkUnavailable'));
     } finally {
       setIsBusy(false);
     }
@@ -241,7 +257,7 @@ export function FriendsWorkspace({
       setNotice(`${t('friends.clearRequestsSuccess')} ${result.deletedCount}`);
       await refreshFriendsData();
     } catch {
-      setError(t('friends.clearRequestsFailed'));
+      setError(isNetworkOnline ? t('friends.clearRequestsFailed') : t('friends.networkUnavailable'));
     } finally {
       setIsBusy(false);
     }
@@ -346,6 +362,11 @@ export function FriendsWorkspace({
       </aside>
 
       <section className="chat-panel friends-detail-panel">
+        {!isNetworkOnline ? (
+          <div className="friends-network-notice" role="status">
+            {t('friends.networkUnavailable')}
+          </div>
+        ) : null}
         {error ? <p className="form-error">{error}</p> : null}
         {notice ? <p className="form-success">{notice}</p> : null}
 

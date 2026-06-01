@@ -73,6 +73,8 @@ export function MainLayout(): JSX.Element {
   const disconnect = useChatStore((state) => state.disconnect);
   const markRead = useChatStore((state) => state.markRead);
   const sendTextMessage = useChatStore((state) => state.sendTextMessage);
+  const createFailedTextMessage = useChatStore((state) => state.createFailedTextMessage);
+  const retryTextMessage = useChatStore((state) => state.retryTextMessage);
   const sendFileMessage = useChatStore((state) => state.sendFileMessage);
   const editMessage = useChatStore((state) => state.editMessage);
   const forwardMessage = useChatStore((state) => state.forwardMessage);
@@ -532,14 +534,14 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
+    const plaintext = messageDraft.trim();
+    setMessageDraft('');
+    setMessageLimitNotice(isNetworkOnline ? null : t('network.unavailableSend'));
     if (!isNetworkOnline) {
-      setMessageLimitNotice(t('network.unavailableSend'));
+      createFailedTextMessage(selectedConversationId, plaintext, user.id);
       return;
     }
 
-    const plaintext = messageDraft.trim();
-    setMessageDraft('');
-    setMessageLimitNotice(null);
     await sendTextMessage(selectedConversationId, plaintext, user.id);
   }
 
@@ -668,6 +670,20 @@ export function MainLayout(): JSX.Element {
     }
 
     await forwardMessage(selectedConversationId, messageId, targetConversationId);
+  }
+
+  async function handleRetryMessage(messageId: string): Promise<void> {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    if (!isNetworkOnline) {
+      setMessageLimitNotice(t('network.unavailableSend'));
+      return;
+    }
+
+    setMessageLimitNotice(null);
+    await retryTextMessage(selectedConversationId, messageId);
   }
 
   async function handleDownloadFile(file: FileMetadataResponse): Promise<void> {
@@ -1104,6 +1120,7 @@ export function MainLayout(): JSX.Element {
                 onRecallMessage={handleRecallMessage}
                 onEditMessage={handleEditMessage}
                 onForwardMessage={handleForwardMessage}
+                onRetryMessage={handleRetryMessage}
                 onDownloadFile={handleDownloadFile}
                 forwardTargets={forwardTargets}
                 downloadStates={downloadStates}
@@ -1598,6 +1615,7 @@ function MessageList({
   onRecallMessage,
   onEditMessage,
   onForwardMessage,
+  onRetryMessage,
   onDownloadFile,
   forwardTargets,
   downloadStates,
@@ -1615,6 +1633,7 @@ function MessageList({
   onRecallMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, plaintext: string) => Promise<void>;
   onForwardMessage: (messageId: string, target: ForwardTarget) => Promise<void>;
+  onRetryMessage: (messageId: string) => Promise<void>;
   onDownloadFile: (file: FileMetadataResponse) => Promise<void>;
   forwardTargets: ForwardTarget[];
   downloadStates: Record<string, FileDownloadStatus>;
@@ -1868,6 +1887,9 @@ function MessageList({
       case 'forward':
         openForwardDialog(message);
         break;
+      case 'retry':
+        void onRetryMessage(message.id);
+        break;
       case 'edit':
         setEditingMessageId(message.id);
         setEditDraft(message.plaintext);
@@ -1916,6 +1938,7 @@ function MessageList({
           const isSameDirectionGroup = Boolean(
             previousMessage && !showTimeDivider && previousMessage.isOwn === message.isOwn,
           );
+          const canRetryMessage = message.isOwn && message.status === 'failed' && message.messageType === 'TEXT';
 
           return (
             <Fragment key={message.id}>
@@ -1935,7 +1958,9 @@ function MessageList({
                 }}
               >
                 <div
-                  className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''}`}
+                  className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''} ${
+                    message.status === 'failed' ? 'is-failed' : ''
+                  }`}
                   onContextMenu={(event) => handleContextMenu(event, message)}
                 >
                   {editingMessageId === message.id ? (
@@ -1977,11 +2002,20 @@ function MessageList({
                     </p>
                   )}
                   <div className="message-meta">
-                    <span>
+                    <span className={message.status === 'failed' ? 'message-status-failed' : ''}>
                       {message.isOwn && message.status !== 'recalled'
                         ? t(`chat.status.${message.status}`)
                         : formatTime(message.recalledAt ?? message.createdAt)}
                     </span>
+                    {canRetryMessage ? (
+                      <button
+                        type="button"
+                        className="message-retry-button"
+                        onClick={() => void onRetryMessage(message.id)}
+                      >
+                        {t('chat.retrySending')}
+                      </button>
+                    ) : null}
                     {message.editedAt && message.status !== 'recalled' ? (
                       <span>{t('chat.edited')}</span>
                     ) : null}
@@ -2267,6 +2301,10 @@ function buildMessageMenuActions(
       labelKey: downloadStatus === 'downloading' ? 'chat.downloading' : 'chat.download',
       disabled: downloadStatus === 'downloading',
     });
+  }
+
+  if (message.isOwn && message.status === 'failed' && message.messageType === 'TEXT') {
+    actions.push({ action: 'retry', labelKey: 'chat.retrySending' });
   }
 
   actions.push({ action: 'forward', labelKey: 'chat.forward' });
@@ -2644,7 +2682,7 @@ interface FileUploadState {
 
 type FileDownloadStatus = 'downloading' | 'failed';
 type MainView = 'messages' | 'contacts';
-type MessageMenuAction = 'download' | 'forward' | 'edit' | 'recall' | 'deleteLocal';
+type MessageMenuAction = 'download' | 'forward' | 'retry' | 'edit' | 'recall' | 'deleteLocal';
 type MessageContextMenuState = {
   message: ChatMessage;
   x: number;

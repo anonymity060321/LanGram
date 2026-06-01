@@ -1316,7 +1316,7 @@ textarea,
   z-index: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   overflow: hidden;
   background: #ffffff;
   background-clip: padding-box;
@@ -1327,7 +1327,19 @@ textarea,
 .friends-detail-panel > .friend-profile-card,
 .friends-detail-panel > .friends-notification-page,
 .friends-detail-panel > .friends-add-page {
-  grid-row: 3;
+  grid-row: 4;
+}
+
+.friends-network-notice {
+  min-width: 0;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .friends-list-header {
@@ -2204,6 +2216,16 @@ textarea,
   border-color: #bbf7d0;
 }
 
+.message-bubble.is-failed {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.message-row.is-own .message-bubble.is-failed {
+  border-color: #fca5a5;
+  background: #fff1f2;
+}
+
 .message-bubble.is-recalled {
   background: #f8fafc;
   border-color: #d6deea;
@@ -2226,6 +2248,30 @@ textarea,
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.message-status-failed {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.message-retry-button {
+  min-height: 22px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #b42318;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.message-retry-button:hover,
+.message-retry-button:focus-visible {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  outline: 0;
 }
 
 .message-context-menu,
@@ -2989,10 +3035,12 @@ textarea,
 }
 
 .message-limit-notice {
-  border-top: 1px solid #fde68a;
+  margin: 0 8px 6px;
+  border: 1px solid #fde68a;
+  border-radius: 14px;
   background: #fffbeb;
   color: #92400e;
-  padding: 8px 18px;
+  padding: 8px 12px;
   font-size: 13px;
 }
 
@@ -4122,6 +4170,12 @@ textarea,
   color: #94a3b8;
 }
 
+:root[data-theme='dark'] .friends-network-notice {
+  border-color: #713f12;
+  background: #422006;
+  color: #fde68a;
+}
+
 :root[data-theme='dark'] .friends-search-field input {
   border-color: #334155;
   background: #0f172a;
@@ -4688,6 +4742,28 @@ textarea,
 :root[data-theme='dark'] .message-highlight {
   background: #92400e;
   color: #fef3c7;
+}
+
+:root[data-theme='dark'] .message-bubble.is-failed,
+:root[data-theme='dark'] .message-row.is-own .message-bubble.is-failed {
+  border-color: #7f1d1d;
+  background: #3f1216;
+}
+
+:root[data-theme='dark'] .message-status-failed {
+  color: #fca5a5;
+}
+
+:root[data-theme='dark'] .message-retry-button {
+  border-color: #7f1d1d;
+  background: #450a0a;
+  color: #fecaca;
+}
+
+:root[data-theme='dark'] .message-retry-button:hover,
+:root[data-theme='dark'] .message-retry-button:focus-visible {
+  border-color: #f87171;
+  background: #7f1d1d;
 }
 
 @media (prefers-reduced-motion: reduce) {
