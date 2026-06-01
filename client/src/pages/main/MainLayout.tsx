@@ -1649,7 +1649,7 @@ function MessageList({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
   const [hasNewMessagesPrompt, setHasNewMessagesPrompt] = useState(false);
-  const [copyNotice, setCopyNotice] = useState<CopyNoticeState | null>(null);
+  const [messageNotice, setMessageNotice] = useState<MessageNoticeState | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLElement | null>>({});
   const isAtBottomRef = useRef(true);
@@ -1696,13 +1696,13 @@ function MessageList({
   }, [forwardingMessage]);
 
   useEffect(() => {
-    if (!copyNotice) {
+    if (!messageNotice) {
       return undefined;
     }
 
-    const timerId = window.setTimeout(() => setCopyNotice(null), 3000);
+    const timerId = window.setTimeout(() => setMessageNotice(null), 3000);
     return () => window.clearTimeout(timerId);
-  }, [copyNotice]);
+  }, [messageNotice]);
 
   useEffect(() => {
     const conversationChanged = previousConversationIdRef.current !== conversationId;
@@ -1908,9 +1908,9 @@ function MessageList({
 
     try {
       await copyTextToClipboard(message.plaintext);
-      setCopyNotice({ message: t('chat.copied'), isError: false });
+      setMessageNotice({ message: t('chat.copied'), isError: false });
     } catch {
-      setCopyNotice({ message: t('chat.copyFailed'), isError: true });
+      setMessageNotice({ message: t('chat.copyFailed'), isError: true });
     }
   }
 
@@ -1936,6 +1936,10 @@ function MessageList({
         setEditDraft(message.plaintext);
         break;
       case 'recall':
+        if (!canRecallMessage(message)) {
+          setMessageNotice({ message: t('chat.recallFailed'), isError: true });
+          return;
+        }
         onRecallMessage(message.id);
         break;
       case 'deleteLocal':
@@ -2102,9 +2106,9 @@ function MessageList({
         />
       ) : null}
       {previewError ? <p className="chat-error">{previewError}</p> : null}
-      {copyNotice ? (
-        <div className={`message-copy-toast ${copyNotice.isError ? 'is-error' : ''}`} role="status" aria-live="polite">
-          {copyNotice.message}
+      {messageNotice ? (
+        <div className={`message-action-toast ${messageNotice.isError ? 'is-error' : ''}`} role="status" aria-live="polite">
+          {messageNotice.message}
         </div>
       ) : null}
       {forwardingMessage ? (
@@ -2364,7 +2368,7 @@ function buildMessageMenuActions(
     actions.push({ action: 'edit', labelKey: 'chat.edit' });
   }
 
-  if (message.isOwn && canRecallMessage(message)) {
+  if (message.isOwn && canShowRecallMenuItem(message)) {
     actions.push({ action: 'recall', labelKey: 'chat.recall', isDanger: true });
   }
 
@@ -2377,6 +2381,21 @@ function canCopyMessage(message: ChatMessage): boolean {
     message.messageType === 'TEXT' &&
     message.status !== 'recalled' &&
     message.plaintext.trim().length > 0
+  );
+}
+
+function isLocalPendingMessage(message: ChatMessage): boolean {
+  return (
+    Boolean(message.clientMessageId) &&
+    (message.status === 'failed' || message.status === 'sending')
+  );
+}
+
+function canShowRecallMenuItem(message: ChatMessage): boolean {
+  return (
+    message.isOwn &&
+    message.status !== 'recalled' &&
+    (isWithinRecallWindow(message) || isLocalPendingMessage(message))
   );
 }
 
@@ -2395,6 +2414,15 @@ function getContextMenuPosition(
 }
 
 function canRecallMessage(message: ChatMessage): boolean {
+  return (
+    message.isOwn &&
+    !isLocalPendingMessage(message) &&
+    (message.status === 'sent' || message.status === 'delivered' || message.status === 'read') &&
+    isWithinRecallWindow(message)
+  );
+}
+
+function isWithinRecallWindow(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 2 * 60 * 1000;
 }
 
@@ -2747,7 +2775,7 @@ type MessageContextMenuState = {
   x: number;
   y: number;
 };
-type CopyNoticeState = {
+type MessageNoticeState = {
   message: string;
   isError: boolean;
 };

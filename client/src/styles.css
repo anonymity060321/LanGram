@@ -2090,7 +2090,7 @@ textarea,
   background: #eef4ff;
 }
 
-.message-copy-toast {
+.message-action-toast {
   position: absolute;
   left: 50%;
   bottom: 66px;
@@ -2110,7 +2110,7 @@ textarea,
   white-space: nowrap;
 }
 
-.message-copy-toast.is-error {
+.message-action-toast.is-error {
   border-color: #fecaca;
   background: #fff1f2;
   color: #b42318;
@@ -4557,14 +4557,14 @@ textarea,
   background: #172554;
 }
 
-:root[data-theme='dark'] .message-copy-toast {
+:root[data-theme='dark'] .message-action-toast {
   border-color: #14532d;
   background: #052e16;
   color: #86efac;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
 }
 
-:root[data-theme='dark'] .message-copy-toast.is-error {
+:root[data-theme='dark'] .message-action-toast.is-error {
   border-color: #7f1d1d;
   background: #450a0a;
   color: #fca5a5;
