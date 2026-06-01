@@ -115,6 +115,8 @@
   "chat.image": "Image",
   "chat.file": "File",
   "chat.jumpToBottom": "Jump to bottom",
+  "chat.newMessages": "New messages",
+  "chat.scrollToBottom": "Scroll to bottom",
   "chat.fileMessageFailed": "File message failed",
   "chat.loadingOlderMessages": "Loading earlier messages",
   "chat.allMessagesLoaded": "All messages loaded",

@@ -1648,14 +1648,18 @@ function MessageList({
   const [previewFile, setPreviewFile] = useState<FileMetadataResponse | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isJumpToBottomVisible, setIsJumpToBottomVisible] = useState(false);
+  const [hasNewMessagesPrompt, setHasNewMessagesPrompt] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLElement | null>>({});
   const isAtBottomRef = useRef(true);
   const previousMessageCountRef = useRef(0);
+  const previousLastMessageIdRef = useRef<string | null>(null);
   const previousConversationIdRef = useRef<string | null>(null);
   const previousIsLoadingRef = useRef(false);
   const isLoadingOlderRef = useRef(false);
-  const lastMessageIsOwn = messages[messages.length - 1]?.isOwn ?? false;
+  const lastMessage = messages[messages.length - 1] ?? null;
+  const lastMessageId = lastMessage?.id ?? null;
+  const lastMessageIsOwn = lastMessage?.isOwn ?? false;
 
   useEffect(() => {
     setContextMenu(null);
@@ -1692,25 +1696,32 @@ function MessageList({
 
   useEffect(() => {
     const conversationChanged = previousConversationIdRef.current !== conversationId;
-    const messageAdded = messages.length > previousMessageCountRef.current;
+    const lastMessageChanged = previousLastMessageIdRef.current !== lastMessageId;
+    const messageAdded = messages.length > previousMessageCountRef.current && lastMessageChanged;
     const loadingFinished = previousIsLoadingRef.current && !isLoading;
     const shouldStickToBottom =
       conversationChanged || loadingFinished || isAtBottomRef.current || lastMessageIsOwn;
     previousConversationIdRef.current = conversationId;
     previousMessageCountRef.current = messages.length;
+    previousLastMessageIdRef.current = lastMessageId;
     previousIsLoadingRef.current = isLoading;
+
+    if (conversationChanged || messages.length === 0) {
+      setHasNewMessagesPrompt(false);
+    }
 
     if (isLoading || (!conversationChanged && !messageAdded && !loadingFinished)) {
       return;
     }
 
     if (!shouldStickToBottom) {
+      setHasNewMessagesPrompt(messageAdded);
       setIsJumpToBottomVisible(true);
       return;
     }
 
     requestAnimationFrame(() => scrollToMessageBottom(conversationChanged ? 'auto' : 'smooth'));
-  }, [conversationId, isLoading, lastMessageIsOwn, messages.length]);
+  }, [conversationId, isLoading, lastMessageId, lastMessageIsOwn, messages.length]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -1807,6 +1818,9 @@ function MessageList({
     const isAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
     isAtBottomRef.current = isAtBottom;
     setIsJumpToBottomVisible(!isAtBottom);
+    if (isAtBottom) {
+      setHasNewMessagesPrompt(false);
+    }
 
     if (list.scrollTop < 96) {
       void loadOlderMessagesFromTop();
@@ -1874,6 +1888,7 @@ function MessageList({
     });
     isAtBottomRef.current = true;
     setIsJumpToBottomVisible(false);
+    setHasNewMessagesPrompt(false);
   }
 
   function handleMenuAction(action: MessageMenuAction, message: ChatMessage): void {
@@ -1898,6 +1913,7 @@ function MessageList({
         onRecallMessage(message.id);
         break;
       case 'deleteLocal':
+        setHasNewMessagesPrompt(false);
         onDeleteLocalMessage(message.id);
         break;
       default:
@@ -2043,12 +2059,12 @@ function MessageList({
       {isJumpToBottomVisible ? (
         <button
           type="button"
-          className="jump-to-bottom-button"
-          aria-label={t('chat.jumpToBottom')}
-          title={t('chat.jumpToBottom')}
+          className={`jump-to-bottom-button ${hasNewMessagesPrompt ? 'has-new-messages' : ''}`}
+          aria-label={hasNewMessagesPrompt ? t('chat.newMessages') : t('chat.scrollToBottom')}
+          title={hasNewMessagesPrompt ? t('chat.newMessages') : t('chat.scrollToBottom')}
           onClick={() => scrollToMessageBottom('smooth')}
         >
-          &darr;
+          {hasNewMessagesPrompt ? t('chat.newMessages') : <span aria-hidden="true">&darr;</span>}
         </button>
       ) : null}
       {previewFile ? (
