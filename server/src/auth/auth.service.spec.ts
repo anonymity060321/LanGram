@@ -524,7 +524,7 @@ describe('AuthService', () => {
 
   it('generates and validates alphanumeric text captchas without ambiguous characters', async () => {
     const captcha = createTextCaptchaChallenge(
-      createSequenceRandomInt([1, 6, 0, 5, 10, 20, 25, 29]),
+      createSequenceRandomInt([1, 0, 5, 10, 20, 25, 29]),
     );
 
     expect(captcha.captchaType).toBe('TEXT');

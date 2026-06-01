@@ -58,6 +58,7 @@ const TEXT_CAPTCHA_TTL_SECONDS = 120;
 const TEXT_CAPTCHA_MAX_ATTEMPTS = 3;
 const TEXT_CAPTCHA_PURPOSE_LOGIN = 'LOGIN';
 const TEXT_CAPTCHA_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const TEXT_CAPTCHA_CODE_LENGTH = 6;
 
 type ArithmeticCaptchaOperation = 'add' | 'subtract' | 'multiply' | 'divide';
 type CaptchaRandomInt = (min: number, max: number) => number;
@@ -126,9 +127,8 @@ function createArithmeticCaptcha(rng: CaptchaRandomInt): TextCaptchaChallenge {
 }
 
 function createCodeCaptcha(rng: CaptchaRandomInt): TextCaptchaChallenge {
-  const length = rng(5, 7);
   let answer = '';
-  for (let index = 0; index < length; index += 1) {
+  for (let index = 0; index < TEXT_CAPTCHA_CODE_LENGTH; index += 1) {
     answer += TEXT_CAPTCHA_CHARSET[rng(0, TEXT_CAPTCHA_CHARSET.length)];
   }
 
