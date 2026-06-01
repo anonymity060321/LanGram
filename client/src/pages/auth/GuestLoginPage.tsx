@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { guestLogin } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
@@ -7,7 +7,7 @@ import { getDeviceIdentity } from '../../utils/device';
 import { reportAuthNetworkError } from '../../utils/serverHealth';
 import { AuthShell } from './AuthShell';
 
-const DISPLAY_NAME_MAX_LENGTH = 80;
+const DISPLAY_NAME_MAX_LENGTH = 32;
 
 export function GuestLoginPage(): JSX.Element {
   const { t } = useI18n();
@@ -15,14 +15,23 @@ export function GuestLoginPage(): JSX.Element {
   const setSession = useAuthStore((state) => state.setSession);
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitInFlightRef = useRef(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    const trimmedDisplayName = displayName.trim();
+    if (submitInFlightRef.current) {
+      return;
+    }
+
+    submitInFlightRef.current = true;
     setError(null);
+    setIsSubmitting(true);
 
     try {
       const device = await getDeviceIdentity();
-      const result = await guestLogin({ displayName: displayName || undefined, device });
+      const result = await guestLogin({ displayName: trimmedDisplayName || undefined, device });
       setSession(result);
       navigate('/', { replace: true });
     } catch (error) {
@@ -30,6 +39,9 @@ export function GuestLoginPage(): JSX.Element {
         return;
       }
       setError(t('auth.submitFailed'));
+    } finally {
+      submitInFlightRef.current = false;
+      setIsSubmitting(false);
     }
   }
 
@@ -50,8 +62,8 @@ export function GuestLoginPage(): JSX.Element {
           />
         </label>
         {error ? <p className="form-error">{error}</p> : null}
-        <button type="submit" className="primary-button">
-          {t('auth.guestLogin')}
+        <button type="submit" className="primary-button" disabled={isSubmitting}>
+          {isSubmitting ? t('auth.entering') : t('auth.guestLogin')}
         </button>
       </form>
     </AuthShell>

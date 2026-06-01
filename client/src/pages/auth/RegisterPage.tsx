@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { register, registerTemporary, sendEmailCode } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
@@ -10,7 +10,7 @@ import { AuthShell } from './AuthShell';
 const EMAIL_MAX_LENGTH = 254;
 const PASSWORD_MAX_LENGTH = 128;
 const EMAIL_CODE_MAX_LENGTH = 6;
-const DISPLAY_NAME_MAX_LENGTH = 80;
+const DISPLAY_NAME_MAX_LENGTH = 32;
 
 export function RegisterPage(): JSX.Element {
   const { t } = useI18n();
@@ -21,18 +21,33 @@ export function RegisterPage(): JSX.Element {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSendingCode, setIsSendingCode] = useState(false);
+  const [isTemporaryRegistering, setIsTemporaryRegistering] = useState(false);
+  const submitInFlightRef = useRef(false);
+  const sendCodeInFlightRef = useRef(false);
+  const temporaryRegisterInFlightRef = useRef(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    const trimmedEmail = email.trim();
+    const trimmedDisplayName = displayName.trim();
+    const trimmedCode = code.trim();
+    if (!trimmedEmail || !password || !trimmedCode || submitInFlightRef.current) {
+      return;
+    }
+
+    submitInFlightRef.current = true;
     setError(null);
+    setIsSubmitting(true);
 
     try {
       const device = await getDeviceIdentity();
       const result = await register({
-        email,
+        email: trimmedEmail,
         password,
-        code,
-        displayName: displayName || undefined,
+        code: trimmedCode,
+        displayName: trimmedDisplayName || undefined,
         device,
       });
       setSession(result);
@@ -42,36 +57,57 @@ export function RegisterPage(): JSX.Element {
         return;
       }
       setError(t('auth.submitFailed'));
+    } finally {
+      submitInFlightRef.current = false;
+      setIsSubmitting(false);
     }
   }
 
   async function handleSendCode(): Promise<void> {
-    if (!email) {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || sendCodeInFlightRef.current) {
       return;
     }
 
+    sendCodeInFlightRef.current = true;
+    setError(null);
+    setIsSendingCode(true);
+
     try {
-      await sendEmailCode({ email, purpose: 'REGISTER' });
+      await sendEmailCode({ email: trimmedEmail, purpose: 'REGISTER' });
     } catch (error) {
       if (reportAuthNetworkError(error)) {
         return;
       }
       setError(t('auth.submitFailed'));
+    } finally {
+      sendCodeInFlightRef.current = false;
+      setIsSendingCode(false);
     }
   }
 
   async function handleTemporaryRegister(): Promise<void> {
-    if (!email || !password || !window.confirm(t('auth.temporaryRegisterConfirm'))) {
+    const trimmedEmail = email.trim();
+    const trimmedDisplayName = displayName.trim();
+    if (
+      !trimmedEmail ||
+      !password ||
+      temporaryRegisterInFlightRef.current ||
+      !window.confirm(t('auth.temporaryRegisterConfirm'))
+    ) {
       return;
     }
 
+    temporaryRegisterInFlightRef.current = true;
     setError(null);
+    setIsTemporaryRegistering(true);
+
     try {
       const device = await getDeviceIdentity();
       const result = await registerTemporary({
-        email,
+        email: trimmedEmail,
         password,
-        displayName: displayName || undefined,
+        displayName: trimmedDisplayName || undefined,
         device,
       });
       setSession(result);
@@ -81,8 +117,14 @@ export function RegisterPage(): JSX.Element {
         return;
       }
       setError(t('auth.submitFailed'));
+    } finally {
+      temporaryRegisterInFlightRef.current = false;
+      setIsTemporaryRegistering(false);
     }
   }
+
+  const trimmedEmail = email.trim();
+  const trimmedCode = code.trim();
 
   return (
     <AuthShell
@@ -122,27 +164,36 @@ export function RegisterPage(): JSX.Element {
           <div className="inline-control">
             <input
               value={code}
-              onChange={(event) => setCode(event.target.value)}
+              onChange={(event) => setCode(event.target.value.trim().slice(0, EMAIL_CODE_MAX_LENGTH))}
               maxLength={EMAIL_CODE_MAX_LENGTH}
             />
-            <button type="button" className="secondary-button" onClick={() => void handleSendCode()}>
-              {t('auth.sendCode')}
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={isSendingCode || !trimmedEmail}
+              onClick={() => void handleSendCode()}
+            >
+              {isSendingCode ? t('auth.sending') : t('auth.sendCode')}
             </button>
           </div>
         </label>
         {error ? <p className="form-error">{error}</p> : null}
-        <button type="submit" className="primary-button">
-          {t('auth.register')}
+        <button
+          type="submit"
+          className="primary-button"
+          disabled={isSubmitting || !trimmedEmail || !password || !trimmedCode}
+        >
+          {isSubmitting ? t('auth.signingUp') : t('auth.register')}
         </button>
         <div className="temporary-register-box">
           <p className="form-hint">{t('auth.temporaryRegisterHint')}</p>
           <button
             type="button"
             className="secondary-button"
-            disabled={!email || !password}
+            disabled={isTemporaryRegistering || !trimmedEmail || !password}
             onClick={() => void handleTemporaryRegister()}
           >
-            {t('auth.temporaryRegister')}
+            {isTemporaryRegistering ? t('auth.signingUp') : t('auth.temporaryRegister')}
           </button>
         </div>
       </form>

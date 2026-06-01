@@ -23,6 +23,7 @@ const PASSWORD_MAX_LENGTH = 128;
 const EMAIL_CODE_MAX_LENGTH = 6;
 const CAPTCHA_ANSWER_MAX_LENGTH = 6;
 const CAPTCHA_AUTO_REFRESH_MS = 30_000;
+const CAPTCHA_AUTO_REFRESH_SECONDS = CAPTCHA_AUTO_REFRESH_MS / 1000;
 
 export function LoginPage(): JSX.Element {
   const { t } = useI18n();
@@ -45,9 +46,19 @@ export function LoginPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
+  const [captchaRefreshSeconds, setCaptchaRefreshSeconds] = useState(CAPTCHA_AUTO_REFRESH_SECONDS);
+  const submitInFlightRef = useRef(false);
+  const sendCodeInFlightRef = useRef(false);
+  const captchaRefreshInFlightRef = useRef(false);
   const shouldRefreshCaptchaAfterReconnectRef = useRef(false);
 
   const refreshCaptcha = useCallback(async (): Promise<void> => {
+    if (captchaRefreshInFlightRef.current) {
+      return;
+    }
+
+    captchaRefreshInFlightRef.current = true;
+    setCaptchaRefreshSeconds(CAPTCHA_AUTO_REFRESH_SECONDS);
     setIsLoadingCaptcha(true);
     setError(null);
     setNotice(null);
@@ -62,6 +73,7 @@ export function LoginPage(): JSX.Element {
       }
       setError(t('auth.submitFailed'));
     } finally {
+      captchaRefreshInFlightRef.current = false;
       setIsLoadingCaptcha(false);
     }
   }, [t]);
@@ -78,8 +90,15 @@ export function LoginPage(): JSX.Element {
     }
 
     const timerId = window.setInterval(() => {
-      void refreshCaptcha();
-    }, CAPTCHA_AUTO_REFRESH_MS);
+      setCaptchaRefreshSeconds((currentSeconds) => {
+        if (currentSeconds <= 1) {
+          void refreshCaptcha();
+          return CAPTCHA_AUTO_REFRESH_SECONDS;
+        }
+
+        return currentSeconds - 1;
+      });
+    }, 1000);
 
     return () => window.clearInterval(timerId);
   }, [captcha, mode, refreshCaptcha]);
@@ -102,10 +121,13 @@ export function LoginPage(): JSX.Element {
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!captcha) {
+    const trimmedIdentifier = identifier.trim();
+    const trimmedCaptchaAnswer = captchaAnswer.trim();
+    if (!captcha || !trimmedIdentifier || !password || !trimmedCaptchaAnswer || submitInFlightRef.current) {
       return;
     }
 
+    submitInFlightRef.current = true;
     setError(null);
     setNotice(null);
     setIsSubmitting(true);
@@ -113,10 +135,10 @@ export function LoginPage(): JSX.Element {
     try {
       const device = await getDeviceIdentity();
       const result = await loginWithPassword({
-        identifier,
+        identifier: trimmedIdentifier,
         password,
         captchaId: captcha.captchaId,
-        captchaAnswer,
+        captchaAnswer: trimmedCaptchaAnswer,
         device,
       });
       setSession(result);
@@ -130,12 +152,20 @@ export function LoginPage(): JSX.Element {
       await refreshCaptcha();
       setError(t('auth.passwordLoginFailed'));
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   async function handleEmailCodeSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    const trimmedEmail = emailCodeEmail.trim();
+    const trimmedCode = emailCode.trim();
+    if (!trimmedEmail || !trimmedCode || submitInFlightRef.current) {
+      return;
+    }
+
+    submitInFlightRef.current = true;
     setError(null);
     setNotice(null);
     setIsSubmitting(true);
@@ -143,8 +173,8 @@ export function LoginPage(): JSX.Element {
     try {
       const device = await getDeviceIdentity();
       const result = await loginWithEmailCode({
-        email: emailCodeEmail,
-        code: emailCode,
+        email: trimmedEmail,
+        code: trimmedCode,
         device,
       });
       setSession(result);
@@ -155,42 +185,48 @@ export function LoginPage(): JSX.Element {
       }
       setError(t('auth.emailLoginFailed'));
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   async function handleSendCode(): Promise<void> {
-    if (!emailCodeEmail) {
+    const trimmedEmail = emailCodeEmail.trim();
+    if (!trimmedEmail || sendCodeInFlightRef.current) {
       return;
     }
 
+    sendCodeInFlightRef.current = true;
     setError(null);
     setNotice(null);
     setIsSendingCode(true);
 
     try {
-      await sendEmailCode({ email: emailCodeEmail, purpose: 'LOGIN' });
+      await sendEmailCode({ email: trimmedEmail, purpose: 'LOGIN' });
     } catch (error) {
       if (reportAuthNetworkError(error)) {
         return;
       }
       setError(t('auth.submitFailed'));
     } finally {
+      sendCodeInFlightRef.current = false;
       setIsSendingCode(false);
     }
   }
 
   async function handleSendPasswordResetCode(): Promise<void> {
-    if (!resetEmail) {
+    const trimmedEmail = resetEmail.trim();
+    if (!trimmedEmail || sendCodeInFlightRef.current) {
       return;
     }
 
+    sendCodeInFlightRef.current = true;
     setError(null);
     setNotice(null);
     setIsSendingCode(true);
 
     try {
-      await requestPasswordResetCode({ email: resetEmail });
+      await requestPasswordResetCode({ email: trimmedEmail });
       setNotice(t('auth.passwordResetCodeSent'));
     } catch (error) {
       if (reportAuthNetworkError(error)) {
@@ -198,12 +234,25 @@ export function LoginPage(): JSX.Element {
       }
       setNotice(t('auth.passwordResetCodeSent'));
     } finally {
+      sendCodeInFlightRef.current = false;
       setIsSendingCode(false);
     }
   }
 
   async function handlePasswordResetSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    const trimmedEmail = resetEmail.trim();
+    const trimmedCode = resetCode.trim();
+    if (
+      !trimmedEmail ||
+      !trimmedCode ||
+      !resetPasswordValue ||
+      !resetPasswordConfirm ||
+      submitInFlightRef.current
+    ) {
+      return;
+    }
+
     setError(null);
     setNotice(null);
 
@@ -212,11 +261,12 @@ export function LoginPage(): JSX.Element {
       return;
     }
 
+    submitInFlightRef.current = true;
     setIsSubmitting(true);
     try {
       await resetPassword({
-        email: resetEmail,
-        code: resetCode,
+        email: trimmedEmail,
+        code: trimmedCode,
         newPassword: resetPasswordValue,
       });
       setResetCode('');
@@ -230,6 +280,7 @@ export function LoginPage(): JSX.Element {
       }
       setError(t('auth.passwordResetFailed'));
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }
@@ -241,9 +292,15 @@ export function LoginPage(): JSX.Element {
   }
 
   function handleCaptchaAnswerChange(value: string): void {
-    const nextValue = captcha?.captchaType === 'TEXT' ? value.toUpperCase() : value;
+    const nextValue = captcha?.captchaType === 'TEXT' ? value.trim().toUpperCase() : value.trim();
     setCaptchaAnswer(nextValue.slice(0, CAPTCHA_ANSWER_MAX_LENGTH));
   }
+
+  const trimmedIdentifier = identifier.trim();
+  const trimmedEmailCodeEmail = emailCodeEmail.trim();
+  const trimmedEmailCode = emailCode.trim();
+  const trimmedResetEmail = resetEmail.trim();
+  const trimmedResetCode = resetCode.trim();
 
   return (
     <AuthShell
@@ -309,9 +366,14 @@ export function LoginPage(): JSX.Element {
                 disabled={isLoadingCaptcha}
                 onClick={() => void refreshCaptcha()}
               >
-                {t('auth.refreshCaptcha')}
+                {isLoadingCaptcha ? t('auth.refreshing') : t('auth.refreshCaptcha')}
               </button>
             </div>
+            {captcha ? (
+              <span className="form-hint">
+                {formatCaptchaRefreshCountdown(t('auth.captchaRefreshCountdown'), captchaRefreshSeconds)}
+              </span>
+            ) : null}
             <input
               value={captchaAnswer}
               inputMode={captcha?.captchaType === 'TEXT' ? 'text' : 'numeric'}
@@ -331,9 +393,9 @@ export function LoginPage(): JSX.Element {
           <button
             type="submit"
             className="primary-button"
-            disabled={isSubmitting || !captcha || !identifier || !password || !captchaAnswer}
+            disabled={isSubmitting || !captcha || !trimmedIdentifier || !password || !captchaAnswer}
           >
-            {t('auth.login')}
+            {isSubmitting ? t('auth.signingIn') : t('auth.login')}
           </button>
         </form>
       ) : mode === 'emailCode' ? (
@@ -354,16 +416,16 @@ export function LoginPage(): JSX.Element {
               <input
                 value={emailCode}
                 autoComplete="one-time-code"
-                onChange={(event) => setEmailCode(event.target.value)}
+                onChange={(event) => setEmailCode(event.target.value.trim().slice(0, EMAIL_CODE_MAX_LENGTH))}
                 maxLength={EMAIL_CODE_MAX_LENGTH}
               />
               <button
                 type="button"
                 className="secondary-button"
-                disabled={isSendingCode || !emailCodeEmail}
+                disabled={isSendingCode || !trimmedEmailCodeEmail}
                 onClick={() => void handleSendCode()}
               >
-                {t('auth.sendEmailCode')}
+                {isSendingCode ? t('auth.sending') : t('auth.sendEmailCode')}
               </button>
             </div>
           </label>
@@ -371,9 +433,9 @@ export function LoginPage(): JSX.Element {
           <button
             type="submit"
             className="primary-button"
-            disabled={isSubmitting || !emailCodeEmail || !emailCode}
+            disabled={isSubmitting || !trimmedEmailCodeEmail || !trimmedEmailCode}
           >
-            {t('auth.login')}
+            {isSubmitting ? t('auth.signingIn') : t('auth.login')}
           </button>
         </form>
       ) : (
@@ -394,16 +456,16 @@ export function LoginPage(): JSX.Element {
               <input
                 value={resetCode}
                 autoComplete="one-time-code"
-                onChange={(event) => setResetCode(event.target.value)}
+                onChange={(event) => setResetCode(event.target.value.trim().slice(0, EMAIL_CODE_MAX_LENGTH))}
                 maxLength={EMAIL_CODE_MAX_LENGTH}
               />
               <button
                 type="button"
                 className="secondary-button"
-                disabled={isSendingCode || !resetEmail}
+                disabled={isSendingCode || !trimmedResetEmail}
                 onClick={() => void handleSendPasswordResetCode()}
               >
-                {t('auth.sendEmailCode')}
+                {isSendingCode ? t('auth.sending') : t('auth.sendEmailCode')}
               </button>
             </div>
           </label>
@@ -434,13 +496,13 @@ export function LoginPage(): JSX.Element {
             className="primary-button"
             disabled={
               isSubmitting ||
-              !resetEmail ||
-              !resetCode ||
+              !trimmedResetEmail ||
+              !trimmedResetCode ||
               !resetPasswordValue ||
               !resetPasswordConfirm
             }
           >
-            {t('auth.resetPassword')}
+            {isSubmitting ? t('auth.resetting') : t('auth.resetPassword')}
           </button>
           <button
             type="button"
@@ -464,4 +526,8 @@ function getCaptchaTitle(
   }
 
   return t('auth.textCaptcha');
+}
+
+function formatCaptchaRefreshCountdown(template: string, seconds: number): string {
+  return template.replace('{{seconds}}', String(seconds));
 }
