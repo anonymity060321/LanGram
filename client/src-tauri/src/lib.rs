@@ -14,6 +14,8 @@ use tauri::{
     AppHandle, Emitter, Manager, State, WindowEvent,
 };
 
+mod local_cache;
+
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ID: &str = "langram-main-tray";
 const TRAY_MENU_SHOW_ID: &str = "tray-show";
@@ -168,7 +170,10 @@ pub fn run() {
             get_device_identity,
             update_tray_unread_count,
             update_tray_authenticated,
-            update_close_to_tray
+            update_close_to_tray,
+            local_cache::init_local_cache,
+            local_cache::get_local_cache_status,
+            local_cache::clear_local_cache
         ])
         .run(tauri::generate_context!())
         .expect("failed to run LanGram client");
@@ -176,13 +181,12 @@ pub fn run() {
 
 fn setup_tray(app: &AppHandle, is_quitting: Arc<AtomicBool>) -> tauri::Result<()> {
     let menu = build_tray_menu(app, false, 0)?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| tauri::Error::InvalidIcon(io::Error::new(
+    let icon = app.default_window_icon().cloned().ok_or_else(|| {
+        tauri::Error::InvalidIcon(io::Error::new(
             io::ErrorKind::NotFound,
             "default window icon is unavailable",
-        )))?;
+        ))
+    })?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
