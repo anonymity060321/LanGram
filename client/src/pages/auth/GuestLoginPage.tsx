@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { guestLogin } from '../../api/auth.api';
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
+import { getAuthErrorMessage } from '../../utils/authErrors';
 import { getDeviceIdentity } from '../../utils/device';
-import { reportAuthNetworkError } from '../../utils/serverHealth';
 import { AuthShell } from './AuthShell';
 
 const DISPLAY_NAME_MAX_LENGTH = 32;
@@ -21,6 +21,11 @@ export function GuestLoginPage(): JSX.Element {
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const trimmedDisplayName = displayName.trim();
+    if (!trimmedDisplayName) {
+      setError(t('auth.nicknameRequired'));
+      return;
+    }
+
     if (submitInFlightRef.current) {
       return;
     }
@@ -31,14 +36,11 @@ export function GuestLoginPage(): JSX.Element {
 
     try {
       const device = await getDeviceIdentity();
-      const result = await guestLogin({ displayName: trimmedDisplayName || undefined, device });
+      const result = await guestLogin({ displayName: trimmedDisplayName, device });
       setSession(result);
       navigate('/', { replace: true });
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
-        return;
-      }
-      setError(t('auth.submitFailed'));
+      setError(getAuthErrorMessage(error, t, 'auth.submitFailed'));
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -58,11 +60,14 @@ export function GuestLoginPage(): JSX.Element {
           <input
             value={displayName}
             maxLength={DISPLAY_NAME_MAX_LENGTH}
-            onChange={(event) => setDisplayName(event.target.value)}
+            onChange={(event) => {
+              setDisplayName(event.target.value);
+              setError(null);
+            }}
           />
         </label>
         {error ? <p className="form-error">{error}</p> : null}
-        <button type="submit" className="primary-button" disabled={isSubmitting}>
+        <button type="submit" className="primary-button" disabled={isSubmitting || !displayName.trim()}>
           {isSubmitting ? t('auth.entering') : t('auth.guestLogin')}
         </button>
       </form>

@@ -12,11 +12,14 @@ import {
 import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useNetworkStore } from '../../stores/network.store';
+import { getAuthErrorMessage, getCaptchaErrorMessage, getNetworkErrorMessage } from '../../utils/authErrors';
 import { getDeviceIdentity } from '../../utils/device';
-import { reportAuthNetworkError } from '../../utils/serverHealth';
 import { AuthShell } from './AuthShell';
 
 type LoginMode = 'password' | 'emailCode' | 'forgotPassword';
+interface RefreshCaptchaOptions {
+  silent?: boolean;
+}
 
 const EMAIL_MAX_LENGTH = 254;
 const PASSWORD_MAX_LENGTH = 128;
@@ -24,6 +27,7 @@ const EMAIL_CODE_MAX_LENGTH = 6;
 const CAPTCHA_ANSWER_MAX_LENGTH = 6;
 const CAPTCHA_AUTO_REFRESH_MS = 30_000;
 const CAPTCHA_AUTO_REFRESH_SECONDS = CAPTCHA_AUTO_REFRESH_MS / 1000;
+const EMAIL_LOGIN_ERROR_MIN_DELAY_MS = 700;
 
 export function LoginPage(): JSX.Element {
   const { t } = useI18n();
@@ -46,32 +50,37 @@ export function LoginPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [hasCaptchaRefreshError, setHasCaptchaRefreshError] = useState(false);
   const [captchaRefreshSeconds, setCaptchaRefreshSeconds] = useState(CAPTCHA_AUTO_REFRESH_SECONDS);
   const submitInFlightRef = useRef(false);
   const sendCodeInFlightRef = useRef(false);
   const captchaRefreshInFlightRef = useRef(false);
   const shouldRefreshCaptchaAfterReconnectRef = useRef(false);
 
-  const refreshCaptcha = useCallback(async (): Promise<void> => {
+  const refreshCaptcha = useCallback(async (options: RefreshCaptchaOptions = {}): Promise<void> => {
     if (captchaRefreshInFlightRef.current) {
       return;
     }
 
+    const isSilent = options.silent ?? false;
     captchaRefreshInFlightRef.current = true;
     setCaptchaRefreshSeconds(CAPTCHA_AUTO_REFRESH_SECONDS);
     setIsLoadingCaptcha(true);
-    setError(null);
-    setNotice(null);
 
     try {
       const nextCaptcha = await requestTextCaptcha();
       setCaptcha(nextCaptcha);
       setCaptchaAnswer('');
+      setHasCaptchaRefreshError(false);
+      setError(null);
+      setNotice(null);
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
-        return;
+      setCaptchaAnswer('');
+      setHasCaptchaRefreshError(true);
+      if (!isSilent) {
+        setError(getCaptchaErrorMessage(error, t));
       }
-      setError(t('auth.submitFailed'));
     } finally {
       captchaRefreshInFlightRef.current = false;
       setIsLoadingCaptcha(false);
@@ -92,7 +101,7 @@ export function LoginPage(): JSX.Element {
     const timerId = window.setInterval(() => {
       setCaptchaRefreshSeconds((currentSeconds) => {
         if (currentSeconds <= 1) {
-          void refreshCaptcha();
+          void refreshCaptcha({ silent: true });
           return CAPTCHA_AUTO_REFRESH_SECONDS;
         }
 
@@ -115,7 +124,7 @@ export function LoginPage(): JSX.Element {
 
     shouldRefreshCaptchaAfterReconnectRef.current = false;
     if (mode === 'password') {
-      void refreshCaptcha();
+      void refreshCaptcha({ silent: true });
     }
   }, [mode, networkStatus, refreshCaptcha]);
 
@@ -144,13 +153,15 @@ export function LoginPage(): JSX.Element {
       setSession(result);
       navigate('/', { replace: true });
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
+      const networkMessage = getNetworkErrorMessage(error, t);
+      if (networkMessage) {
+        setError(networkMessage);
         return;
       }
-      setPassword('');
+
       setCaptchaAnswer('');
-      await refreshCaptcha();
-      setError(t('auth.passwordLoginFailed'));
+      await refreshCaptcha({ silent: true });
+      setError(getAuthErrorMessage(error, t, 'auth.passwordLoginFailed'));
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -169,6 +180,7 @@ export function LoginPage(): JSX.Element {
     setError(null);
     setNotice(null);
     setIsSubmitting(true);
+    const submittedAt = Date.now();
 
     try {
       const device = await getDeviceIdentity();
@@ -180,10 +192,8 @@ export function LoginPage(): JSX.Element {
       setSession(result);
       navigate('/', { replace: true });
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
-        return;
-      }
-      setError(t('auth.emailLoginFailed'));
+      await waitAtLeast(submittedAt, EMAIL_LOGIN_ERROR_MIN_DELAY_MS);
+      setError(getAuthErrorMessage(error, t, 'auth.emailLoginFailed'));
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -204,10 +214,7 @@ export function LoginPage(): JSX.Element {
     try {
       await sendEmailCode({ email: trimmedEmail, purpose: 'LOGIN' });
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
-        return;
-      }
-      setError(t('auth.submitFailed'));
+      setError(getAuthErrorMessage(error, t, 'auth.submitFailed'));
     } finally {
       sendCodeInFlightRef.current = false;
       setIsSendingCode(false);
@@ -229,7 +236,9 @@ export function LoginPage(): JSX.Element {
       await requestPasswordResetCode({ email: trimmedEmail });
       setNotice(t('auth.passwordResetCodeSent'));
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
+      const networkMessage = getNetworkErrorMessage(error, t);
+      if (networkMessage) {
+        setError(networkMessage);
         return;
       }
       setNotice(t('auth.passwordResetCodeSent'));
@@ -275,10 +284,7 @@ export function LoginPage(): JSX.Element {
       setMode('password');
       setNotice(t('auth.passwordResetSuccess'));
     } catch (error) {
-      if (reportAuthNetworkError(error)) {
-        return;
-      }
-      setError(t('auth.passwordResetFailed'));
+      setError(getAuthErrorMessage(error, t, 'auth.passwordResetFailed'));
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -286,14 +292,61 @@ export function LoginPage(): JSX.Element {
   }
 
   function switchMode(nextMode: LoginMode): void {
+    if (mode === nextMode) {
+      return;
+    }
+
+    if (nextMode === 'password') {
+      setEmailCodeEmail('');
+      setEmailCode('');
+      setResetEmail('');
+      setResetCode('');
+      setResetPasswordValue('');
+      setResetPasswordConfirm('');
+      setCaptchaAnswer('');
+      setCaptcha(null);
+      setHasCaptchaRefreshError(false);
+      setCaptchaRefreshSeconds(CAPTCHA_AUTO_REFRESH_SECONDS);
+    } else if (nextMode === 'emailCode') {
+      setIdentifier('');
+      setPassword('');
+      setCaptchaAnswer('');
+      setCaptcha(null);
+      setHasCaptchaRefreshError(false);
+    } else {
+      setIdentifier('');
+      setPassword('');
+      setCaptchaAnswer('');
+      setEmailCodeEmail('');
+      setEmailCode('');
+      setCaptcha(null);
+      setHasCaptchaRefreshError(false);
+    }
+
     setMode(nextMode);
     setError(null);
     setNotice(null);
+    setIsSubmitting(false);
+    setIsSendingCode(false);
+    setIsPasswordVisible(false);
+    submitInFlightRef.current = false;
+    sendCodeInFlightRef.current = false;
   }
 
   function handleCaptchaAnswerChange(value: string): void {
     const nextValue = captcha?.captchaType === 'TEXT' ? value.trim().toUpperCase() : value.trim();
     setCaptchaAnswer(nextValue.slice(0, CAPTCHA_ANSWER_MAX_LENGTH));
+    setError(null);
+  }
+
+  function handleEmailCodeChange(value: string): void {
+    setEmailCode(value.trim().slice(0, EMAIL_CODE_MAX_LENGTH));
+    setError(null);
+  }
+
+  function handleResetCodeChange(value: string): void {
+    setResetCode(value.trim().slice(0, EMAIL_CODE_MAX_LENGTH));
+    setError(null);
   }
 
   const trimmedIdentifier = identifier.trim();
@@ -301,6 +354,12 @@ export function LoginPage(): JSX.Element {
   const trimmedEmailCode = emailCode.trim();
   const trimmedResetEmail = resetEmail.trim();
   const trimmedResetCode = resetCode.trim();
+  const shouldShowCaptchaRefreshCountdown =
+    mode === 'password' &&
+    Boolean(captcha) &&
+    !isLoadingCaptcha &&
+    !hasCaptchaRefreshError &&
+    networkStatus === 'online';
 
   return (
     <AuthShell
@@ -331,6 +390,7 @@ export function LoginPage(): JSX.Element {
         </div>
       ) : null}
 
+      <div key={mode} className="auth-mode-panel">
       {mode === 'password' ? (
         <form className="form-stack" onSubmit={(event) => void handlePasswordSubmit(event)}>
           <label>
@@ -344,13 +404,28 @@ export function LoginPage(): JSX.Element {
           </label>
           <label>
             <span>{t('auth.password')}</span>
-            <input
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              maxLength={PASSWORD_MAX_LENGTH}
-              onChange={(event) => setPassword(event.target.value)}
-            />
+            <div className="password-input-wrap">
+              <input
+                type={isPasswordVisible ? 'text' : 'password'}
+                value={password}
+                autoComplete="current-password"
+                maxLength={PASSWORD_MAX_LENGTH}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <button
+                type="button"
+                className="password-visibility-button"
+                aria-label={isPasswordVisible ? t('auth.hidePassword') : t('auth.showPassword')}
+                aria-pressed={isPasswordVisible}
+                title={isPasswordVisible ? t('auth.hidePassword') : t('auth.showPassword')}
+                onClick={() => setIsPasswordVisible((current) => !current)}
+              >
+                <span
+                  className={`password-visibility-icon ${isPasswordVisible ? 'is-hide' : 'is-show'}`}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
           </label>
           <label>
             <span>{getCaptchaTitle(captcha, t)}</span>
@@ -364,12 +439,12 @@ export function LoginPage(): JSX.Element {
                 type="button"
                 className="secondary-button"
                 disabled={isLoadingCaptcha}
-                onClick={() => void refreshCaptcha()}
+                onClick={() => void refreshCaptcha({ silent: false })}
               >
                 {isLoadingCaptcha ? t('auth.refreshing') : t('auth.refreshCaptcha')}
               </button>
             </div>
-            {captcha ? (
+            {shouldShowCaptchaRefreshCountdown ? (
               <span className="form-hint">
                 {formatCaptchaRefreshCountdown(t('auth.captchaRefreshCountdown'), captchaRefreshSeconds)}
               </span>
@@ -416,7 +491,7 @@ export function LoginPage(): JSX.Element {
               <input
                 value={emailCode}
                 autoComplete="one-time-code"
-                onChange={(event) => setEmailCode(event.target.value.trim().slice(0, EMAIL_CODE_MAX_LENGTH))}
+                onChange={(event) => handleEmailCodeChange(event.target.value)}
                 maxLength={EMAIL_CODE_MAX_LENGTH}
               />
               <button
@@ -456,7 +531,7 @@ export function LoginPage(): JSX.Element {
               <input
                 value={resetCode}
                 autoComplete="one-time-code"
-                onChange={(event) => setResetCode(event.target.value.trim().slice(0, EMAIL_CODE_MAX_LENGTH))}
+                onChange={(event) => handleResetCodeChange(event.target.value)}
                 maxLength={EMAIL_CODE_MAX_LENGTH}
               />
               <button
@@ -513,6 +588,7 @@ export function LoginPage(): JSX.Element {
           </button>
         </form>
       )}
+      </div>
     </AuthShell>
   );
 }
@@ -530,4 +606,15 @@ function getCaptchaTitle(
 
 function formatCaptchaRefreshCountdown(template: string, seconds: number): string {
   return template.replace('{{seconds}}', String(seconds));
+}
+
+function waitAtLeast(startTimeMs: number, minimumDurationMs: number): Promise<void> {
+  const remainingMs = minimumDurationMs - (Date.now() - startTimeMs);
+  if (remainingMs <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, remainingMs);
+  });
 }

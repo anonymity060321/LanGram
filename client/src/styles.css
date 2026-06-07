@@ -205,6 +205,58 @@ textarea,
   padding: 9px 11px;
 }
 
+.password-input-wrap {
+  position: relative;
+  display: grid;
+}
+
+.password-input-wrap input {
+  padding-right: 48px;
+}
+
+.password-visibility-button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  transform: translateY(-50%);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.password-visibility-button:hover {
+  background: #eef4ff;
+  color: #1d4ed8;
+}
+
+.password-visibility-icon {
+  width: 20px;
+  height: 20px;
+  background: currentColor;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.password-visibility-icon.is-show {
+  -webkit-mask-image: url('/vector_icon/eye.svg');
+  mask-image: url('/vector_icon/eye.svg');
+}
+
+.password-visibility-icon.is-hide {
+  -webkit-mask-image: url('/vector_icon/eye-off.svg');
+  mask-image: url('/vector_icon/eye-off.svg');
+}
+
 .inline-control {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1749,12 +1801,6 @@ textarea,
 
 .main-friends-shell .friend-profile-card {
   align-content: start;
-}
-
-.temporary-register-box {
-  display: grid;
-  gap: 8px;
-  padding-top: 6px;
 }
 
 .form-hint {
@@ -3450,6 +3496,7 @@ textarea,
 .composer-tool-button:focus-visible,
 .message-editor textarea:focus-visible,
 .form-stack input:focus-visible,
+.password-visibility-button:focus-visible,
 .chat-search-bar input:focus-visible,
 .settings-select-button:focus-visible {
   border-color: #60a5fa;
@@ -3482,6 +3529,19 @@ textarea,
 .auth-tabs button.is-active,
 .friends-tabs button.is-active {
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.09);
+}
+
+.auth-mode-panel {
+  animation: auth-mode-fade-in 150ms ease-out both;
+}
+
+.auth-mode-panel .inline-control .secondary-button {
+  animation: none;
+  transform: none;
+}
+
+.auth-mode-panel .inline-control .secondary-button:hover:not(:disabled) {
+  transform: none;
 }
 
 .friends-tab-panel {
@@ -3583,6 +3643,16 @@ textarea,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes auth-mode-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 
@@ -4416,6 +4486,15 @@ textarea,
 }
 
 :root[data-theme='dark'] .auth-inline-link:hover {
+  color: #bfdbfe;
+}
+
+:root[data-theme='dark'] .password-visibility-button {
+  color: #94a3b8;
+}
+
+:root[data-theme='dark'] .password-visibility-button:hover {
+  background: #1e3a8a;
   color: #bfdbfe;
 }
 
