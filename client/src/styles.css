@@ -995,6 +995,64 @@ textarea,
   justify-content: flex-end;
 }
 
+.settings-local-cache-card {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.settings-local-cache-header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.settings-local-cache-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-local-cache-details {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.settings-local-cache-details div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.settings-local-cache-details dt {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-local-cache-details dd {
+  min-width: 0;
+  margin: 0;
+  color: #172033;
+  font-size: 13px;
+}
+
+.settings-local-cache-path {
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 .settings-account-badge {
   min-width: 0;
   justify-self: end;
@@ -2280,7 +2338,9 @@ textarea,
 
 .message-row.is-current-search-match .message-bubble {
   border-color: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.26), 0 10px 28px rgba(15, 23, 42, 0.14);
+  box-shadow:
+    0 0 0 3px rgba(250, 204, 21, 0.26),
+    0 10px 28px rgba(15, 23, 42, 0.14);
 }
 
 .message-bubble {
@@ -3815,6 +3875,15 @@ textarea,
     grid-template-columns: 1fr;
   }
 
+  .settings-local-cache-header,
+  .settings-local-cache-details div {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-local-cache-actions {
+    justify-content: flex-start;
+  }
+
   .settings-shell {
     grid-template-rows: auto minmax(0, 1fr);
   }
@@ -4009,7 +4078,9 @@ textarea,
 :root[data-theme='dark'] .file-message-card.is-current-search-match,
 :root[data-theme='dark'] .image-message-card.is-current-search-match {
   border-color: #facc15;
-  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.22), 0 10px 30px rgba(0, 0, 0, 0.28);
+  box-shadow:
+    0 0 0 3px rgba(250, 204, 21, 0.22),
+    0 10px 30px rgba(0, 0, 0, 0.28);
 }
 
 :root[data-theme='dark'] .conversation-context-menu {
@@ -4067,6 +4138,11 @@ textarea,
   background: #0f172a;
 }
 
+:root[data-theme='dark'] .settings-local-cache-card {
+  border-color: #334155;
+  background: #0f172a;
+}
+
 :root[data-theme='dark'] .settings-row input {
   border-color: #475569;
   background: #111827;
@@ -4079,6 +4155,14 @@ textarea,
 
 :root[data-theme='dark'] .settings-row-text span {
   color: #94a3b8;
+}
+
+:root[data-theme='dark'] .settings-local-cache-details dt {
+  color: #94a3b8;
+}
+
+:root[data-theme='dark'] .settings-local-cache-details dd {
+  color: #e5edf7;
 }
 
 :root[data-theme='dark'] .settings-account-badge {

@@ -5,6 +5,7 @@ import { AppRoutes } from './routes';
 import { useI18n } from './i18n';
 import { useAuthStore } from './stores/auth.store';
 import { useChatStore } from './stores/chat.store';
+import { useLocalCacheStore } from './stores/localCache.store';
 import { isTauriRuntime } from './utils/desktopNotification';
 
 type EditableTarget = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
@@ -28,8 +29,13 @@ export function App(): JSX.Element {
   const acknowledgeSessionReplaced = useAuthStore((state) => state.acknowledgeSessionReplaced);
   const clearSession = useAuthStore((state) => state.clearSession);
   const disconnect = useChatStore((state) => state.disconnect);
+  const initializeLocalCacheOnce = useLocalCacheStore((state) => state.initializeOnce);
   const [inputContextMenu, setInputContextMenu] = useState<InputContextMenuState | null>(null);
   const inputContextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void initializeLocalCacheOnce();
+  }, [initializeLocalCacheOnce]);
 
   useEffect(() => {
     function preventNativeContextMenu(event: MouseEvent): void {

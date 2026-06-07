@@ -15,6 +15,7 @@ import {
   type LanguagePreference,
   type ThemePreference,
 } from '../../stores/settings.store';
+import { useLocalCacheStore } from '../../stores/localCache.store';
 import { updateCloseToTrayRuntime } from '../../utils/localConfig';
 import {
   getNotificationRuntimeStatus,
@@ -47,6 +48,14 @@ export function SettingsPage(): JSX.Element {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [notificationStatus, setNotificationStatus] = useState<NotificationRuntimeStatus | null>(null);
   const [notificationPermissionNotice, setNotificationPermissionNotice] = useState<string | null>(null);
+  const [localCacheNotice, setLocalCacheNotice] = useState<LocalCacheNotice | null>(null);
+  const localCacheStatus = useLocalCacheStore((state) => state.status);
+  const localCacheInitializationState = useLocalCacheStore((state) => state.initializationState);
+  const isLocalCacheInitializing = useLocalCacheStore((state) => state.isInitializing);
+  const isLocalCacheRefreshing = useLocalCacheStore((state) => state.isRefreshing);
+  const isLocalCacheClearing = useLocalCacheStore((state) => state.isClearing);
+  const refreshLocalCacheStatus = useLocalCacheStore((state) => state.refreshStatus);
+  const clearLocalCache = useLocalCacheStore((state) => state.clearCache);
 
   useEffect(() => {
     void load();
@@ -55,6 +64,16 @@ export function SettingsPage(): JSX.Element {
   useEffect(() => {
     void refreshNotificationStatus();
   }, []);
+
+  useEffect(() => {
+    if (activeSection !== 'about') {
+      return;
+    }
+
+    void refreshLocalCacheStatus().catch(() => {
+      setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheReadFailed') });
+    });
+  }, [activeSection, refreshLocalCacheStatus, t]);
 
   useEffect(() => {
     if (!config) {
@@ -152,6 +171,32 @@ export function SettingsPage(): JSX.Element {
 
     if (result.reason === 'unsupported') {
       setNotificationPermissionNotice(t('settings.notificationPermissionUnsupportedHint'));
+    }
+  }
+
+  async function handleRefreshLocalCacheStatus(): Promise<void> {
+    setLocalCacheNotice(null);
+    try {
+      await refreshLocalCacheStatus();
+    } catch {
+      setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheReadFailed') });
+    }
+  }
+
+  async function handleClearLocalCache(): Promise<void> {
+    if (!window.confirm(t('settings.localCacheClearConfirm'))) {
+      return;
+    }
+
+    setLocalCacheNotice(null);
+    try {
+      await clearLocalCache();
+      setLocalCacheNotice({ kind: 'success', message: t('settings.localCacheCleared') });
+      await refreshLocalCacheStatus().catch(() => {
+        setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheReadFailed') });
+      });
+    } catch {
+      setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheClearFailed') });
     }
   }
 
@@ -481,6 +526,72 @@ export function SettingsPage(): JSX.Element {
                       <span>{t('settings.localDataHint')}</span>
                     </div>
                   </div>
+                  <div className="settings-local-cache-card">
+                    <div className="settings-local-cache-header">
+                      <div className="settings-row-text">
+                        <strong>{t('settings.localCache')}</strong>
+                        <span>
+                          {t('settings.localCacheStatus')}:{' '}
+                          {t(
+                            getLocalCacheStatusLabelKey(
+                              localCacheInitializationState,
+                              localCacheStatus?.exists ?? false,
+                            ),
+                          )}
+                        </span>
+                      </div>
+                      <div className="settings-local-cache-actions">
+                        <button
+                          type="button"
+                          className="secondary-button compact-button"
+                          disabled={
+                            isLocalCacheInitializing ||
+                            isLocalCacheRefreshing ||
+                            isLocalCacheClearing
+                          }
+                          onClick={() => void handleRefreshLocalCacheStatus()}
+                        >
+                          {t('settings.localCacheRefresh')}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button compact-button danger-button"
+                          disabled={
+                            isLocalCacheInitializing ||
+                            isLocalCacheRefreshing ||
+                            isLocalCacheClearing
+                          }
+                          onClick={() => void handleClearLocalCache()}
+                        >
+                          {t('settings.localCacheClear')}
+                        </button>
+                      </div>
+                    </div>
+                    <dl className="settings-local-cache-details">
+                      <div>
+                        <dt>{t('settings.localCacheSchemaVersion')}</dt>
+                        <dd>{localCacheStatus?.schemaVersion ?? '-'}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('settings.localCacheDbPath')}</dt>
+                        <dd className="settings-local-cache-path">
+                          {localCacheStatus?.dbPath ?? '-'}
+                        </dd>
+                      </div>
+                    </dl>
+                    {localCacheInitializationState === 'failed' ? (
+                      <p className="form-error">{t('settings.localCacheInitFailed')}</p>
+                    ) : null}
+                    {localCacheNotice ? (
+                      <p
+                        className={
+                          localCacheNotice.kind === 'success' ? 'form-success' : 'form-error'
+                        }
+                      >
+                        {localCacheNotice.message}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </section>
             ) : null}
@@ -652,6 +763,10 @@ type SettingsSection = 'general' | 'profile' | 'account' | 'about';
 type NotificationSetting = 'enabled' | 'disabled';
 type TrayCloseSetting = 'enabled' | 'disabled';
 type TranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
+type LocalCacheNotice = {
+  kind: 'success' | 'error';
+  message: string;
+};
 
 function getNotificationPermissionLabelKey(
   permission: NotificationRuntimeStatus['permission'],
@@ -669,6 +784,17 @@ function getNotificationPermissionLabelKey(
   }
 
   return 'settings.notificationPermissionUnsupported';
+}
+
+function getLocalCacheStatusLabelKey(
+  initializationState: 'idle' | 'initialized' | 'failed',
+  exists: boolean,
+): TranslationKey {
+  if (initializationState === 'failed') {
+    return 'settings.localCacheInitFailed';
+  }
+
+  return exists ? 'settings.localCacheInitialized' : 'settings.localCacheNotInitialized';
 }
 
 const SETTINGS_SECTIONS: Array<{
