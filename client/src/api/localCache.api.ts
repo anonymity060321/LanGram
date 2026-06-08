@@ -54,6 +54,32 @@ export interface CachedMessageInput {
   localDeletedAt: string | null;
 }
 
+export interface CachedMessageRecord {
+  id: string;
+  clientMessageId: string | null;
+  conversationId: string;
+  senderId: string;
+  messageType: string;
+  status: string;
+  ciphertext: string | null;
+  nonce: string | null;
+  encryptionVersion: string | null;
+  metadataJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
+  editedAt: string | null;
+  recalledAt: string | null;
+  localDeletedAt: string | null;
+}
+
+export interface ListCachedMessagesParams {
+  conversationId: string;
+  limit?: number;
+  beforeCreatedAt?: string;
+}
+
 export interface CachedMessageStatePatchInput {
   id: string;
   status: string | null;
@@ -96,4 +122,16 @@ export function updateCachedMessageState(
   patches: CachedMessageStatePatchInput[],
 ): Promise<void> {
   return invoke<void>('update_cached_message_state', { patches });
+}
+
+export function listCachedMessages({
+  conversationId,
+  limit,
+  beforeCreatedAt,
+}: ListCachedMessagesParams): Promise<CachedMessageRecord[]> {
+  return invoke<CachedMessageRecord[]>('list_cached_messages', {
+    conversationId,
+    limit,
+    beforeCreatedAt,
+  });
 }

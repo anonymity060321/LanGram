@@ -9,6 +9,8 @@ use tauri::{AppHandle, Manager};
 const LOCAL_CACHE_DB_FILE: &str = "langram-local-cache.sqlite3";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 const CURRENT_SCHEMA_VERSION: i64 = 1;
+const DEFAULT_CACHED_MESSAGES_LIMIT: i64 = 50;
+const MAX_CACHED_MESSAGES_LIMIT: i64 = 100;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +57,28 @@ pub struct CachedConversationRecord {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedMessageInput {
+    id: String,
+    client_message_id: Option<String>,
+    conversation_id: String,
+    sender_id: String,
+    message_type: String,
+    status: String,
+    ciphertext: Option<String>,
+    nonce: Option<String>,
+    encryption_version: Option<String>,
+    metadata_json: Option<String>,
+    created_at: String,
+    updated_at: String,
+    delivered_at: Option<String>,
+    read_at: Option<String>,
+    edited_at: Option<String>,
+    recalled_at: Option<String>,
+    local_deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedMessageRecord {
     id: String,
     client_message_id: Option<String>,
     conversation_id: String,
@@ -146,6 +170,23 @@ pub fn update_cached_message_state(
 ) -> Result<(), String> {
     let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
     update_cached_message_state_at_path(&db_path, &patches).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_cached_messages(
+    app: AppHandle,
+    conversation_id: String,
+    limit: Option<i64>,
+    before_created_at: Option<String>,
+) -> Result<Vec<CachedMessageRecord>, String> {
+    let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
+    list_cached_messages_at_path(
+        &db_path,
+        &conversation_id,
+        limit,
+        before_created_at.as_deref(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn local_cache_path(app: &AppHandle) -> Result<PathBuf, LocalCacheError> {
@@ -427,6 +468,116 @@ fn update_cached_message_state_at_path(
     transaction.commit()?;
 
     Ok(())
+}
+
+fn list_cached_messages_at_path(
+    db_path: &Path,
+    conversation_id: &str,
+    limit: Option<i64>,
+    before_created_at: Option<&str>,
+) -> Result<Vec<CachedMessageRecord>, LocalCacheError> {
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    init_database_at_path(db_path)?;
+
+    let normalized_limit = limit
+        .unwrap_or(DEFAULT_CACHED_MESSAGES_LIMIT)
+        .clamp(1, MAX_CACHED_MESSAGES_LIMIT);
+    let connection = Connection::open(db_path)?;
+    enable_foreign_keys(&connection)?;
+    let sql = if before_created_at.is_some() {
+        "
+        SELECT
+            id,
+            client_message_id,
+            conversation_id,
+            sender_id,
+            message_type,
+            status,
+            ciphertext,
+            nonce,
+            encryption_version,
+            metadata_json,
+            created_at,
+            updated_at,
+            delivered_at,
+            read_at,
+            edited_at,
+            recalled_at,
+            local_deleted_at
+        FROM cached_messages
+        WHERE conversation_id = ?1 AND created_at < ?2
+        ORDER BY created_at DESC
+        LIMIT ?3
+        "
+    } else {
+        "
+        SELECT
+            id,
+            client_message_id,
+            conversation_id,
+            sender_id,
+            message_type,
+            status,
+            ciphertext,
+            nonce,
+            encryption_version,
+            metadata_json,
+            created_at,
+            updated_at,
+            delivered_at,
+            read_at,
+            edited_at,
+            recalled_at,
+            local_deleted_at
+        FROM cached_messages
+        WHERE conversation_id = ?1
+        ORDER BY created_at DESC
+        LIMIT ?2
+        "
+    };
+    let mut statement = connection.prepare(sql)?;
+    let rows = if let Some(before_created_at) = before_created_at {
+        statement.query_map(
+            params![conversation_id, before_created_at, normalized_limit],
+            cached_message_record_from_row,
+        )?
+    } else {
+        statement.query_map(
+            params![conversation_id, normalized_limit],
+            cached_message_record_from_row,
+        )?
+    };
+    let mut messages = rows.collect::<Result<Vec<_>, _>>()?;
+    messages.reverse();
+
+    Ok(messages)
+}
+
+fn cached_message_record_from_row(
+    row: &rusqlite::Row<'_>,
+) -> Result<CachedMessageRecord, rusqlite::Error> {
+    Ok(CachedMessageRecord {
+        id: row.get(0)?,
+        client_message_id: row.get(1)?,
+        conversation_id: row.get(2)?,
+        sender_id: row.get(3)?,
+        message_type: row.get(4)?,
+        status: row.get(5)?,
+        ciphertext: row.get(6)?,
+        nonce: row.get(7)?,
+        encryption_version: row.get(8)?,
+        metadata_json: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        delivered_at: row.get(12)?,
+        read_at: row.get(13)?,
+        edited_at: row.get(14)?,
+        recalled_at: row.get(15)?,
+        local_deleted_at: row.get(16)?,
+    })
 }
 
 fn enable_foreign_keys(connection: &Connection) -> Result<(), LocalCacheError> {
@@ -832,6 +983,145 @@ mod tests {
     }
 
     #[test]
+    fn list_cached_messages_returns_empty_when_database_is_missing() {
+        let db_path = test_db_path("message-list-missing");
+
+        let messages = list_cached_messages_at_path(&db_path, "conversation-1", None, None)
+            .expect("missing database should list");
+
+        assert!(messages.is_empty());
+        assert!(!db_path.exists());
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_cached_messages_only_returns_requested_conversation() {
+        let db_path = test_db_path("message-list-conversation");
+        let mut other_conversation_message = test_cached_message("message-other", "SENT");
+        other_conversation_message.conversation_id = "conversation-2".to_string();
+        let messages = vec![
+            test_cached_message_with_created_at("message-1", "2026-06-07T00:00:00.000Z"),
+            other_conversation_message,
+        ];
+
+        upsert_cached_messages_at_path(&db_path, &messages).expect("messages should upsert");
+
+        let listed = list_cached_messages_at_path(&db_path, "conversation-1", None, None)
+            .expect("messages should list");
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "message-1");
+        assert_eq!(listed[0].conversation_id, "conversation-1");
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_cached_messages_returns_created_at_ascending_by_default() {
+        let db_path = test_db_path("message-list-asc");
+        let messages = vec![
+            test_cached_message_with_created_at("message-older", "2026-06-07T00:00:00.000Z"),
+            test_cached_message_with_created_at("message-newest", "2026-06-07T00:02:00.000Z"),
+            test_cached_message_with_created_at("message-middle", "2026-06-07T00:01:00.000Z"),
+        ];
+
+        upsert_cached_messages_at_path(&db_path, &messages).expect("messages should upsert");
+
+        let listed = list_cached_messages_at_path(&db_path, "conversation-1", None, None)
+            .expect("messages should list");
+
+        assert_eq!(
+            listed
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-older", "message-middle", "message-newest"]
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_cached_messages_applies_limit_to_recent_messages() {
+        let db_path = test_db_path("message-list-limit");
+        let messages = vec![
+            test_cached_message_with_created_at("message-older", "2026-06-07T00:00:00.000Z"),
+            test_cached_message_with_created_at("message-middle", "2026-06-07T00:01:00.000Z"),
+            test_cached_message_with_created_at("message-newest", "2026-06-07T00:02:00.000Z"),
+        ];
+
+        upsert_cached_messages_at_path(&db_path, &messages).expect("messages should upsert");
+
+        let listed = list_cached_messages_at_path(&db_path, "conversation-1", Some(2), None)
+            .expect("messages should list");
+
+        assert_eq!(
+            listed
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-middle", "message-newest"]
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_cached_messages_applies_before_created_at() {
+        let db_path = test_db_path("message-list-before");
+        let messages = vec![
+            test_cached_message_with_created_at("message-older", "2026-06-07T00:00:00.000Z"),
+            test_cached_message_with_created_at("message-middle", "2026-06-07T00:01:00.000Z"),
+            test_cached_message_with_created_at("message-newest", "2026-06-07T00:02:00.000Z"),
+        ];
+
+        upsert_cached_messages_at_path(&db_path, &messages).expect("messages should upsert");
+
+        let listed = list_cached_messages_at_path(
+            &db_path,
+            "conversation-1",
+            None,
+            Some("2026-06-07T00:02:00.000Z"),
+        )
+        .expect("messages should list");
+
+        assert_eq!(
+            listed
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-older", "message-middle"]
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_cached_messages_returns_fields_written_by_upsert() {
+        let db_path = test_db_path("message-list-fields");
+        let mut message =
+            test_cached_message_with_created_at("message-1", "2026-06-07T00:00:00.000Z");
+        message.metadata_json = Some(r#"{"fileId":"file-1","sizeBytes":1024}"#.to_string());
+        message.delivered_at = Some("2026-06-07T00:01:00.000Z".to_string());
+        message.read_at = Some("2026-06-07T00:02:00.000Z".to_string());
+        message.edited_at = Some("2026-06-07T00:03:00.000Z".to_string());
+        message.recalled_at = Some("2026-06-07T00:04:00.000Z".to_string());
+        message.local_deleted_at = Some("2026-06-07T00:05:00.000Z".to_string());
+        message.updated_at = "2026-06-07T00:05:00.000Z".to_string();
+
+        upsert_cached_messages_at_path(&db_path, &[message.clone()])
+            .expect("message should upsert");
+
+        let listed = list_cached_messages_at_path(&db_path, "conversation-1", None, None)
+            .expect("messages should list");
+
+        assert_eq!(listed, vec![expected_cached_message_record(&message)]);
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
     fn upserting_cached_message_updates_status_delivery_and_read_fields() {
         let db_path = test_db_path("message-upsert-update");
         let first = test_cached_message("message-1", "SENT");
@@ -1069,6 +1359,35 @@ mod tests {
             edited_at: None,
             recalled_at: None,
             local_deleted_at: None,
+        }
+    }
+
+    fn test_cached_message_with_created_at(id: &str, created_at: &str) -> CachedMessageInput {
+        let mut message = test_cached_message(id, "SENT");
+        message.created_at = created_at.to_string();
+        message.updated_at = created_at.to_string();
+        message
+    }
+
+    fn expected_cached_message_record(input: &CachedMessageInput) -> CachedMessageRecord {
+        CachedMessageRecord {
+            id: input.id.clone(),
+            client_message_id: input.client_message_id.clone(),
+            conversation_id: input.conversation_id.clone(),
+            sender_id: input.sender_id.clone(),
+            message_type: input.message_type.clone(),
+            status: input.status.clone(),
+            ciphertext: input.ciphertext.clone(),
+            nonce: input.nonce.clone(),
+            encryption_version: input.encryption_version.clone(),
+            metadata_json: input.metadata_json.clone(),
+            created_at: input.created_at.clone(),
+            updated_at: input.updated_at.clone(),
+            delivered_at: input.delivered_at.clone(),
+            read_at: input.read_at.clone(),
+            edited_at: input.edited_at.clone(),
+            recalled_at: input.recalled_at.clone(),
+            local_deleted_at: input.local_deleted_at.clone(),
         }
     }
 
