@@ -9,6 +9,7 @@ import {
 } from '../api/conversations.api';
 import { forwardFile, type FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
+import { upsertCachedConversations, type CachedConversationInput } from '../api/localCache.api';
 import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
 import { isNetworkRequestError } from '../utils/serverHealth';
 import { useNetworkStore } from './network.store';
@@ -121,6 +122,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userId = currentUserId ?? get().currentUserId;
       const conversations = userId ? await enrichConversations(result.conversations) : result.conversations;
       set({ conversations, currentUserId: userId ?? null, isLoadingConversations: false });
+      void cacheConversationSummaries(conversations);
     } catch (error) {
       if (handleNetworkLoadError(error, () => set({ isLoadingConversations: false }))) {
         return;
@@ -909,6 +911,27 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
       new Date(right.lastMessageAt ?? right.updatedAt).getTime() -
       new Date(left.lastMessageAt ?? left.updatedAt).getTime(),
   );
+}
+
+async function cacheConversationSummaries(conversations: Conversation[]): Promise<void> {
+  try {
+    await upsertCachedConversations(conversations.map(toCachedConversationInput));
+  } catch {
+    // Local cache writes are best-effort and must not affect REST-backed chat state.
+  }
+}
+
+function toCachedConversationInput(conversation: Conversation): CachedConversationInput {
+  return {
+    id: conversation.id,
+    conversationType: conversation.type,
+    peerUserId: conversation.peer?.id ?? null,
+    title: conversation.peer?.displayName ?? null,
+    avatarUrl: conversation.peer?.avatarUrl ?? null,
+    lastMessageId: conversation.lastMessage?.id ?? null,
+    lastMessageAt: conversation.lastMessageAt ?? conversation.lastMessage?.createdAt ?? null,
+    updatedAt: conversation.updatedAt,
+  };
 }
 
 async function handleIncomingMessage(

@@ -173,7 +173,8 @@ pub fn run() {
             update_close_to_tray,
             local_cache::init_local_cache,
             local_cache::get_local_cache_status,
-            local_cache::clear_local_cache
+            local_cache::clear_local_cache,
+            local_cache::upsert_cached_conversations
         ])
         .run(tauri::generate_context!())
         .expect("failed to run LanGram client");

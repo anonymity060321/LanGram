@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
@@ -26,6 +26,19 @@ pub struct LocalCacheStatus {
     schema_version: Option<i64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedConversationInput {
+    id: String,
+    conversation_type: String,
+    peer_user_id: Option<String>,
+    title: Option<String>,
+    avatar_url: Option<String>,
+    last_message_id: Option<String>,
+    last_message_at: Option<String>,
+    updated_at: String,
+}
+
 #[tauri::command]
 pub fn init_local_cache(app: AppHandle) -> Result<InitLocalCacheResult, String> {
     let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
@@ -49,6 +62,15 @@ pub fn clear_local_cache(app: AppHandle) -> Result<LocalCacheStatus, String> {
     let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
     clear_local_cache_at_path(&db_path).map_err(|error| error.to_string())?;
     get_status_at_path(&db_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn upsert_cached_conversations(
+    app: AppHandle,
+    conversations: Vec<CachedConversationInput>,
+) -> Result<(), String> {
+    let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
+    upsert_cached_conversations_at_path(&db_path, &conversations).map_err(|error| error.to_string())
 }
 
 fn local_cache_path(app: &AppHandle) -> Result<PathBuf, LocalCacheError> {
@@ -102,6 +124,58 @@ fn clear_local_cache_at_path(db_path: &Path) -> Result<(), LocalCacheError> {
         DELETE FROM local_clear_watermarks;
         ",
     )?;
+    transaction.commit()?;
+
+    Ok(())
+}
+
+fn upsert_cached_conversations_at_path(
+    db_path: &Path,
+    conversations: &[CachedConversationInput],
+) -> Result<(), LocalCacheError> {
+    init_database_at_path(db_path)?;
+
+    let mut connection = Connection::open(db_path)?;
+    enable_foreign_keys(&connection)?;
+    let transaction = connection.transaction()?;
+    {
+        let mut statement = transaction.prepare(
+            "
+            INSERT INTO cached_conversations(
+                id,
+                conversation_type,
+                peer_user_id,
+                title,
+                avatar_url,
+                last_message_id,
+                last_message_at,
+                updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id) DO UPDATE SET
+                conversation_type = excluded.conversation_type,
+                peer_user_id = excluded.peer_user_id,
+                title = excluded.title,
+                avatar_url = excluded.avatar_url,
+                last_message_id = excluded.last_message_id,
+                last_message_at = excluded.last_message_at,
+                updated_at = excluded.updated_at
+            ",
+        )?;
+
+        for conversation in conversations {
+            statement.execute(params![
+                &conversation.id,
+                &conversation.conversation_type,
+                &conversation.peer_user_id,
+                &conversation.title,
+                &conversation.avatar_url,
+                &conversation.last_message_id,
+                &conversation.last_message_at,
+                &conversation.updated_at
+            ])?;
+        }
+    }
     transaction.commit()?;
 
     Ok(())
@@ -307,6 +381,85 @@ mod tests {
     }
 
     #[test]
+    fn cached_conversations_has_no_plaintext_columns() {
+        let db_path = test_db_path("conversation-no-plaintext");
+        init_database_at_path(&db_path).expect("database should initialize");
+
+        let connection = Connection::open(&db_path).expect("database should open");
+        let mut statement = connection
+            .prepare("PRAGMA table_info(cached_conversations)")
+            .expect("table info should prepare");
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("table info should query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("columns should collect");
+
+        assert!(!columns.iter().any(|column| {
+            let normalized = column.to_ascii_lowercase();
+            normalized.contains("plain") || normalized.contains("decrypted")
+        }));
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn upserts_cached_conversations_in_batch() {
+        let db_path = test_db_path("upsert-batch");
+        let conversations = vec![
+            test_cached_conversation("conversation-1", "Alice", "2026-06-07T00:00:00.000Z"),
+            test_cached_conversation("conversation-2", "Bob", "2026-06-07T00:01:00.000Z"),
+        ];
+
+        upsert_cached_conversations_at_path(&db_path, &conversations)
+            .expect("conversations should upsert");
+
+        let connection = Connection::open(&db_path).expect("database should open");
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM cached_conversations", [], |row| {
+                row.get(0)
+            })
+            .expect("conversation count should query");
+
+        assert_eq!(count, 2);
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn upserting_cached_conversation_updates_existing_row() {
+        let db_path = test_db_path("upsert-update");
+        let first = vec![test_cached_conversation(
+            "conversation-1",
+            "Alice",
+            "2026-06-07T00:00:00.000Z",
+        )];
+        let second = vec![test_cached_conversation(
+            "conversation-1",
+            "Alice Updated",
+            "2026-06-07T00:05:00.000Z",
+        )];
+
+        upsert_cached_conversations_at_path(&db_path, &first).expect("first upsert should succeed");
+        upsert_cached_conversations_at_path(&db_path, &second)
+            .expect("second upsert should succeed");
+
+        let connection = Connection::open(&db_path).expect("database should open");
+        let row = connection
+            .query_row(
+                "SELECT title, updated_at FROM cached_conversations WHERE id = ?1",
+                params!["conversation-1"],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("conversation should query");
+
+        assert_eq!(row.0, "Alice Updated");
+        assert_eq!(row.1, "2026-06-07T00:05:00.000Z");
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
     fn clears_cached_rows_without_resetting_schema() {
         let db_path = test_db_path("clear");
         init_database_at_path(&db_path).expect("database should initialize");
@@ -395,6 +548,23 @@ mod tests {
     fn cleanup_test_db(db_path: &Path) {
         if let Some(parent) = db_path.parent() {
             let _ = fs::remove_dir_all(parent);
+        }
+    }
+
+    fn test_cached_conversation(
+        id: &str,
+        title: &str,
+        updated_at: &str,
+    ) -> CachedConversationInput {
+        CachedConversationInput {
+            id: id.to_string(),
+            conversation_type: "DIRECT".to_string(),
+            peer_user_id: Some("user-2".to_string()),
+            title: Some(title.to_string()),
+            avatar_url: Some("https://example.test/avatar.png".to_string()),
+            last_message_id: Some("message-1".to_string()),
+            last_message_at: Some("2026-06-07T00:00:00.000Z".to_string()),
+            updated_at: updated_at.to_string(),
         }
     }
 }
