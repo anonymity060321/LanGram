@@ -9,7 +9,14 @@ import {
 } from '../api/conversations.api';
 import { forwardFile, type FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
-import { upsertCachedConversations, type CachedConversationInput } from '../api/localCache.api';
+import {
+  updateCachedMessageState,
+  upsertCachedConversations,
+  upsertCachedMessages,
+  type CachedConversationInput,
+  type CachedMessageInput,
+  type CachedMessageStatePatchInput,
+} from '../api/localCache.api';
 import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
 import { isNetworkRequestError } from '../utils/serverHealth';
 import { useNetworkStore } from './network.store';
@@ -149,6 +156,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ isLoadingMessages: false });
         return;
       }
+      void cacheEncryptedMessages(result.messages);
 
       const loadedMessages = await Promise.all(
         result.messages.map((message) => toChatMessage(message, conversation, currentUserId)),
@@ -225,6 +233,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (get().selectedConversationId !== conversationId) {
         return false;
       }
+      void cacheEncryptedMessages(result.messages);
 
       const loadedOlderMessages = await Promise.all(
         result.messages.map((message) => toChatMessage(message, conversation, currentUserId)),
@@ -615,6 +624,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     sendRealtimeRecall({ conversationId, messageId });
   },
   deleteLocalMessage: (conversationId, messageId) => {
+    const deletedAt = new Date().toISOString();
+    void cacheMessageStatePatches([
+      buildCachedMessageStatePatch(messageId, {
+        updatedAt: deletedAt,
+        localDeletedAt: deletedAt,
+      }),
+    ]);
     set((state) => ({
       messagesByConversation: {
         ...state.messagesByConversation,
@@ -626,11 +642,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   clearLocalConversation: (conversationId) => {
     const clearedAt = new Date().toISOString();
+    const cachedMessagePatches = (get().messagesByConversation[conversationId] ?? []).map(
+      (message) =>
+        buildCachedMessageStatePatch(message.id, {
+          updatedAt: clearedAt,
+          localDeletedAt: clearedAt,
+        }),
+    );
     const localClearWatermarks = {
       ...get().localClearWatermarks,
       [conversationId]: clearedAt,
     };
     saveLocalClearWatermarks(localClearWatermarks);
+    void cacheMessageStatePatches(cachedMessagePatches);
     set((state) => ({
       localClearWatermarks,
       messagesByConversation: {
@@ -934,6 +958,114 @@ function toCachedConversationInput(conversation: Conversation): CachedConversati
   };
 }
 
+async function cacheEncryptedMessages(messages: EncryptedMessage[]): Promise<void> {
+  if (messages.length === 0) {
+    return;
+  }
+
+  try {
+    await upsertCachedMessages(messages.map(toCachedMessageInput));
+  } catch {
+    // Local cache writes are best-effort and must not affect REST-backed chat state.
+  }
+}
+
+async function cacheRealtimeMessage(payload: MessageNewPayload): Promise<void> {
+  try {
+    await upsertCachedMessages([realtimePayloadToCachedMessageInput(payload)]);
+  } catch {
+    // Local cache writes are best-effort and must not affect realtime chat state.
+  }
+}
+
+async function cacheMessageStatePatches(
+  patches: CachedMessageStatePatchInput[],
+): Promise<void> {
+  if (patches.length === 0) {
+    return;
+  }
+
+  try {
+    await updateCachedMessageState(patches);
+  } catch {
+    // Local cache writes are best-effort and must not affect chat state.
+  }
+}
+
+function toCachedMessageInput(message: EncryptedMessage): CachedMessageInput {
+  return {
+    id: message.id,
+    clientMessageId: null,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    messageType: message.messageType,
+    status: message.status,
+    ciphertext: message.ciphertext,
+    nonce: message.nonce,
+    encryptionVersion: message.encryptionVersion,
+    metadataJson: null,
+    createdAt: message.createdAt,
+    updatedAt: message.updatedAt,
+    deliveredAt: null,
+    readAt: null,
+    editedAt: message.editedAt,
+    recalledAt: message.recalledAt,
+    localDeletedAt: null,
+  };
+}
+
+function realtimePayloadToCachedMessageInput(payload: MessageNewPayload): CachedMessageInput {
+  return {
+    id: payload.messageId,
+    clientMessageId: payload.clientMessageId ?? null,
+    conversationId: payload.conversationId,
+    senderId: payload.senderId,
+    messageType: payload.messageType,
+    status: payload.status,
+    ciphertext: payload.ciphertext,
+    nonce: payload.nonce,
+    encryptionVersion: payload.encryptionVersion,
+    metadataJson: null,
+    createdAt: payload.createdAt,
+    updatedAt: payload.createdAt,
+    deliveredAt: null,
+    readAt: null,
+    editedAt: null,
+    recalledAt: null,
+    localDeletedAt: null,
+  };
+}
+
+function buildCachedMessageStatePatch(
+  id: string,
+  patch: {
+    status?: string;
+    ciphertext?: string;
+    nonce?: string;
+    encryptionVersion?: string;
+    updatedAt: string;
+    deliveredAt?: string;
+    readAt?: string;
+    editedAt?: string;
+    recalledAt?: string;
+    localDeletedAt?: string;
+  },
+): CachedMessageStatePatchInput {
+  return {
+    id,
+    status: patch.status ?? null,
+    ciphertext: patch.ciphertext ?? null,
+    nonce: patch.nonce ?? null,
+    encryptionVersion: patch.encryptionVersion ?? null,
+    updatedAt: patch.updatedAt,
+    deliveredAt: patch.deliveredAt ?? null,
+    readAt: patch.readAt ?? null,
+    editedAt: patch.editedAt ?? null,
+    recalledAt: patch.recalledAt ?? null,
+    localDeletedAt: patch.localDeletedAt ?? null,
+  };
+}
+
 async function handleIncomingMessage(
   payload: MessageNewPayload,
   get: () => ChatState,
@@ -942,6 +1074,7 @@ async function handleIncomingMessage(
   const state = get();
   const conversation = state.conversations.find((item) => item.id === payload.conversationId);
   if (!conversation) {
+    void cacheRealtimeMessage(payload);
     await state.loadConversations(state.currentUserId ?? undefined);
     return;
   }
@@ -968,6 +1101,7 @@ async function handleIncomingMessage(
   if (isMessageClearedLocally(payload.conversationId, message.createdAt, state.localClearWatermarks)) {
     return;
   }
+  void cacheRealtimeMessage(payload);
 
   set((currentState: ChatState) => ({
     messagesByConversation: upsertMessage(
@@ -995,6 +1129,13 @@ function handleDelivered(
   set: ChatSet,
 ): void {
   updateMessageStatus(payload.conversationId, payload.messageId, 'delivered', set);
+  void cacheMessageStatePatches([
+    buildCachedMessageStatePatch(payload.messageId, {
+      status: 'DELIVERED',
+      updatedAt: payload.deliveredAt,
+      deliveredAt: payload.deliveredAt,
+    }),
+  ]);
 }
 
 function handleRead(
@@ -1014,12 +1155,26 @@ function handleRead(
       ),
     };
   });
+  void cacheMessageStatePatches([
+    buildCachedMessageStatePatch(payload.messageId, {
+      status: 'READ',
+      updatedAt: payload.readAt,
+      readAt: payload.readAt,
+    }),
+  ]);
 }
 
 function handleRecalled(
   payload: MessageRecalledPayload,
   set: ChatSet,
 ): void {
+  void cacheMessageStatePatches([
+    buildCachedMessageStatePatch(payload.messageId, {
+      status: 'RECALLED',
+      updatedAt: payload.recalledAt,
+      recalledAt: payload.recalledAt,
+    }),
+  ]);
   set((state: ChatState) => ({
     messagesByConversation: {
       ...state.messagesByConversation,
@@ -1066,6 +1221,15 @@ async function handleEdited(
   }
 
   const plaintext = await decryptSafely(payload.ciphertext, payload.nonce, conversation);
+  void cacheMessageStatePatches([
+    buildCachedMessageStatePatch(payload.messageId, {
+      ciphertext: payload.ciphertext,
+      nonce: payload.nonce,
+      encryptionVersion: payload.encryptionVersion,
+      updatedAt: payload.editedAt,
+      editedAt: payload.editedAt,
+    }),
+  ]);
   set((currentState: ChatState) => ({
     messagesByConversation: {
       ...currentState.messagesByConversation,
