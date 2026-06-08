@@ -88,6 +88,8 @@
   "network.unavailableSend": "当前网络不可用，请稍后重试",
   "network.reconnectingTitle": "重连中",
   "chat.loading": "加载中",
+  "chat.showingLocalCache": "当前显示本地缓存，会在网络恢复后更新",
+  "chat.showingCachedMessages": "当前显示本地缓存消息，网络恢复后会更新",
   "chat.today": "今天",
   "chat.noConversations": "暂无会话，可从右侧好友开始单聊。",
   "chat.noMessages": "暂无消息",

@@ -10,14 +10,18 @@ import {
 import { forwardFile, type FileMetadataResponse } from '../api/files.api';
 import { getApiBaseUrl } from '../api/http';
 import {
+  listCachedConversations,
+  listCachedMessages,
   updateCachedMessageState,
   upsertCachedConversations,
   upsertCachedMessages,
   type CachedConversationInput,
+  type CachedConversationRecord,
   type CachedMessageInput,
+  type CachedMessageRecord,
   type CachedMessageStatePatchInput,
 } from '../api/localCache.api';
-import { decryptMessage, encryptMessage } from '../crypto/messageCrypto';
+import { decryptMessage, encryptMessage, MESSAGE_ENCRYPTION_VERSION } from '../crypto/messageCrypto';
 import { isNetworkRequestError } from '../utils/serverHealth';
 import { useNetworkStore } from './network.store';
 import {
@@ -69,12 +73,14 @@ interface ChatState {
   currentUserId: string | null;
   messagesByConversation: Record<string, ChatMessage[]>;
   messagePaginationByConversation: Record<string, MessagePaginationState>;
+  isUsingCachedMessagesByConversation: Record<string, boolean>;
   localClearWatermarks: Record<string, string>;
   latestIncomingMessage: ChatMessage | null;
   presenceByUserId: Record<string, PresenceUpdatePayload>;
   error: string | null;
   searchQuery: string;
   isLoadingConversations: boolean;
+  isUsingCachedConversations: boolean;
   isLoadingMessages: boolean;
   loadConversations: (currentUserId?: string) => Promise<void>;
   selectConversation: (conversationId: string, currentUserId: string) => Promise<void>;
@@ -115,12 +121,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentUserId: null,
   messagesByConversation: {},
   messagePaginationByConversation: {},
+  isUsingCachedMessagesByConversation: {},
   localClearWatermarks: loadLocalClearWatermarks(),
   latestIncomingMessage: null,
   presenceByUserId: {},
   error: null,
   searchQuery: '',
   isLoadingConversations: false,
+  isUsingCachedConversations: false,
   isLoadingMessages: false,
   loadConversations: async (currentUserId) => {
     set({ isLoadingConversations: true, error: null });
@@ -128,10 +136,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const result = await listConversations();
       const userId = currentUserId ?? get().currentUserId;
       const conversations = userId ? await enrichConversations(result.conversations) : result.conversations;
-      set({ conversations, currentUserId: userId ?? null, isLoadingConversations: false });
+      set({
+        conversations,
+        currentUserId: userId ?? null,
+        isLoadingConversations: false,
+        isUsingCachedConversations: false,
+      });
       void cacheConversationSummaries(conversations);
     } catch (error) {
-      if (handleNetworkLoadError(error, () => set({ isLoadingConversations: false }))) {
+      if (isNetworkRequestError(error)) {
+        useNetworkStore.getState().setStatus('reconnecting');
+        const userId = currentUserId ?? get().currentUserId;
+        const cachedConversations = userId ? await loadCachedConversationSnapshot(userId) : [];
+        if (cachedConversations.length > 0) {
+          set({
+            conversations: cachedConversations,
+            currentUserId: userId ?? null,
+            isLoadingConversations: false,
+            isUsingCachedConversations: true,
+          });
+          return;
+        }
+
+        set({ isLoadingConversations: false });
         return;
       }
 
@@ -185,6 +212,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               isLoadingOlder: false,
             },
           },
+          isUsingCachedMessagesByConversation: {
+            ...state.isUsingCachedMessagesByConversation,
+            [conversationId]: false,
+          },
           conversations: updateConversationFromMessages(state.conversations, conversationId, mergedMessages),
           isLoadingMessages: false,
         };
@@ -195,7 +226,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
         get().markRead(conversationId, lastIncoming.id);
       }
     } catch (error) {
-      if (handleNetworkLoadError(error, () => set({ isLoadingMessages: false }))) {
+      if (isNetworkRequestError(error)) {
+        useNetworkStore.getState().setStatus('reconnecting');
+        const conversation = get().conversations.find((item) => item.id === conversationId);
+        const cachedMessages = conversation
+          ? await loadCachedMessageSnapshot(
+              conversationId,
+              conversation,
+              currentUserId,
+              get().localClearWatermarks,
+            )
+          : [];
+        if (cachedMessages.length > 0 && get().selectedConversationId === conversationId) {
+          set((state) => {
+            const mergedMessages = mergeLoadedMessagesWithPendingLocal(
+              cachedMessages,
+              state.messagesByConversation[conversationId] ?? [],
+              conversationId,
+              state.localClearWatermarks,
+            );
+
+            return {
+              messagesByConversation: {
+                ...state.messagesByConversation,
+                [conversationId]: mergedMessages,
+              },
+              messagePaginationByConversation: {
+                ...state.messagePaginationByConversation,
+                [conversationId]: {
+                  hasMore: false,
+                  nextCursor: null,
+                  isLoadingOlder: false,
+                },
+              },
+              isUsingCachedMessagesByConversation: {
+                ...state.isUsingCachedMessagesByConversation,
+                [conversationId]: true,
+              },
+              conversations: updateConversationFromMessages(state.conversations, conversationId, mergedMessages),
+              isLoadingMessages: false,
+            };
+          });
+          return;
+        }
+
+        set({ isLoadingMessages: false });
         return;
       }
 
@@ -665,6 +740,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.messagePaginationByConversation,
         [conversationId]: { hasMore: false, nextCursor: null, isLoadingOlder: false },
       },
+      isUsingCachedMessagesByConversation: {
+        ...state.isUsingCachedMessagesByConversation,
+        [conversationId]: false,
+      },
       conversations: clearConversationUnread(state.conversations, conversationId),
     }));
   },
@@ -808,6 +887,69 @@ async function toChatMessage(
   };
 }
 
+async function loadCachedMessageSnapshot(
+  conversationId: string,
+  conversation: Conversation,
+  currentUserId: string,
+  localClearWatermarks: Record<string, string>,
+): Promise<ChatMessage[]> {
+  try {
+    const records = await listCachedMessages({ conversationId, limit: MESSAGE_PAGE_SIZE });
+    const messages = await Promise.all(
+      records.map((record) => cachedMessageToChatMessage(record, conversation, currentUserId)),
+    );
+
+    return filterMessagesAfterLocalClear(
+      conversationId,
+      messages.filter((message): message is ChatMessage => Boolean(message)),
+      localClearWatermarks,
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function cachedMessageToChatMessage(
+  record: CachedMessageRecord,
+  conversation: Conversation,
+  currentUserId: string,
+): Promise<ChatMessage | null> {
+  if (record.localDeletedAt || record.messageType !== 'TEXT') {
+    return null;
+  }
+
+  const isRecalled = Boolean(record.recalledAt) || record.status === 'RECALLED';
+  if (
+    !isRecalled &&
+    (!record.ciphertext ||
+      !record.nonce ||
+      record.encryptionVersion !== MESSAGE_ENCRYPTION_VERSION)
+  ) {
+    return null;
+  }
+  const ciphertext = record.ciphertext ?? '';
+  const nonce = record.nonce ?? '';
+  const status = toCachedLocalStatus(record);
+  if (!status) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    clientMessageId: record.clientMessageId ?? undefined,
+    conversationId: record.conversationId,
+    senderId: record.senderId,
+    messageType: 'TEXT',
+    plaintext: isRecalled ? '' : await decryptSafely(ciphertext, nonce, conversation),
+    file: null,
+    status,
+    createdAt: record.createdAt,
+    editedAt: record.editedAt,
+    recalledAt: record.recalledAt,
+    isOwn: record.senderId === currentUserId,
+  };
+}
+
 async function enrichConversations(conversations: Conversation[]): Promise<Conversation[]> {
   const enriched = await Promise.all(
     conversations.map(async (conversation) => {
@@ -935,6 +1077,75 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
       new Date(right.lastMessageAt ?? right.updatedAt).getTime() -
       new Date(left.lastMessageAt ?? left.updatedAt).getTime(),
   );
+}
+
+async function loadCachedConversationSnapshot(currentUserId: string): Promise<Conversation[]> {
+  try {
+    const records = await listCachedConversations();
+    return sortConversations(
+      records
+        .map((record) => cachedConversationToConversation(record, currentUserId))
+        .filter((conversation): conversation is Conversation => Boolean(conversation)),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function cachedConversationToConversation(
+  record: CachedConversationRecord,
+  currentUserId: string,
+): Conversation | null {
+  if (record.conversationType !== 'DIRECT' || !record.peerUserId || !currentUserId) {
+    return null;
+  }
+
+  const peer = buildCachedConversationUser({
+    id: record.peerUserId,
+    displayName: record.title?.trim() || record.peerUserId,
+    avatarUrl: record.avatarUrl,
+  });
+  const currentUser = buildCachedConversationUser({
+    id: currentUserId,
+    displayName: currentUserId,
+    avatarUrl: null,
+  });
+  const createdAt = record.lastMessageAt ?? record.updatedAt;
+
+  return {
+    id: record.id,
+    type: 'DIRECT',
+    peer,
+    members: [currentUser, peer],
+    lastMessage: null,
+    lastMessageAt: record.lastMessageAt,
+    unreadCount: 0,
+    lastMessagePlaintext: null,
+    lastMessageDecryptionFailed: false,
+    createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function buildCachedConversationUser({
+  id,
+  displayName,
+  avatarUrl,
+}: {
+  id: string;
+  displayName: string;
+  avatarUrl: string | null;
+}): NonNullable<Conversation['peer']> {
+  return {
+    id,
+    email: null,
+    displayName,
+    statusMessage: null,
+    avatarUrl,
+    accountType: 'cached',
+    isOnline: false,
+    lastSeenAt: null,
+  };
 }
 
 async function cacheConversationSummaries(conversations: Conversation[]): Promise<void> {
@@ -1276,16 +1487,6 @@ function handleRealtimeError(
   set({ error: payload.message });
 }
 
-function handleNetworkLoadError(error: unknown, cleanup: () => void): boolean {
-  if (!isNetworkRequestError(error)) {
-    return false;
-  }
-
-  useNetworkStore.getState().setStatus('reconnecting');
-  cleanup();
-  return true;
-}
-
 async function decryptSafely(
   ciphertext: string,
   nonce: string,
@@ -1307,6 +1508,23 @@ function toLocalStatus(status: EncryptedMessage['status']): LocalMessageStatus {
   }
   if (status === 'DELIVERED') {
     return 'delivered';
+  }
+
+  return 'sent';
+}
+
+function toCachedLocalStatus(record: CachedMessageRecord): LocalMessageStatus | null {
+  if (record.recalledAt || record.status === 'RECALLED') {
+    return 'recalled';
+  }
+  if (record.readAt || record.status === 'READ') {
+    return 'read';
+  }
+  if (record.deliveredAt || record.status === 'DELIVERED') {
+    return 'delivered';
+  }
+  if (record.status !== 'SENT') {
+    return null;
   }
 
   return 'sent';

@@ -63,6 +63,10 @@ export function MainLayout(): JSX.Element {
   const networkLastChangedAt = useNetworkStore((state) => state.lastChangedAt);
   const isNetworkOnline = useNetworkStore((state) => state.online);
   const isLoadingConversations = useChatStore((state) => state.isLoadingConversations);
+  const isUsingCachedConversations = useChatStore((state) => state.isUsingCachedConversations);
+  const isUsingCachedMessagesByConversation = useChatStore(
+    (state) => state.isUsingCachedMessagesByConversation,
+  );
   const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
   const selectConversation = useChatStore((state) => state.selectConversation);
@@ -116,6 +120,9 @@ export function MainLayout(): JSX.Element {
   const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
+  const isUsingCachedMessages = selectedConversationId
+    ? isUsingCachedMessagesByConversation[selectedConversationId] ?? false
+    : false;
   const profileUser = selectedConversation?.peer ?? user ?? null;
   const profilePresence = !isNetworkOnline
     ? t('presence.offline')
@@ -974,6 +981,9 @@ export function MainLayout(): JSX.Element {
         </div>
         <section className="sidebar-section">
           {isLoadingConversations ? <p>{t('chat.loading')}</p> : null}
+          {isUsingCachedConversations ? (
+            <p className="conversation-cache-notice">{t('chat.showingLocalCache')}</p>
+          ) : null}
           {!isLoadingConversations && displayedConversations.length === 0 ? (
             <p>{t('chat.noConversations')}</p>
           ) : null}
@@ -1106,6 +1116,9 @@ export function MainLayout(): JSX.Element {
               ) : null}
             </div>
             <div className="chat-message-area">
+              {isUsingCachedMessages ? (
+                <p className="chat-cache-notice">{t('chat.showingCachedMessages')}</p>
+              ) : null}
               <MessageList
                 conversationId={selectedConversation.id}
                 messages={messages}

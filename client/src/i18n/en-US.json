@@ -88,6 +88,8 @@
   "network.unavailableSend": "Network unavailable. Please try again later.",
   "network.reconnectingTitle": "Reconnecting",
   "chat.loading": "Loading",
+  "chat.showingLocalCache": "Showing local cache. It will update when the network recovers.",
+  "chat.showingCachedMessages": "Showing cached messages. They will update when the network recovers.",
   "chat.today": "Today",
   "chat.noConversations": "No conversations yet. Start a direct chat from the friends panel.",
   "chat.noMessages": "No messages yet",
