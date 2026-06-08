@@ -23,6 +23,17 @@ export interface CachedConversationInput {
   updatedAt: string;
 }
 
+export interface CachedConversationRecord {
+  id: string;
+  conversationType: string;
+  peerUserId: string | null;
+  title: string | null;
+  avatarUrl: string | null;
+  lastMessageId: string | null;
+  lastMessageAt: string | null;
+  updatedAt: string;
+}
+
 export function initLocalCache(): Promise<InitLocalCacheResult> {
   return invoke<InitLocalCacheResult>('init_local_cache');
 }
@@ -37,4 +48,8 @@ export function clearLocalCache(): Promise<LocalCacheStatus> {
 
 export function upsertCachedConversations(conversations: CachedConversationInput[]): Promise<void> {
   return invoke<void>('upsert_cached_conversations', { conversations });
+}
+
+export function listCachedConversations(): Promise<CachedConversationRecord[]> {
+  return invoke<CachedConversationRecord[]>('list_cached_conversations');
 }

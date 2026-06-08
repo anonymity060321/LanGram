@@ -39,6 +39,19 @@ pub struct CachedConversationInput {
     updated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedConversationRecord {
+    id: String,
+    conversation_type: String,
+    peer_user_id: Option<String>,
+    title: Option<String>,
+    avatar_url: Option<String>,
+    last_message_id: Option<String>,
+    last_message_at: Option<String>,
+    updated_at: String,
+}
+
 #[tauri::command]
 pub fn init_local_cache(app: AppHandle) -> Result<InitLocalCacheResult, String> {
     let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
@@ -71,6 +84,12 @@ pub fn upsert_cached_conversations(
 ) -> Result<(), String> {
     let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
     upsert_cached_conversations_at_path(&db_path, &conversations).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_cached_conversations(app: AppHandle) -> Result<Vec<CachedConversationRecord>, String> {
+    let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
+    list_cached_conversations_at_path(&db_path).map_err(|error| error.to_string())
 }
 
 fn local_cache_path(app: &AppHandle) -> Result<PathBuf, LocalCacheError> {
@@ -179,6 +198,51 @@ fn upsert_cached_conversations_at_path(
     transaction.commit()?;
 
     Ok(())
+}
+
+fn list_cached_conversations_at_path(
+    db_path: &Path,
+) -> Result<Vec<CachedConversationRecord>, LocalCacheError> {
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    init_database_at_path(db_path)?;
+
+    let connection = Connection::open(db_path)?;
+    enable_foreign_keys(&connection)?;
+    let mut statement = connection.prepare(
+        "
+        SELECT
+            id,
+            conversation_type,
+            peer_user_id,
+            title,
+            avatar_url,
+            last_message_id,
+            last_message_at,
+            updated_at
+        FROM cached_conversations
+        ORDER BY updated_at DESC
+        ",
+    )?;
+
+    let conversations = statement
+        .query_map([], |row| {
+            Ok(CachedConversationRecord {
+                id: row.get(0)?,
+                conversation_type: row.get(1)?,
+                peer_user_id: row.get(2)?,
+                title: row.get(3)?,
+                avatar_url: row.get(4)?,
+                last_message_id: row.get(5)?,
+                last_message_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(conversations)
 }
 
 fn enable_foreign_keys(connection: &Connection) -> Result<(), LocalCacheError> {
@@ -404,6 +468,46 @@ mod tests {
     }
 
     #[test]
+    fn list_cached_conversations_returns_empty_when_database_is_missing() {
+        let db_path = test_db_path("list-missing");
+
+        let conversations =
+            list_cached_conversations_at_path(&db_path).expect("missing database should list");
+
+        assert!(conversations.is_empty());
+        assert!(!db_path.exists());
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_cached_conversations_returns_upserted_rows_ordered_by_updated_at_desc() {
+        let db_path = test_db_path("list-upserted");
+        let older =
+            test_cached_conversation("conversation-older", "Alice", "2026-06-07T00:00:00.000Z");
+        let newer =
+            test_cached_conversation("conversation-newer", "Bob", "2026-06-07T00:01:00.000Z");
+
+        upsert_cached_conversations_at_path(&db_path, &[older.clone(), newer.clone()])
+            .expect("conversations should upsert");
+
+        let conversations =
+            list_cached_conversations_at_path(&db_path).expect("conversations should list");
+
+        assert_eq!(conversations.len(), 2);
+        assert_eq!(
+            conversations[0],
+            expected_cached_conversation_record(&newer)
+        );
+        assert_eq!(
+            conversations[1],
+            expected_cached_conversation_record(&older)
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
     fn upserts_cached_conversations_in_batch() {
         let db_path = test_db_path("upsert-batch");
         let conversations = vec![
@@ -565,6 +669,21 @@ mod tests {
             last_message_id: Some("message-1".to_string()),
             last_message_at: Some("2026-06-07T00:00:00.000Z".to_string()),
             updated_at: updated_at.to_string(),
+        }
+    }
+
+    fn expected_cached_conversation_record(
+        input: &CachedConversationInput,
+    ) -> CachedConversationRecord {
+        CachedConversationRecord {
+            id: input.id.clone(),
+            conversation_type: input.conversation_type.clone(),
+            peer_user_id: input.peer_user_id.clone(),
+            title: input.title.clone(),
+            avatar_url: input.avatar_url.clone(),
+            last_message_id: input.last_message_id.clone(),
+            last_message_at: input.last_message_at.clone(),
+            updated_at: input.updated_at.clone(),
         }
     }
 }
