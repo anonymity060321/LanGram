@@ -574,7 +574,10 @@ export function SettingsPage(): JSX.Element {
                       </div>
                       <div>
                         <dt>{t('settings.localCacheDbPath')}</dt>
-                        <dd className="settings-local-cache-path">
+                        <dd
+                          className="settings-local-cache-path"
+                          title={localCacheStatus?.dbPath ?? undefined}
+                        >
                           {localCacheStatus?.dbPath ?? '-'}
                         </dd>
                       </div>

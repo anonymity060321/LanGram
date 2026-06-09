@@ -1103,8 +1103,9 @@ textarea,
 
 .settings-local-cache-path {
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-account-badge {
@@ -1971,8 +1972,9 @@ textarea,
 }
 
 .friend-row.is-selected {
-  border-color: #93c5fd;
+  border-color: transparent;
   background: #eff6ff;
+  box-shadow: none;
 }
 
 .friend-row-button {
@@ -4419,8 +4421,9 @@ textarea,
 }
 
 :root[data-theme='dark'] .friend-row.is-selected {
-  border-color: #60a5fa;
+  border-color: transparent;
   background: #172554;
+  box-shadow: none;
 }
 
 :root[data-theme='dark'] .friend-row.is-selected .friend-summary-name {
@@ -4557,7 +4560,7 @@ textarea,
 :root[data-theme='dark'] .conversation-item.is-active,
 :root[data-theme='dark'] .friend-start-button:hover,
 :root[data-theme='dark'] .app-nav-menu-item:hover {
-  border-color: #3b82f6;
+  border-color: transparent;
   background: #1e293b;
 }
 
@@ -5344,6 +5347,7 @@ select:focus {
 .conversation-item.is-active {
   border-color: transparent;
   background: var(--color-interactive-active);
+  box-shadow: none;
 }
 
 .conversation-item-header strong {
@@ -5689,6 +5693,7 @@ select:focus {
 
 :root[data-theme='dark'] .app-nav-link.is-active,
 :root[data-theme='dark'] .conversation-item.is-active {
+  border-color: transparent;
   background: var(--color-interactive-active);
 }
 
@@ -5773,6 +5778,491 @@ select:focus {
     grid-template-columns: 1fr;
     gap: 12px;
     overflow: hidden;
+  }
+}
+
+/* Phase 8.19.4: contacts-only Desktop v2 polish. */
+.main-layout--contacts .friends-main-layout {
+  grid-template-columns: minmax(264px, 296px) minmax(0, 1fr);
+  gap: 6px;
+  overflow: visible;
+}
+
+.main-layout--contacts .friends-conversation-panel,
+.main-layout--contacts .friends-detail-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.main-layout--contacts .friends-conversation-panel {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  z-index: 5;
+  overflow: visible;
+}
+
+.main-layout--contacts .friends-list-header {
+  min-height: 56px;
+  padding: 0 14px;
+  border-bottom-color: var(--color-border-muted);
+}
+
+.main-layout--contacts .friends-list-header h1 {
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-list-header a {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.main-layout--contacts .friends-search-row {
+  position: relative;
+  z-index: 20;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 7px;
+  border-bottom-color: var(--color-border-muted);
+  padding: 10px 10px 8px;
+  overflow: visible;
+}
+
+.main-layout--contacts .friends-search-field input {
+  height: 32px;
+  border-color: var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-panel-muted);
+  color: var(--color-text);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.main-layout--contacts .friends-search-field input:focus {
+  border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
+  background: var(--color-bg-elevated);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+
+.main-layout--contacts .friends-add-button {
+  width: 34px;
+  height: 32px;
+  border-color: var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-muted);
+}
+
+.main-layout--contacts .friends-add-button img {
+  width: 17px;
+  height: 17px;
+  opacity: 0.68;
+}
+
+.main-layout--contacts .friends-add-button:hover,
+.main-layout--contacts .friends-add-button[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+  background: var(--color-interactive-hover);
+}
+
+.main-layout--contacts .friends-add-button:hover img,
+.main-layout--contacts .friends-add-button[aria-expanded='true'] img {
+  opacity: 0.92;
+}
+
+.main-layout--contacts .friends-add-menu {
+  width: 34px;
+  height: 32px;
+}
+
+.main-layout--contacts .friends-add-popover {
+  top: calc(100% + 7px);
+  right: auto;
+  left: 0;
+  min-width: 140px;
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-popover);
+  padding: 5px;
+}
+
+.main-layout--contacts .friends-add-popover button {
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.main-layout--contacts .friends-add-popover button:hover {
+  background: var(--color-interactive-hover);
+}
+
+.main-layout--contacts .friends-nav-entry {
+  min-height: 38px;
+  border-bottom-color: var(--color-border-muted);
+  color: var(--color-text);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.main-layout--contacts .friends-nav-entry:hover {
+  background: var(--color-interactive-hover);
+}
+
+.main-layout--contacts .friends-nav-entry.is-active {
+  background: var(--color-interactive-active);
+  color: var(--color-text);
+}
+
+.main-layout--contacts .friends-nav-entry strong:first-child {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-nav-entry .friends-nav-badge {
+  min-width: 21px;
+  height: 19px;
+  background: var(--color-bg-panel-muted);
+  color: var(--color-text-muted);
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-nav-entry .friends-nav-badge--alert {
+  min-width: 18px;
+  height: 18px;
+  background: #dc2626;
+  color: #ffffff;
+  padding: 0 6px;
+}
+
+.main-layout--contacts .friends-list-scroll {
+  padding: 8px 7px 10px;
+  overflow-y: auto;
+}
+
+.main-layout--contacts .request-list {
+  gap: 3px;
+}
+
+.main-layout--contacts .friend-row {
+  min-height: 58px;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  padding: 7px 9px;
+  box-shadow: none;
+}
+
+.main-layout--contacts .friends-conversation-panel .friend-row:hover {
+  border-color: transparent;
+  background: var(--color-interactive-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.main-layout--contacts .friend-row.is-selected {
+  border-color: transparent;
+  background: var(--color-interactive-active);
+  box-shadow: none;
+}
+
+.main-layout--contacts .friend-summary-name {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friend-summary-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.main-layout--contacts .friend-presence-line,
+.main-layout--contacts .friend-profile-presence {
+  color: color-mix(in srgb, var(--color-success) 82%, var(--color-text-muted));
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.main-layout--contacts .friends-detail-panel {
+  padding: 16px;
+  background: var(--color-bg-panel);
+}
+
+.main-layout--contacts .friends-detail-empty {
+  gap: 7px;
+  color: var(--color-text-muted);
+  padding: 28px;
+}
+
+.main-layout--contacts .friends-empty-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel-muted);
+  color: var(--color-text-subtle);
+}
+
+.main-layout--contacts .friends-empty-icon img {
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: contain;
+  opacity: 0.68;
+}
+
+.main-layout--contacts .friends-detail-empty h2 {
+  margin: 4px 0 0;
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-detail-empty p {
+  max-width: 300px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.main-layout--contacts .friends-detail-panel .friend-profile-card {
+  align-content: center;
+  gap: 9px;
+  padding: 24px;
+}
+
+.main-layout--contacts .friend-profile-card h2 {
+  color: var(--color-text);
+  font-size: 20px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-detail-panel .friend-profile-card dl {
+  width: min(100%, 520px);
+  margin-top: 14px;
+  border-color: var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel-muted);
+}
+
+.main-layout--contacts .friends-detail-panel .friend-profile-card dl > div {
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px 14px;
+}
+
+.main-layout--contacts .friends-detail-panel .friend-profile-card dl > div + div {
+  border-top-color: var(--color-border-muted);
+}
+
+.main-layout--contacts .friend-profile-card dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.main-layout--contacts .friend-profile-card dd {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.main-layout--contacts .friend-profile-actions {
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.main-layout--contacts .friend-profile-actions .primary-button,
+.main-layout--contacts .friend-profile-actions .secondary-button {
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.main-layout--contacts .friends-add-page {
+  place-items: center;
+  padding: 10px;
+}
+
+.main-layout--contacts .friends-add-section {
+  width: min(100%, 760px);
+  grid-template-columns: repeat(2, minmax(250px, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+
+.main-layout--contacts .friends-add-section--has-code {
+  align-items: stretch;
+}
+
+.main-layout--contacts .friends-add-card {
+  align-self: start;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  gap: 12px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel-muted);
+  padding: 16px;
+  box-shadow: none;
+}
+
+.main-layout--contacts .friends-add-section--has-code .friends-add-card {
+  align-self: stretch;
+}
+
+.main-layout--contacts .friends-add-card h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-generate-code-button,
+.main-layout--contacts .friends-add-card .primary-button {
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  border-radius: var(--radius-sm);
+}
+
+.main-layout--contacts .friends-generate-code-button {
+  width: auto;
+  min-width: 132px;
+}
+
+.main-layout--contacts .friends-add-card input {
+  height: 38px;
+  min-height: 38px;
+  border-color: var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+}
+
+.main-layout--contacts .pairing-code-box {
+  margin-top: 2px;
+  gap: 5px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  padding: 13px;
+}
+
+.main-layout--contacts .pairing-code-box strong {
+  color: var(--color-text);
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.main-layout--contacts .pairing-code-box span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.main-layout--contacts .friends-notification-page {
+  min-width: 0;
+}
+
+.main-layout--contacts .friends-page-header {
+  min-height: 54px;
+  border-bottom-color: var(--color-border-muted);
+  padding: 0 2px 12px;
+}
+
+.main-layout--contacts .friends-page-header h2 {
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.main-layout--contacts .friends-page-header span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.main-layout--contacts .friends-notification-body {
+  min-width: 0;
+  padding-top: 12px;
+}
+
+.main-layout--contacts .friends-notification-empty {
+  gap: 9px;
+  color: var(--color-text-muted);
+}
+
+.main-layout--contacts .friends-notification-empty p {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.main-layout--contacts .friends-notification-list {
+  display: grid;
+  gap: 8px;
+}
+
+.main-layout--contacts .friends-notification-row {
+  border-color: var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel-muted);
+  padding: 10px;
+}
+
+:root[data-theme='dark'] .main-layout--contacts .friends-conversation-panel,
+:root[data-theme='dark'] .main-layout--contacts .friends-detail-panel {
+  border-color: var(--color-border);
+  background: var(--color-bg-panel);
+}
+
+:root[data-theme='dark'] .main-layout--contacts .friends-search-field input,
+:root[data-theme='dark'] .main-layout--contacts .friends-add-card,
+:root[data-theme='dark'] .main-layout--contacts .friends-detail-panel .friend-profile-card dl,
+:root[data-theme='dark'] .main-layout--contacts .friends-notification-row {
+  border-color: var(--color-border);
+  background: var(--color-bg-panel-muted);
+}
+
+:root[data-theme='dark'] .main-layout--contacts .friends-add-button,
+:root[data-theme='dark'] .main-layout--contacts .friends-add-popover,
+:root[data-theme='dark'] .main-layout--contacts .pairing-code-box,
+:root[data-theme='dark'] .main-layout--contacts .friends-empty-icon {
+  border-color: var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+:root[data-theme='dark'] .main-layout--contacts .friends-empty-icon img {
+  filter: invert(83%) sepia(13%) saturate(502%) hue-rotate(178deg) brightness(89%) contrast(88%);
+  opacity: 0.72;
+}
+
+:root[data-theme='dark'] .main-layout--contacts .friends-nav-entry:hover,
+:root[data-theme='dark'] .main-layout--contacts .friends-add-popover button:hover,
+:root[data-theme='dark'] .main-layout--contacts .friends-conversation-panel .friend-row:hover {
+  background: var(--color-interactive-hover);
+}
+
+:root[data-theme='dark'] .main-layout--contacts .friends-nav-entry.is-active,
+:root[data-theme='dark'] .main-layout--contacts .friend-row.is-selected {
+  background: var(--color-interactive-active);
+}
+
+@media (max-width: 720px) {
+  .main-layout--contacts .friends-main-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .main-layout--contacts .friends-add-section {
+    grid-template-columns: 1fr;
   }
 }
 

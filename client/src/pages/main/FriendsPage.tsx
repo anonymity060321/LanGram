@@ -447,6 +447,9 @@ function FriendListSection({
 function ContactsEmptyState({ t }: { t: ReturnType<typeof useI18n>['t'] }): JSX.Element {
   return (
     <section className="friends-detail-empty">
+      <span className="friends-empty-icon" aria-hidden="true">
+        <img src="/vector_icon/contact-round.svg" alt="" />
+      </span>
       <h2>{t('friends.profileTitle')}</h2>
       <p>{t('friends.noProfileSelected')}</p>
     </section>
@@ -535,7 +538,11 @@ function AddFriendSection({
 }): JSX.Element {
   return (
     <section className="friends-add-page">
-      <div className="friends-add-section">
+      <div
+        className={`friends-add-section ${
+          pairingCode ? 'friends-add-section--has-code' : ''
+        }`.trim()}
+      >
         <div className="friends-panel friends-add-card">
           <h2>{t('friends.generateTitle')}</h2>
           <button
@@ -619,7 +626,9 @@ function FriendRequestsSection({
       >
         {incoming.length === 0 && outgoing.length === 0 ? (
           <div className="friends-notification-empty">
-            <span aria-hidden="true">!</span>
+            <span className="friends-empty-icon" aria-hidden="true">
+              <img src="/vector_icon/bell.svg" alt="" />
+            </span>
             <p>{t('friends.noRequests')}</p>
           </div>
         ) : (
