@@ -6726,14 +6726,11 @@ select:focus {
 }
 
 .auth-panel .auth-field {
+  display: grid;
   gap: 7px;
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 680;
-}
-
-.auth-panel .auth-field {
-  display: grid;
 }
 
 .auth-field-label {
@@ -6891,23 +6888,23 @@ select:focus {
   color: var(--color-primary);
 }
 
-.password-input-wrap input {
+.auth-panel .password-input-wrap input {
   padding-right: 42px;
 }
 
-.password-input-wrap input[type='password']::-ms-reveal,
-.password-input-wrap input[type='password']::-ms-clear {
+.auth-panel .password-input-wrap input[type='password']::-ms-reveal,
+.auth-panel .password-input-wrap input[type='password']::-ms-clear {
   display: none;
 }
 
-.password-input-wrap input[type='password']::-webkit-credentials-auto-fill-button,
-.password-input-wrap input[type='password']::-webkit-contacts-auto-fill-button {
+.auth-panel .password-input-wrap input[type='password']::-webkit-credentials-auto-fill-button,
+.auth-panel .password-input-wrap input[type='password']::-webkit-contacts-auto-fill-button {
   display: none !important;
   pointer-events: none;
   visibility: hidden;
 }
 
-.password-visibility-button {
+.auth-panel .password-visibility-button {
   right: 5px;
   width: 30px;
   height: 30px;
@@ -6915,17 +6912,17 @@ select:focus {
   color: var(--color-text-muted);
 }
 
-.password-visibility-button:hover {
+.auth-panel .password-visibility-button:hover {
   background: var(--color-interactive-hover);
   color: var(--color-text);
 }
 
-.password-visibility-icon {
+.auth-panel .password-visibility-icon {
   width: 17px;
   height: 17px;
 }
 
-.captcha-box {
+.auth-panel .captcha-box {
   min-height: 48px;
   grid-template-columns: minmax(0, 1fr) auto;
   border-color: var(--color-border);
@@ -6935,7 +6932,7 @@ select:focus {
   pointer-events: none;
 }
 
-.captcha-box strong {
+.auth-panel .captcha-box strong {
   color: var(--color-text);
   padding-left: 6px;
   font-size: 18px;
@@ -6943,12 +6940,12 @@ select:focus {
   letter-spacing: 0;
 }
 
-.captcha-image {
+.auth-panel .captcha-image {
   max-width: 210px;
   height: 46px;
 }
 
-.captcha-box .secondary-button {
+.auth-panel .captcha-box .secondary-button {
   min-height: 32px;
   padding: 0 10px;
   pointer-events: auto;
@@ -6962,7 +6959,7 @@ select:focus {
 
 :root[data-theme='dark'] .auth-tabs,
 :root[data-theme='dark'] .auth-panel .secondary-button,
-:root[data-theme='dark'] .captcha-box {
+:root[data-theme='dark'] .auth-panel .captcha-box {
   border-color: var(--color-border);
   background: var(--color-bg-panel-muted);
 }
@@ -6974,7 +6971,7 @@ select:focus {
 
 :root[data-theme='dark'] .auth-tabs button:hover,
 :root[data-theme='dark'] .auth-panel .secondary-button:hover:not(:disabled),
-:root[data-theme='dark'] .password-visibility-button:hover {
+:root[data-theme='dark'] .auth-panel .password-visibility-button:hover {
   background: var(--color-interactive-hover);
 }
 
@@ -7028,11 +7025,11 @@ select:focus {
   }
 
   .auth-panel .inline-control,
-  .captcha-box {
+  .auth-panel .captcha-box {
     grid-template-columns: 1fr;
   }
 
-  .captcha-box .secondary-button,
+  .auth-panel .captcha-box .secondary-button,
   .auth-panel .inline-control .secondary-button {
     width: 100%;
   }
