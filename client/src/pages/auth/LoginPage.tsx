@@ -393,19 +393,21 @@ export function LoginPage(): JSX.Element {
       <div key={mode} className="auth-mode-panel">
       {mode === 'password' ? (
         <form className="form-stack" onSubmit={(event) => void handlePasswordSubmit(event)}>
-          <label>
-            <span>{t('auth.identifier')}</span>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.identifier')}</span>
             <input
+              aria-label={t('auth.identifier')}
               value={identifier}
               autoComplete="username"
               maxLength={EMAIL_MAX_LENGTH}
               onChange={(event) => setIdentifier(event.target.value)}
             />
-          </label>
-          <label>
-            <span>{t('auth.password')}</span>
+          </div>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.password')}</span>
             <div className="password-input-wrap">
               <input
+                aria-label={t('auth.password')}
                 type={isPasswordVisible ? 'text' : 'password'}
                 value={password}
                 autoComplete="current-password"
@@ -426,9 +428,9 @@ export function LoginPage(): JSX.Element {
                 />
               </button>
             </div>
-          </label>
-          <label>
-            <span>{getCaptchaTitle(captcha, t)}</span>
+          </div>
+          <div className="auth-field">
+            <span className="auth-field-label">{getCaptchaTitle(captcha, t)}</span>
             <div className="captcha-box">
               {captcha?.imageDataUrl ? (
                 <img className="captcha-image" src={captcha.imageDataUrl} alt={captcha.prompt} />
@@ -439,7 +441,10 @@ export function LoginPage(): JSX.Element {
                 type="button"
                 className="secondary-button"
                 disabled={isLoadingCaptcha}
-                onClick={() => void refreshCaptcha({ silent: false })}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void refreshCaptcha({ silent: false });
+                }}
               >
                 {isLoadingCaptcha ? t('auth.refreshing') : t('auth.refreshCaptcha')}
               </button>
@@ -450,12 +455,13 @@ export function LoginPage(): JSX.Element {
               </span>
             ) : null}
             <input
+              aria-label={getCaptchaTitle(captcha, t)}
               value={captchaAnswer}
               inputMode={captcha?.captchaType === 'TEXT' ? 'text' : 'numeric'}
               maxLength={CAPTCHA_ANSWER_MAX_LENGTH}
               onChange={(event) => handleCaptchaAnswerChange(event.target.value)}
             />
-          </label>
+          </div>
           <button
             type="button"
             className="auth-inline-link"
@@ -475,20 +481,22 @@ export function LoginPage(): JSX.Element {
         </form>
       ) : mode === 'emailCode' ? (
         <form className="form-stack" onSubmit={(event) => void handleEmailCodeSubmit(event)}>
-          <label>
-            <span>{t('auth.email')}</span>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.email')}</span>
             <input
+              aria-label={t('auth.email')}
               type="email"
               value={emailCodeEmail}
               autoComplete="email"
               maxLength={EMAIL_MAX_LENGTH}
               onChange={(event) => setEmailCodeEmail(event.target.value)}
             />
-          </label>
-          <label>
-            <span>{t('auth.code')}</span>
+          </div>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.code')}</span>
             <div className="inline-control">
               <input
+                aria-label={t('auth.code')}
                 value={emailCode}
                 autoComplete="one-time-code"
                 onChange={(event) => handleEmailCodeChange(event.target.value)}
@@ -503,7 +511,7 @@ export function LoginPage(): JSX.Element {
                 {isSendingCode ? t('auth.sending') : t('auth.sendEmailCode')}
               </button>
             </div>
-          </label>
+          </div>
           {error ? <p className="form-error">{error}</p> : null}
           <button
             type="submit"
@@ -515,20 +523,22 @@ export function LoginPage(): JSX.Element {
         </form>
       ) : (
         <form className="form-stack" onSubmit={(event) => void handlePasswordResetSubmit(event)}>
-          <label>
-            <span>{t('auth.email')}</span>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.email')}</span>
             <input
+              aria-label={t('auth.email')}
               type="email"
               value={resetEmail}
               autoComplete="email"
               maxLength={EMAIL_MAX_LENGTH}
               onChange={(event) => setResetEmail(event.target.value)}
             />
-          </label>
-          <label>
-            <span>{t('auth.code')}</span>
+          </div>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.code')}</span>
             <div className="inline-control">
               <input
+                aria-label={t('auth.code')}
                 value={resetCode}
                 autoComplete="one-time-code"
                 onChange={(event) => handleResetCodeChange(event.target.value)}
@@ -543,27 +553,29 @@ export function LoginPage(): JSX.Element {
                 {isSendingCode ? t('auth.sending') : t('auth.sendEmailCode')}
               </button>
             </div>
-          </label>
-          <label>
-            <span>{t('auth.newPassword')}</span>
+          </div>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.newPassword')}</span>
             <input
+              aria-label={t('auth.newPassword')}
               type="password"
               value={resetPasswordValue}
               autoComplete="new-password"
               maxLength={PASSWORD_MAX_LENGTH}
               onChange={(event) => setResetPasswordValue(event.target.value)}
             />
-          </label>
-          <label>
-            <span>{t('auth.confirmPassword')}</span>
+          </div>
+          <div className="auth-field">
+            <span className="auth-field-label">{t('auth.confirmPassword')}</span>
             <input
+              aria-label={t('auth.confirmPassword')}
               type="password"
               value={resetPasswordConfirm}
               autoComplete="new-password"
               maxLength={PASSWORD_MAX_LENGTH}
               onChange={(event) => setResetPasswordConfirm(event.target.value)}
             />
-          </label>
+          </div>
           {notice ? <p className="form-success">{notice}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           <button

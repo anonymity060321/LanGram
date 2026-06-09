@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLogo } from '../../components/AppLogo';
 import { useI18n } from '../../i18n';
@@ -30,6 +30,11 @@ export function AuthShell({
   const [reconnectedNoticeVisible, setReconnectedNoticeVisible] = useState(false);
   const hasSeenOnlineRef = useRef(false);
   const previousNetworkStatusRef = useRef<NetworkStatus>(networkStatus);
+  const authLinks = [
+    showLoginLink ? { to: '/auth/login', label: loginLinkLabel ?? t('auth.toLogin') } : null,
+    showRegisterLink ? { to: '/auth/register', label: registerLinkLabel ?? t('auth.toRegister') } : null,
+    showGuestLink ? { to: '/auth/guest', label: t('auth.toGuest') } : null,
+  ].filter((link): link is { to: string; label: string } => link !== null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -124,12 +129,27 @@ export function AuthShell({
           t={t}
         />
         {children}
-        <nav className="auth-links" aria-label="Auth navigation">
-          {showLoginLink ? <Link to="/auth/login">{loginLinkLabel ?? t('auth.toLogin')}</Link> : null}
-          {showRegisterLink ? (
-            <Link to="/auth/register">{registerLinkLabel ?? t('auth.toRegister')}</Link>
-          ) : null}
-          {showGuestLink ? <Link to="/auth/guest">{t('auth.toGuest')}</Link> : null}
+        <nav
+          className={`auth-links ${
+            authLinks.length === 1 ? 'auth-links--single' : 'auth-links--pair'
+          }`}
+          aria-label="Auth navigation"
+        >
+          {authLinks.map((link, index) => (
+            <Fragment key={link.to}>
+              {index > 0 ? <span className="auth-link-separator" aria-hidden="true" /> : null}
+              <Link
+                className={
+                  authLinks.length === 1
+                    ? 'auth-link auth-link--single'
+                    : `auth-link ${index === 0 ? 'auth-link--left' : 'auth-link--right'}`
+                }
+                to={link.to}
+              >
+                {link.label}
+              </Link>
+            </Fragment>
+          ))}
         </nav>
       </section>
     </main>

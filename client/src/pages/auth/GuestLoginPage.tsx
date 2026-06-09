@@ -55,9 +55,10 @@ export function GuestLoginPage(): JSX.Element {
       registerLinkLabel={t('auth.toRegisterPrompt')}
     >
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
-        <label>
-          <span>{t('auth.displayName')}</span>
+        <div className="auth-field">
+          <span className="auth-field-label">{t('auth.displayName')}</span>
           <input
+            aria-label={t('auth.displayName')}
             value={displayName}
             maxLength={DISPLAY_NAME_MAX_LENGTH}
             onChange={(event) => {
@@ -65,7 +66,7 @@ export function GuestLoginPage(): JSX.Element {
               setError(null);
             }}
           />
-        </label>
+        </div>
         {error ? <p className="form-error">{error}</p> : null}
         <button type="submit" className="primary-button" disabled={isSubmitting || !displayName.trim()}>
           {isSubmitting ? t('auth.entering') : t('auth.guestLogin')}

@@ -93,36 +93,40 @@ export function RegisterPage(): JSX.Element {
       loginLinkLabel={t('auth.toLoginPrompt')}
     >
       <form className="form-stack" onSubmit={(event) => void handleSubmit(event)}>
-        <label>
-          <span>{t('auth.email')}</span>
+        <div className="auth-field">
+          <span className="auth-field-label">{t('auth.email')}</span>
           <input
+            aria-label={t('auth.email')}
             type="email"
             value={email}
             maxLength={EMAIL_MAX_LENGTH}
             onChange={(event) => setEmail(event.target.value)}
           />
-        </label>
-        <label>
-          <span>{t('auth.displayName')}</span>
+        </div>
+        <div className="auth-field">
+          <span className="auth-field-label">{t('auth.displayName')}</span>
           <input
+            aria-label={t('auth.displayName')}
             value={displayName}
             maxLength={DISPLAY_NAME_MAX_LENGTH}
             onChange={(event) => setDisplayName(event.target.value)}
           />
-        </label>
-        <label>
-          <span>{t('auth.password')}</span>
+        </div>
+        <div className="auth-field">
+          <span className="auth-field-label">{t('auth.password')}</span>
           <input
+            aria-label={t('auth.password')}
             type="password"
             value={password}
             maxLength={PASSWORD_MAX_LENGTH}
             onChange={(event) => setPassword(event.target.value)}
           />
-        </label>
-        <label>
-          <span>{t('auth.code')}</span>
+        </div>
+        <div className="auth-field">
+          <span className="auth-field-label">{t('auth.code')}</span>
           <div className="inline-control">
             <input
+              aria-label={t('auth.code')}
               value={code}
               onChange={(event) => handleCodeChange(event.target.value)}
               maxLength={EMAIL_CODE_MAX_LENGTH}
@@ -136,7 +140,7 @@ export function RegisterPage(): JSX.Element {
               {isSendingCode ? t('auth.sending') : t('auth.sendCode')}
             </button>
           </div>
-        </label>
+        </div>
         {error ? <p className="form-error">{error}</p> : null}
         <button
           type="submit"
