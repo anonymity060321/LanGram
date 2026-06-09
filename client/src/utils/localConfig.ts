@@ -8,6 +8,7 @@ const fallbackConfig: ClientConfig = {
   theme: 'system',
   language: 'system',
   deviceId: '',
+  downloadDir: null,
   enableNotifications: true,
   closeToTray: true,
 };

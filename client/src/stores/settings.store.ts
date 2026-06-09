@@ -10,6 +10,7 @@ export interface ClientConfig {
   theme: ThemePreference;
   language: LanguagePreference;
   deviceId: string;
+  downloadDir: string | null;
   enableNotifications: boolean;
   closeToTray: boolean;
 }

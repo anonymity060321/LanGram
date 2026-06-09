@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
@@ -31,10 +31,20 @@ struct ClientConfig {
     theme: ThemePreference,
     language: LanguagePreference,
     device_id: String,
+    #[serde(default)]
+    download_dir: Option<String>,
     #[serde(default = "default_enable_notifications")]
     enable_notifications: bool,
     #[serde(default = "default_close_to_tray")]
     close_to_tray: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadDirectoryStatus {
+    configured_dir: Option<String>,
+    effective_dir: String,
+    is_default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,8 +152,32 @@ fn update_close_to_tray(state: State<'_, AppRuntimeState>, enabled: bool) {
     state.close_to_tray.store(enabled, Ordering::SeqCst);
 }
 
+#[tauri::command]
+fn get_download_directory_status(app: AppHandle) -> Result<DownloadDirectoryStatus, String> {
+    let config = read_or_create_config(&app).map_err(|error| error.to_string())?;
+    download_directory_status(&app, &config).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_download_directory(app: AppHandle, path: String) -> Result<DownloadDirectoryStatus, String> {
+    let directory = ensure_download_directory_input(&path)?;
+    let mut config = read_or_create_config(&app).map_err(|error| error.to_string())?;
+    config.download_dir = Some(path_to_config_string(&directory));
+    write_config(&app, &config).map_err(|error| error.to_string())?;
+    download_directory_status(&app, &config).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn reset_download_directory(app: AppHandle) -> Result<DownloadDirectoryStatus, String> {
+    let mut config = read_or_create_config(&app).map_err(|error| error.to_string())?;
+    config.download_dir = None;
+    write_config(&app, &config).map_err(|error| error.to_string())?;
+    download_directory_status(&app, &config).map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let close_to_tray = read_or_create_config(app.handle())
@@ -171,6 +205,9 @@ pub fn run() {
             update_tray_unread_count,
             update_tray_authenticated,
             update_close_to_tray,
+            get_download_directory_status,
+            set_download_directory,
+            reset_download_directory,
             local_cache::init_local_cache,
             local_cache::get_local_cache_status,
             local_cache::clear_local_cache,
@@ -328,6 +365,7 @@ fn default_config() -> ClientConfig {
         theme: ThemePreference::System,
         language: LanguagePreference::System,
         device_id: create_device_id(),
+        download_dir: None,
         enable_notifications: default_enable_notifications(),
         close_to_tray: default_close_to_tray(),
     }
@@ -375,6 +413,102 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, ConfigError> {
     Ok(directory.join("client-config.json"))
 }
 
+fn download_directory_status(
+    app: &AppHandle,
+    config: &ClientConfig,
+) -> Result<DownloadDirectoryStatus, ConfigError> {
+    match config
+        .download_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        Some(configured_dir) => {
+            let directory = ensure_directory(PathBuf::from(configured_dir))
+                .map_err(ConfigError::InvalidDownloadDirectory)?;
+            Ok(build_download_directory_status(
+                Some(directory.clone()),
+                directory,
+            ))
+        }
+        None => {
+            let directory = ensure_directory(default_download_directory(app)?)
+                .map_err(ConfigError::InvalidDownloadDirectory)?;
+            Ok(build_download_directory_status(None, directory))
+        }
+    }
+}
+
+fn default_download_directory(app: &AppHandle) -> Result<PathBuf, ConfigError> {
+    if let Ok(download_dir) = app.path().download_dir() {
+        return Ok(download_dir.join("LanGram"));
+    }
+
+    if let Ok(documents_dir) = app.path().document_dir() {
+        return Ok(documents_dir.join("LanGram"));
+    }
+
+    Ok(app.path().app_data_dir()?.join("downloads"))
+}
+
+fn ensure_directory(directory: PathBuf) -> Result<PathBuf, String> {
+    if directory.exists() && !directory.is_dir() {
+        return Err(String::from(
+            "Download directory path must point to a directory",
+        ));
+    }
+
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Failed to create download directory: {error}"))?;
+
+    if !directory.is_dir() {
+        return Err(String::from(
+            "Download directory path must point to a directory",
+        ));
+    }
+
+    directory
+        .canonicalize()
+        .map_err(|error| format!("Failed to normalize download directory: {error}"))
+}
+
+fn ensure_download_directory_input(path: &str) -> Result<PathBuf, String> {
+    let trimmed_path = path.trim();
+    if trimmed_path.is_empty() {
+        return Err(String::from("Download directory path cannot be empty"));
+    }
+
+    ensure_directory(PathBuf::from(trimmed_path))
+}
+
+fn build_download_directory_status(
+    configured_dir: Option<PathBuf>,
+    effective_dir: PathBuf,
+) -> DownloadDirectoryStatus {
+    DownloadDirectoryStatus {
+        configured_dir: configured_dir.as_ref().map(path_to_config_string),
+        effective_dir: path_to_config_string(&effective_dir),
+        is_default: configured_dir.is_none(),
+    }
+}
+
+fn path_to_config_string(path: &PathBuf) -> String {
+    display_path_string(path)
+}
+
+fn display_path_string(path: &Path) -> String {
+    strip_windows_extended_path_prefix(path.to_string_lossy().to_string())
+}
+
+fn strip_windows_extended_path_prefix(path: String) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+
+    path.strip_prefix(r"\\?\")
+        .map_or(path.clone(), ToOwned::to_owned)
+}
+
 fn create_device_id() -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -388,6 +522,7 @@ enum ConfigError {
     Io(io::Error),
     Json(serde_json::Error),
     Tauri(tauri::Error),
+    InvalidDownloadDirectory(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -396,6 +531,7 @@ impl std::fmt::Display for ConfigError {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::Json(error) => write!(formatter, "JSON error: {error}"),
             Self::Tauri(error) => write!(formatter, "Tauri error: {error}"),
+            Self::InvalidDownloadDirectory(error) => write!(formatter, "{error}"),
         }
     }
 }
@@ -415,5 +551,95 @@ impl From<serde_json::Error> for ConfigError {
 impl From<tauri::Error> for ConfigError {
     fn from(error: tauri::Error) -> Self {
         Self::Tauri(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_config_without_download_dir_deserializes() {
+        let raw_config = r#"{
+            "serverUrl": "http://localhost:8080/api",
+            "theme": "system",
+            "language": "system",
+            "deviceId": "device-1",
+            "enableNotifications": true,
+            "closeToTray": true
+        }"#;
+
+        let config: ClientConfig = serde_json::from_str(raw_config).expect("config should parse");
+
+        assert!(config.download_dir.is_none());
+    }
+
+    #[test]
+    fn default_download_directory_status_is_default() {
+        let directory = unique_test_path("default-status");
+        let status = build_download_directory_status(None, directory.clone());
+
+        assert!(status.configured_dir.is_none());
+        assert_eq!(status.effective_dir, path_to_config_string(&directory));
+        assert!(status.is_default);
+    }
+
+    #[test]
+    fn ensure_download_directory_input_creates_directory() {
+        let directory = unique_test_path("create-directory");
+
+        let normalized = ensure_download_directory_input(&path_to_config_string(&directory))
+            .expect("directory should be created");
+
+        assert!(normalized.is_dir());
+        let _ = fs::remove_dir_all(normalized);
+    }
+
+    #[test]
+    fn ensure_download_directory_input_rejects_empty_path() {
+        let error = ensure_download_directory_input("   ").expect_err("empty path should fail");
+
+        assert_eq!(error, "Download directory path cannot be empty");
+    }
+
+    #[test]
+    fn ensure_download_directory_input_rejects_file_path() {
+        let file_path = unique_test_path("file-path");
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).expect("test parent should be created");
+        }
+        fs::write(&file_path, b"not a directory").expect("test file should be created");
+
+        let error = ensure_download_directory_input(&path_to_config_string(&file_path))
+            .expect_err("file path should fail");
+
+        assert_eq!(error, "Download directory path must point to a directory");
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn strip_windows_extended_drive_path_prefix() {
+        let path = strip_windows_extended_path_prefix(String::from(r"\\?\D:\Downloads\LanGram"));
+
+        assert_eq!(path, r"D:\Downloads\LanGram");
+    }
+
+    #[test]
+    fn strip_windows_extended_unc_path_prefix() {
+        let path =
+            strip_windows_extended_path_prefix(String::from(r"\\?\UNC\server\share\LanGram"));
+
+        assert_eq!(path, r"\\server\share\LanGram");
+    }
+
+    fn unique_test_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "langram-download-dir-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be valid")
+                .as_nanos()
+        ))
     }
 }

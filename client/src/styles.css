@@ -63,31 +63,35 @@
 }
 
 :root[data-theme='dark'] {
-  --color-bg-app: #0f172a;
-  --color-bg-panel: #111827;
-  --color-bg-panel-muted: #1e293b;
-  --color-bg-elevated: #111827;
-  --color-border: #334155;
-  --color-border-strong: #475569;
-  --color-border-muted: #253247;
-  --color-text: #e5edf7;
-  --color-text-muted: #94a3b8;
-  --color-text-subtle: #64748b;
-  --color-primary: #93c5fd;
-  --color-primary-hover: #bfdbfe;
-  --color-primary-soft: #172554;
-  --color-success: #86efac;
-  --color-success-soft: #052e16;
-  --color-warning: #fde68a;
-  --color-warning-soft: #422006;
-  --color-danger: #fca5a5;
-  --color-danger-soft: #450a0a;
-  --color-own-message: #1d4ed8;
-  --color-peer-message: #111827;
-  --shadow-panel: 0 18px 42px rgba(0, 0, 0, 0.32);
-  --shadow-popover: 0 18px 42px rgba(0, 0, 0, 0.46);
-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --shadow-message: 0 8px 22px rgba(0, 0, 0, 0.22);
+  --color-bg-app: #101722;
+  --color-bg-panel: #151d2a;
+  --color-bg-panel-muted: #1a2433;
+  --color-bg-elevated: #202b3a;
+  --color-border: #2c394b;
+  --color-border-strong: #3b4a5f;
+  --color-border-muted: #243044;
+  --color-text: #edf3fb;
+  --color-text-muted: #adbacb;
+  --color-text-subtle: #8390a3;
+  --color-primary: #7da7df;
+  --color-primary-hover: #a4c5ef;
+  --color-primary-soft: #1b2d49;
+  --color-success: #7dd3a6;
+  --color-success-soft: #0c2a1d;
+  --color-warning: #e8ca7a;
+  --color-warning-soft: #36270d;
+  --color-danger: #ee9a9a;
+  --color-danger-soft: #341417;
+  --color-own-message: #223a5f;
+  --color-peer-message: #1b2532;
+  --shadow-panel: 0 18px 42px rgba(0, 0, 0, 0.28);
+  --shadow-popover: 0 20px 46px rgba(0, 0, 0, 0.42);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.26);
+  --shadow-message: 0 8px 20px rgba(0, 0, 0, 0.18);
+  --color-interactive-hover: rgba(125, 167, 223, 0.12);
+  --color-interactive-active: rgba(125, 167, 223, 0.18);
+  --color-focus-ring: rgba(125, 167, 223, 0.24);
+  --color-chat-canvas: #121a26;
   color: var(--color-text);
   background: var(--color-bg-app);
 }
@@ -5093,23 +5097,23 @@ textarea,
 }
 
 :root[data-theme='dark'] {
-  --color-bg-app: #0d1422;
-  --color-bg-panel: #121a28;
-  --color-bg-panel-muted: #172132;
-  --color-bg-elevated: #162033;
-  --color-border: #2b394d;
-  --color-border-muted: #233044;
-  --color-interactive-hover: #1b2638;
-  --color-interactive-active: #203555;
-  --color-focus-ring: rgba(147, 197, 253, 0.18);
-  --color-chat-canvas: #101827;
-  --color-notice-info-bg: #172554;
-  --color-notice-info-border: #24406f;
-  --color-own-message: #1d3b62;
-  --color-peer-message: #162033;
-  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.24);
-  --shadow-popover: 0 16px 38px rgba(0, 0, 0, 0.42);
-  --shadow-message: 0 1px 1px rgba(0, 0, 0, 0.2);
+  --color-bg-app: #101722;
+  --color-bg-panel: #151d2a;
+  --color-bg-panel-muted: #1a2433;
+  --color-bg-elevated: #202b3a;
+  --color-border: #2c394b;
+  --color-border-muted: #243044;
+  --color-interactive-hover: rgba(125, 167, 223, 0.12);
+  --color-interactive-active: rgba(125, 167, 223, 0.18);
+  --color-focus-ring: rgba(125, 167, 223, 0.24);
+  --color-chat-canvas: #121a26;
+  --color-notice-info-bg: #1b2d49;
+  --color-notice-info-border: #314766;
+  --color-own-message: #223a5f;
+  --color-peer-message: #1b2532;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-popover: 0 18px 42px rgba(0, 0, 0, 0.4);
+  --shadow-message: 0 1px 1px rgba(0, 0, 0, 0.16);
 }
 
 button,
@@ -6413,12 +6417,20 @@ select:focus {
   font-weight: 760;
 }
 
+.settings-group-title {
+  margin: 4px 2px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
 .settings-section-stack {
   gap: 9px;
 }
 
 .settings-row,
 .settings-local-cache-card,
+.settings-storage-card,
 .settings-choice-card {
   border-color: var(--color-border-muted);
   border-radius: var(--radius-md);
@@ -6526,6 +6538,81 @@ select:focus {
 .settings-local-cache-path {
   display: block;
   line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-download-directory-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-download-directory-input {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.settings-download-directory-input input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-size: 13px;
+  padding: 0 11px;
+}
+
+.settings-download-directory-input input:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.settings-download-directory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.settings-storage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.settings-storage-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.settings-storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.settings-storage-path {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-storage-card--muted {
+  background: color-mix(in srgb, var(--color-bg-panel-muted) 78%, var(--color-bg-elevated));
 }
 
 .settings-account-badge {
@@ -6581,6 +6668,7 @@ select:focus {
 :root[data-theme='dark'] .settings-nav,
 :root[data-theme='dark'] .settings-row,
 :root[data-theme='dark'] .settings-local-cache-card,
+:root[data-theme='dark'] .settings-storage-card,
 :root[data-theme='dark'] .settings-choice-card {
   border-color: var(--color-border);
   background: var(--color-bg-panel-muted);
@@ -6599,6 +6687,7 @@ select:focus {
 
 :root[data-theme='dark'] .settings-local-cache-details,
 :root[data-theme='dark'] .settings-row input,
+:root[data-theme='dark'] .settings-download-directory-input input,
 :root[data-theme='dark'] .settings-select-button {
   border-color: var(--color-border);
   background: var(--color-bg-elevated);
@@ -6616,6 +6705,10 @@ select:focus {
 :root[data-theme='dark'] .settings-account-badge {
   background: var(--color-interactive-active);
   color: #bfdbfe;
+}
+
+:root[data-theme='dark'] .settings-storage-card--muted {
+  background: color-mix(in srgb, var(--color-bg-panel-muted) 82%, var(--color-bg-elevated));
 }
 
 :root[data-theme='dark'] .settings-panel .danger-button {
@@ -7006,6 +7099,230 @@ select:focus {
   color: #86efac;
 }
 
+/* Phase 8.20.3.1: dark-mode color refinement, scoped to visual tokens and surface states. */
+:root[data-theme='dark'] body,
+:root[data-theme='dark'] .main-layout,
+:root[data-theme='dark'] .chat-panel,
+:root[data-theme='dark'] .message-list {
+  background: var(--color-bg-app);
+}
+
+:root[data-theme='dark'] .chat-panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-chat-canvas) 96%, #000000) 0%, var(--color-chat-canvas) 100%);
+}
+
+:root[data-theme='dark'] .app-nav,
+:root[data-theme='dark'] .conversation-panel,
+:root[data-theme='dark'] .profile-panel,
+:root[data-theme='dark'] .sidebar-header,
+:root[data-theme='dark'] .chat-header,
+:root[data-theme='dark'] .friends-shell,
+:root[data-theme='dark'] .friends-panel,
+:root[data-theme='dark'] .friends-main-layout .friends-conversation-panel,
+:root[data-theme='dark'] .friends-main-layout .friends-detail-panel,
+:root[data-theme='dark'] .settings-panel,
+:root[data-theme='dark'] .auth-panel {
+  border-color: var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .settings-nav,
+:root[data-theme='dark'] .settings-row,
+:root[data-theme='dark'] .settings-local-cache-card,
+:root[data-theme='dark'] .settings-storage-card,
+:root[data-theme='dark'] .settings-choice-card,
+:root[data-theme='dark'] .captcha-box,
+:root[data-theme='dark'] .pairing-code-box,
+:root[data-theme='dark'] .main-layout--contacts .friends-add-card,
+:root[data-theme='dark'] .main-layout--contacts .friends-notification-row,
+:root[data-theme='dark'] .main-layout--contacts .friends-detail-panel .friend-profile-card dl {
+  border-color: var(--color-border-muted);
+  background: var(--color-bg-panel-muted);
+}
+
+:root[data-theme='dark'] .settings-local-cache-details,
+:root[data-theme='dark'] .settings-row input,
+:root[data-theme='dark'] .settings-download-directory-input input,
+:root[data-theme='dark'] .settings-select-button,
+:root[data-theme='dark'] .auth-panel .form-stack input,
+:root[data-theme='dark'] .auth-panel .form-stack select,
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] .message-input,
+:root[data-theme='dark'] .chat-search-bar,
+:root[data-theme='dark'] .message-context-menu,
+:root[data-theme='dark'] .conversation-context-menu,
+:root[data-theme='dark'] .input-context-menu,
+:root[data-theme='dark'] .app-nav-popover,
+:root[data-theme='dark'] .image-options-panel,
+:root[data-theme='dark'] .friends-add-popover,
+:root[data-theme='dark'] .friends-search-field input {
+  border-color: var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .primary-button {
+  background: var(--color-primary);
+  color: #0d1623;
+}
+
+:root[data-theme='dark'] .primary-button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  color: #0d1623;
+}
+
+:root[data-theme='dark'] .primary-button:disabled,
+:root[data-theme='dark'] .secondary-button:disabled {
+  border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
+  background: color-mix(in srgb, var(--color-bg-panel-muted) 70%, transparent);
+  color: var(--color-text-subtle);
+  opacity: 0.64;
+}
+
+:root[data-theme='dark'] .secondary-button,
+:root[data-theme='dark'] .auth-panel .secondary-button {
+  border-color: var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-elevated) 78%, var(--color-bg-panel));
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .secondary-button:hover:not(:disabled),
+:root[data-theme='dark'] .auth-panel .secondary-button:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: color-mix(in srgb, var(--color-primary-soft) 54%, var(--color-bg-elevated));
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .danger-button,
+:root[data-theme='dark'] .settings-panel .danger-button {
+  border-color: color-mix(in srgb, var(--color-danger) 24%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger-soft) 62%, var(--color-bg-panel-muted));
+  color: #f2b8b8;
+}
+
+:root[data-theme='dark'] .danger-button:hover:not(:disabled),
+:root[data-theme='dark'] .settings-panel .danger-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-danger) 34%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger-soft) 78%, var(--color-bg-panel-muted));
+  color: #ffd1d1;
+}
+
+:root[data-theme='dark'] .conversation-item:hover,
+:root[data-theme='dark'] .friend-row:hover,
+:root[data-theme='dark'] .main-layout--contacts .friends-conversation-panel .friend-row:hover,
+:root[data-theme='dark'] .settings-nav-item:hover,
+:root[data-theme='dark'] .friends-nav-entry:hover,
+:root[data-theme='dark'] .friends-add-popover button:hover {
+  border-color: transparent;
+  background: var(--color-interactive-hover);
+}
+
+:root[data-theme='dark'] .conversation-item.is-active,
+:root[data-theme='dark'] .friend-row.is-selected,
+:root[data-theme='dark'] .main-layout--contacts .friend-row.is-selected,
+:root[data-theme='dark'] .settings-nav-item.is-active,
+:root[data-theme='dark'] .friends-nav-entry.is-active {
+  border-color: transparent;
+  background: var(--color-interactive-active);
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .conversation-item strong,
+:root[data-theme='dark'] .friend-summary-name,
+:root[data-theme='dark'] .settings-row-text strong,
+:root[data-theme='dark'] .settings-storage-path,
+:root[data-theme='dark'] .settings-local-cache-details dd,
+:root[data-theme='dark'] .auth-panel h1,
+:root[data-theme='dark'] .auth-panel .captcha-box strong {
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .conversation-item small,
+:root[data-theme='dark'] .conversation-item-header time,
+:root[data-theme='dark'] .message-bubble span,
+:root[data-theme='dark'] .file-message-card small,
+:root[data-theme='dark'] .image-message-card small,
+:root[data-theme='dark'] .friend-summary-meta,
+:root[data-theme='dark'] .friend-presence-line,
+:root[data-theme='dark'] .settings-row-text span,
+:root[data-theme='dark'] .settings-group-title,
+:root[data-theme='dark'] .settings-local-cache-details dt,
+:root[data-theme='dark'] .auth-panel .auth-field,
+:root[data-theme='dark'] .auth-panel .form-hint,
+:root[data-theme='dark'] input::placeholder,
+:root[data-theme='dark'] textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+:root[data-theme='dark'] .message-bubble {
+  border-color: color-mix(in srgb, var(--color-border) 74%, transparent);
+  background: var(--color-peer-message);
+  box-shadow: var(--shadow-message);
+}
+
+:root[data-theme='dark'] .message-row.is-own .message-bubble {
+  border-color: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  background: var(--color-own-message);
+}
+
+:root[data-theme='dark'] .message-bubble p,
+:root[data-theme='dark'] .message-row.is-own .message-bubble p {
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .file-message-card,
+:root[data-theme='dark'] .image-message-card {
+  border-color: var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-panel-muted) 84%, var(--color-bg-elevated));
+}
+
+:root[data-theme='dark'] .message-row.is-own .file-message-card,
+:root[data-theme='dark'] .message-row.is-own .image-message-card {
+  border-color: color-mix(in srgb, var(--color-primary) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--color-own-message) 74%, var(--color-bg-panel-muted));
+}
+
+:root[data-theme='dark'] .message-history-status,
+:root[data-theme='dark'] .message-time-divider time {
+  border-color: color-mix(in srgb, var(--color-border) 76%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 78%, transparent);
+  color: var(--color-text-muted);
+}
+
+:root[data-theme='dark'] .auth-panel .form-stack input:focus,
+:root[data-theme='dark'] .auth-panel .form-stack select:focus,
+:root[data-theme='dark'] .message-input:focus-within,
+:root[data-theme='dark'] .settings-row input:focus,
+:root[data-theme='dark'] .settings-select-button:focus {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+
+:root[data-theme='dark'] .auth-panel .captcha-box,
+:root[data-theme='dark'] .auth-tabs {
+  border-color: var(--color-border);
+  background: var(--color-bg-panel-muted);
+}
+
+:root[data-theme='dark'] .auth-tabs button.is-active {
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .settings-account-badge {
+  background: color-mix(in srgb, var(--color-primary-soft) 74%, var(--color-bg-panel-muted));
+  color: #c5dcf7;
+}
+
+:root[data-theme='dark'] .settings-storage-card--muted {
+  background: color-mix(in srgb, var(--color-bg-panel-muted) 78%, var(--color-bg-panel));
+}
+
 @media (max-width: 520px), (max-height: 720px) {
   .auth-page {
     align-items: start;
@@ -7073,11 +7390,15 @@ select:focus {
 
   .settings-row,
   .settings-local-cache-header,
-  .settings-local-cache-details div {
+  .settings-local-cache-details div,
+  .settings-storage-main,
+  .settings-download-directory-input {
     grid-template-columns: 1fr;
   }
 
   .settings-local-cache-actions,
+  .settings-storage-actions,
+  .settings-download-directory-actions,
   .settings-actions-row {
     justify-content: flex-start;
   }

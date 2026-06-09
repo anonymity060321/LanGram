@@ -1,6 +1,13 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { open } from '@tauri-apps/plugin-dialog';
 import { logout as requestLogout } from '../../api/auth.api';
+import {
+  getDownloadDirectoryStatus,
+  resetDownloadDirectory,
+  setDownloadDirectory,
+  type DownloadDirectoryStatus,
+} from '../../api/downloadSettings.api';
 import {
   getCurrentUserProfile,
   updateCurrentUserProfile,
@@ -48,6 +55,12 @@ export function SettingsPage(): JSX.Element {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [notificationStatus, setNotificationStatus] = useState<NotificationRuntimeStatus | null>(null);
   const [notificationPermissionNotice, setNotificationPermissionNotice] = useState<string | null>(null);
+  const [downloadDirectoryStatus, setDownloadDirectoryStatus] =
+    useState<DownloadDirectoryStatus | null>(null);
+  const [downloadDirectoryNotice, setDownloadDirectoryNotice] = useState<LocalCacheNotice | null>(
+    null,
+  );
+  const [isDownloadDirectorySaving, setIsDownloadDirectorySaving] = useState(false);
   const [localCacheNotice, setLocalCacheNotice] = useState<LocalCacheNotice | null>(null);
   const localCacheStatus = useLocalCacheStore((state) => state.status);
   const localCacheInitializationState = useLocalCacheStore((state) => state.initializationState);
@@ -66,13 +79,17 @@ export function SettingsPage(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (activeSection !== 'about') {
-      return;
+    if (activeSection === 'about' || activeSection === 'storage') {
+      void refreshLocalCacheStatus().catch(() => {
+        setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheReadFailed') });
+      });
     }
 
-    void refreshLocalCacheStatus().catch(() => {
-      setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheReadFailed') });
-    });
+    if (activeSection === 'storage') {
+      void refreshDownloadDirectoryStatus().catch(() => {
+        setDownloadDirectoryNotice({ kind: 'error', message: t('settings.downloadDirectoryReadFailed') });
+      });
+    }
   }, [activeSection, refreshLocalCacheStatus, t]);
 
   useEffect(() => {
@@ -197,6 +214,62 @@ export function SettingsPage(): JSX.Element {
       });
     } catch {
       setLocalCacheNotice({ kind: 'error', message: t('settings.localCacheClearFailed') });
+    }
+  }
+
+  async function refreshDownloadDirectoryStatus(): Promise<void> {
+    const status = await getDownloadDirectoryStatus();
+    setDownloadDirectoryStatus(status);
+  }
+
+  async function handleSelectDownloadDirectory(): Promise<void> {
+    setDownloadDirectoryNotice(null);
+    setIsDownloadDirectorySaving(true);
+
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: downloadDirectoryStatus?.effectiveDir,
+      });
+
+      if (!selectedPath) {
+        setDownloadDirectoryNotice({
+          kind: 'success',
+          message: t('settings.downloadDirectorySelectCanceled'),
+        });
+        return;
+      }
+
+      const nextPath = Array.isArray(selectedPath) ? selectedPath[0] : selectedPath;
+      if (!nextPath) {
+        return;
+      }
+
+      const status = await setDownloadDirectory(nextPath);
+      setDownloadDirectoryStatus(status);
+      await load();
+      setDownloadDirectoryNotice({ kind: 'success', message: t('settings.downloadDirectorySaved') });
+    } catch {
+      setDownloadDirectoryNotice({ kind: 'error', message: t('settings.downloadDirectorySelectFailed') });
+    } finally {
+      setIsDownloadDirectorySaving(false);
+    }
+  }
+
+  async function handleResetDownloadDirectory(): Promise<void> {
+    setDownloadDirectoryNotice(null);
+    setIsDownloadDirectorySaving(true);
+
+    try {
+      const status = await resetDownloadDirectory();
+      setDownloadDirectoryStatus(status);
+      await load();
+      setDownloadDirectoryNotice({ kind: 'success', message: t('settings.downloadDirectoryReset') });
+    } catch {
+      setDownloadDirectoryNotice({ kind: 'error', message: t('settings.downloadDirectoryResetFailed') });
+    } finally {
+      setIsDownloadDirectorySaving(false);
     }
   }
 
@@ -509,6 +582,84 @@ export function SettingsPage(): JSX.Element {
               </section>
             ) : null}
 
+            {activeSection === 'storage' ? (
+              <section className="settings-section" aria-labelledby="settings-storage-title">
+                <h2 id="settings-storage-title">{t('settings.storageTitle')}</h2>
+                <div className="settings-section-stack">
+                  <h3 className="settings-group-title">{t('settings.storageSaveLocation')}</h3>
+                  <div className="settings-storage-card">
+                    <div className="settings-storage-main">
+                      <div className="settings-row-text">
+                        <strong>{t('settings.receivedFilesSaveTo')}</strong>
+                        <span
+                          className="settings-storage-path"
+                          title={downloadDirectoryStatus?.effectiveDir ?? undefined}
+                        >
+                          {downloadDirectoryStatus?.effectiveDir ?? '-'}
+                        </span>
+                      </div>
+                      <span className="settings-account-badge">
+                        {downloadDirectoryStatus?.isDefault
+                          ? t('settings.downloadDirectoryDefault')
+                          : t('settings.downloadDirectoryCustom')}
+                      </span>
+                    </div>
+                    <div className="settings-storage-actions">
+                      <button
+                        type="button"
+                        className="primary-button compact-button"
+                        disabled={isDownloadDirectorySaving}
+                        onClick={() => void handleSelectDownloadDirectory()}
+                      >
+                        {t('settings.changeStoragePath')}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button compact-button"
+                        disabled={isDownloadDirectorySaving}
+                        onClick={() => void handleResetDownloadDirectory()}
+                      >
+                        {t('settings.resetDownloadDirectory')}
+                      </button>
+                    </div>
+                    {downloadDirectoryNotice ? (
+                      <p
+                        className={
+                          downloadDirectoryNotice.kind === 'success' ? 'form-success' : 'form-error'
+                        }
+                      >
+                        {downloadDirectoryNotice.message}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="settings-storage-card">
+                    <div className="settings-storage-main">
+                      <div className="settings-row-text">
+                        <strong>{t('settings.messageCacheSaveTo')}</strong>
+                        <span
+                          className="settings-storage-path"
+                          title={localCacheStatus?.dbPath ?? undefined}
+                        >
+                          {localCacheStatus?.dbPath ?? '-'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="settings-storage-card settings-storage-card--muted">
+                    <div className="settings-storage-main">
+                      <div className="settings-row-text">
+                        <strong>{t('settings.storageSpace')}</strong>
+                        <span>{t('settings.storageManageComingSoon')}</span>
+                      </div>
+                      <button type="button" className="secondary-button compact-button" disabled>
+                        {t('settings.storageManage')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             {activeSection === 'about' ? (
               <section className="settings-section" aria-labelledby="settings-about-title">
                 <h2 id="settings-about-title">{t('settings.aboutTitle')}</h2>
@@ -762,7 +913,7 @@ function SettingsSelect<TValue extends string>({
   );
 }
 
-type SettingsSection = 'general' | 'profile' | 'account' | 'about';
+type SettingsSection = 'general' | 'profile' | 'account' | 'storage' | 'about';
 type NotificationSetting = 'enabled' | 'disabled';
 type TrayCloseSetting = 'enabled' | 'disabled';
 type TranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
@@ -823,6 +974,12 @@ const SETTINGS_SECTIONS: Array<{
     labelKey: 'settings.accountTitle',
     iconSrc: '/vector_icon/user-key.svg',
     fallback: 'A',
+  },
+  {
+    id: 'storage',
+    labelKey: 'settings.storage',
+    iconSrc: '/vector_icon/hard-drive.svg',
+    fallback: 'S',
   },
   {
     id: 'about',
