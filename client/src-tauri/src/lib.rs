@@ -215,7 +215,10 @@ pub fn run() {
             local_cache::list_cached_conversations,
             local_cache::upsert_cached_messages,
             local_cache::update_cached_message_state,
-            local_cache::list_cached_messages
+            local_cache::list_cached_messages,
+            local_cache::upsert_local_file_record,
+            local_cache::list_local_file_records,
+            local_cache::get_local_file_record
         ])
         .run(tauri::generate_context!())
         .expect("failed to run LanGram client");

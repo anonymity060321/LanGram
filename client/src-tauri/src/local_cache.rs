@@ -8,9 +8,11 @@ use tauri::{AppHandle, Manager};
 
 const LOCAL_CACHE_DB_FILE: &str = "langram-local-cache.sqlite3";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 const DEFAULT_CACHED_MESSAGES_LIMIT: i64 = 50;
 const MAX_CACHED_MESSAGES_LIMIT: i64 = 100;
+const DEFAULT_LOCAL_FILES_LIMIT: i64 = 50;
+const MAX_LOCAL_FILES_LIMIT: i64 = 200;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,6 +116,43 @@ pub struct CachedMessageStatePatchInput {
     local_deleted_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalFileRecordInput {
+    file_id: String,
+    conversation_id: Option<String>,
+    message_id: Option<String>,
+    original_name: String,
+    safe_name: String,
+    mime_type: Option<String>,
+    size_bytes: Option<i64>,
+    sha256: Option<String>,
+    local_path: String,
+    status: String,
+    error_message: Option<String>,
+    downloaded_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalFileRecord {
+    id: String,
+    file_id: String,
+    conversation_id: Option<String>,
+    message_id: Option<String>,
+    original_name: String,
+    safe_name: String,
+    mime_type: Option<String>,
+    size_bytes: Option<i64>,
+    sha256: Option<String>,
+    local_path: String,
+    status: String,
+    error_message: Option<String>,
+    downloaded_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
 #[tauri::command]
 pub fn init_local_cache(app: AppHandle) -> Result<InitLocalCacheResult, String> {
     let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
@@ -189,6 +228,33 @@ pub fn list_cached_messages(
     .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub fn upsert_local_file_record(
+    app: AppHandle,
+    record: LocalFileRecordInput,
+) -> Result<LocalFileRecord, String> {
+    let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
+    upsert_local_file_record_at_path(&db_path, &record).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_local_file_records(
+    app: AppHandle,
+    limit: Option<i64>,
+) -> Result<Vec<LocalFileRecord>, String> {
+    let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
+    list_local_file_records_at_path(&db_path, limit).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_local_file_record(
+    app: AppHandle,
+    id: String,
+) -> Result<Option<LocalFileRecord>, String> {
+    let db_path = local_cache_path(&app).map_err(|error| error.to_string())?;
+    get_local_file_record_at_path(&db_path, &id).map_err(|error| error.to_string())
+}
+
 fn local_cache_path(app: &AppHandle) -> Result<PathBuf, LocalCacheError> {
     Ok(app.path().app_data_dir()?.join(LOCAL_CACHE_DB_FILE))
 }
@@ -233,6 +299,7 @@ fn clear_local_cache_at_path(db_path: &Path) -> Result<(), LocalCacheError> {
     let mut connection = Connection::open(db_path)?;
     enable_foreign_keys(&connection)?;
     let transaction = connection.transaction()?;
+    // Clearing chat cache intentionally keeps local_files download records.
     transaction.execute_batch(
         "
         DELETE FROM cached_messages;
@@ -556,6 +623,189 @@ fn list_cached_messages_at_path(
     Ok(messages)
 }
 
+fn upsert_local_file_record_at_path(
+    db_path: &Path,
+    record: &LocalFileRecordInput,
+) -> Result<LocalFileRecord, LocalCacheError> {
+    validate_local_file_record_input(record)?;
+    init_database_at_path(db_path)?;
+
+    let mut connection = Connection::open(db_path)?;
+    enable_foreign_keys(&connection)?;
+    let transaction = connection.transaction()?;
+    let now = current_timestamp_sql(&transaction)?;
+    let existing_id = transaction
+        .query_row(
+            "SELECT id FROM local_files WHERE file_id = ?1",
+            params![&record.file_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let id = existing_id.unwrap_or_else(create_local_file_record_id);
+
+    transaction.execute(
+        "
+        INSERT INTO local_files(
+            id,
+            file_id,
+            conversation_id,
+            message_id,
+            original_name,
+            safe_name,
+            mime_type,
+            size_bytes,
+            sha256,
+            local_path,
+            status,
+            error_message,
+            downloaded_at,
+            created_at,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
+        ON CONFLICT(id) DO UPDATE SET
+            file_id = excluded.file_id,
+            conversation_id = excluded.conversation_id,
+            message_id = excluded.message_id,
+            original_name = excluded.original_name,
+            safe_name = excluded.safe_name,
+            mime_type = excluded.mime_type,
+            size_bytes = excluded.size_bytes,
+            sha256 = excluded.sha256,
+            local_path = excluded.local_path,
+            status = excluded.status,
+            error_message = excluded.error_message,
+            downloaded_at = excluded.downloaded_at,
+            updated_at = excluded.updated_at
+        ",
+        params![
+            &id,
+            &record.file_id,
+            &record.conversation_id,
+            &record.message_id,
+            &record.original_name,
+            &record.safe_name,
+            &record.mime_type,
+            &record.size_bytes,
+            &record.sha256,
+            &record.local_path,
+            &record.status,
+            &record.error_message,
+            &record.downloaded_at,
+            &now
+        ],
+    )?;
+    transaction.commit()?;
+
+    get_local_file_record_at_path(db_path, &id)?.ok_or(LocalCacheError::MissingLocalFileRecord)
+}
+
+fn list_local_file_records_at_path(
+    db_path: &Path,
+    limit: Option<i64>,
+) -> Result<Vec<LocalFileRecord>, LocalCacheError> {
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    init_database_at_path(db_path)?;
+
+    let normalized_limit = limit
+        .unwrap_or(DEFAULT_LOCAL_FILES_LIMIT)
+        .clamp(1, MAX_LOCAL_FILES_LIMIT);
+    let connection = Connection::open(db_path)?;
+    enable_foreign_keys(&connection)?;
+    let mut statement = connection.prepare(
+        "
+        SELECT
+            id,
+            file_id,
+            conversation_id,
+            message_id,
+            original_name,
+            safe_name,
+            mime_type,
+            size_bytes,
+            sha256,
+            local_path,
+            status,
+            error_message,
+            downloaded_at,
+            created_at,
+            updated_at
+        FROM local_files
+        ORDER BY COALESCE(downloaded_at, updated_at) DESC, updated_at DESC
+        LIMIT ?1
+        ",
+    )?;
+    let records = statement
+        .query_map(params![normalized_limit], local_file_record_from_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(records)
+}
+
+fn get_local_file_record_at_path(
+    db_path: &Path,
+    id: &str,
+) -> Result<Option<LocalFileRecord>, LocalCacheError> {
+    if !db_path.exists() {
+        return Ok(None);
+    }
+
+    init_database_at_path(db_path)?;
+
+    let connection = Connection::open(db_path)?;
+    enable_foreign_keys(&connection)?;
+    connection
+        .query_row(
+            "
+            SELECT
+                id,
+                file_id,
+                conversation_id,
+                message_id,
+                original_name,
+                safe_name,
+                mime_type,
+                size_bytes,
+                sha256,
+                local_path,
+                status,
+                error_message,
+                downloaded_at,
+                created_at,
+                updated_at
+            FROM local_files
+            WHERE id = ?1
+            ",
+            params![id],
+            local_file_record_from_row,
+        )
+        .optional()
+        .map_err(LocalCacheError::from)
+}
+
+fn local_file_record_from_row(row: &rusqlite::Row<'_>) -> Result<LocalFileRecord, rusqlite::Error> {
+    Ok(LocalFileRecord {
+        id: row.get(0)?,
+        file_id: row.get(1)?,
+        conversation_id: row.get(2)?,
+        message_id: row.get(3)?,
+        original_name: row.get(4)?,
+        safe_name: row.get(5)?,
+        mime_type: row.get(6)?,
+        size_bytes: row.get(7)?,
+        sha256: row.get(8)?,
+        local_path: row.get(9)?,
+        status: row.get(10)?,
+        error_message: row.get(11)?,
+        downloaded_at: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
+    })
+}
+
 fn cached_message_record_from_row(
     row: &rusqlite::Row<'_>,
 ) -> Result<CachedMessageRecord, rusqlite::Error> {
@@ -578,6 +828,52 @@ fn cached_message_record_from_row(
         recalled_at: row.get(15)?,
         local_deleted_at: row.get(16)?,
     })
+}
+
+fn validate_local_file_record_input(record: &LocalFileRecordInput) -> Result<(), LocalCacheError> {
+    if record.file_id.trim().is_empty() {
+        return Err(LocalCacheError::InvalidLocalFileRecord(
+            "file_id is required".to_string(),
+        ));
+    }
+    if record.original_name.trim().is_empty() {
+        return Err(LocalCacheError::InvalidLocalFileRecord(
+            "original_name is required".to_string(),
+        ));
+    }
+    if record.safe_name.trim().is_empty() {
+        return Err(LocalCacheError::InvalidLocalFileRecord(
+            "safe_name is required".to_string(),
+        ));
+    }
+    if record.local_path.trim().is_empty() {
+        return Err(LocalCacheError::InvalidLocalFileRecord(
+            "local_path is required".to_string(),
+        ));
+    }
+    if record.status.trim().is_empty() {
+        return Err(LocalCacheError::InvalidLocalFileRecord(
+            "status is required".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn current_timestamp_sql(connection: &Connection) -> Result<String, LocalCacheError> {
+    connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+            row.get(0)
+        })
+        .map_err(LocalCacheError::from)
+}
+
+fn create_local_file_record_id() -> String {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("local-file-{timestamp:x}-{:x}", std::process::id())
 }
 
 fn enable_foreign_keys(connection: &Connection) -> Result<(), LocalCacheError> {
@@ -640,12 +936,38 @@ fn migrate_connection(connection: &Connection) -> Result<(), LocalCacheError> {
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS local_files (
+            id TEXT PRIMARY KEY,
+            file_id TEXT NOT NULL,
+            conversation_id TEXT,
+            message_id TEXT,
+            original_name TEXT NOT NULL,
+            safe_name TEXT NOT NULL,
+            mime_type TEXT,
+            size_bytes INTEGER,
+            sha256 TEXT,
+            local_path TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            downloaded_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_cached_messages_conversation_created
             ON cached_messages(conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_cached_messages_client_message_id
             ON cached_messages(client_message_id);
         CREATE INDEX IF NOT EXISTS idx_cached_conversations_updated
             ON cached_conversations(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_local_files_file_id
+            ON local_files(file_id);
+        CREATE INDEX IF NOT EXISTS idx_local_files_conversation_id
+            ON local_files(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_local_files_message_id
+            ON local_files(message_id);
+        CREATE INDEX IF NOT EXISTS idx_local_files_downloaded_at
+            ON local_files(downloaded_at);
         ",
     )?;
 
@@ -688,6 +1010,8 @@ enum LocalCacheError {
     Tauri(tauri::Error),
     MissingSchemaVersion,
     InvalidSchemaVersion,
+    InvalidLocalFileRecord(String),
+    MissingLocalFileRecord,
 }
 
 impl fmt::Display for LocalCacheError {
@@ -701,6 +1025,12 @@ impl fmt::Display for LocalCacheError {
             }
             Self::InvalidSchemaVersion => {
                 write!(formatter, "local cache schema version is invalid")
+            }
+            Self::InvalidLocalFileRecord(error) => {
+                write!(formatter, "local file record is invalid: {error}")
+            }
+            Self::MissingLocalFileRecord => {
+                write!(formatter, "local file record was not found after write")
             }
         }
     }
@@ -1292,6 +1622,196 @@ mod tests {
         cleanup_test_db(&db_path);
     }
 
+    #[test]
+    fn migrates_v1_database_to_schema_v2() {
+        let db_path = test_db_path("migrate-v1");
+        create_v1_database_at_path(&db_path);
+
+        let schema_version = init_database_at_path(&db_path).expect("database should migrate");
+        let connection = Connection::open(&db_path).expect("database should open");
+
+        assert_eq!(schema_version, CURRENT_SCHEMA_VERSION);
+        assert!(has_table(&connection, "cached_conversations").expect("table check should work"));
+        assert!(has_table(&connection, "cached_messages").expect("table check should work"));
+        assert!(has_table(&connection, "local_clear_watermarks").expect("table check should work"));
+        assert!(has_table(&connection, "local_files").expect("table check should work"));
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn local_files_table_exists_after_initialization() {
+        let db_path = test_db_path("local-files-table");
+        init_database_at_path(&db_path).expect("database should initialize");
+
+        let connection = Connection::open(&db_path).expect("database should open");
+        let mut statement = connection
+            .prepare("PRAGMA table_info(local_files)")
+            .expect("table info should prepare");
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("table info should query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("columns should collect");
+
+        assert_eq!(
+            columns,
+            vec![
+                "id",
+                "file_id",
+                "conversation_id",
+                "message_id",
+                "original_name",
+                "safe_name",
+                "mime_type",
+                "size_bytes",
+                "sha256",
+                "local_path",
+                "status",
+                "error_message",
+                "downloaded_at",
+                "created_at",
+                "updated_at"
+            ]
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn local_files_indexes_exist_after_initialization() {
+        let db_path = test_db_path("local-files-indexes");
+        init_database_at_path(&db_path).expect("database should initialize");
+
+        let connection = Connection::open(&db_path).expect("database should open");
+        let mut statement = connection
+            .prepare("PRAGMA index_list(local_files)")
+            .expect("index list should prepare");
+        let indexes = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("index list should query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("indexes should collect");
+
+        assert!(indexes
+            .iter()
+            .any(|index| index == "idx_local_files_file_id"));
+        assert!(indexes
+            .iter()
+            .any(|index| index == "idx_local_files_conversation_id"));
+        assert!(indexes
+            .iter()
+            .any(|index| index == "idx_local_files_message_id"));
+        assert!(indexes
+            .iter()
+            .any(|index| index == "idx_local_files_downloaded_at"));
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn upserts_local_file_record_inserts_record() {
+        let db_path = test_db_path("local-file-insert");
+        let input = test_local_file_record("file-1", "report.pdf", "2026-06-08T00:00:00.000Z");
+
+        let record =
+            upsert_local_file_record_at_path(&db_path, &input).expect("record should upsert");
+
+        assert!(!record.id.trim().is_empty());
+        assert_eq!(record.file_id, input.file_id);
+        assert_eq!(record.original_name, input.original_name);
+        assert_eq!(record.safe_name, input.safe_name);
+        assert_eq!(record.local_path, input.local_path);
+        assert_eq!(record.status, "completed");
+        assert_eq!(record.downloaded_at, input.downloaded_at);
+        assert!(!record.created_at.trim().is_empty());
+        assert!(!record.updated_at.trim().is_empty());
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn upserts_local_file_record_updates_existing_file_record() {
+        let db_path = test_db_path("local-file-update");
+        let first = test_local_file_record("file-1", "report.pdf", "2026-06-08T00:00:00.000Z");
+        let mut second =
+            test_local_file_record("file-1", "report-renamed.pdf", "2026-06-08T00:02:00.000Z");
+        second.local_path = "D:\\Downloads\\report-renamed.pdf".to_string();
+
+        let first_record =
+            upsert_local_file_record_at_path(&db_path, &first).expect("first upsert should work");
+        let second_record =
+            upsert_local_file_record_at_path(&db_path, &second).expect("second upsert should work");
+        let listed = list_local_file_records_at_path(&db_path, None).expect("records should list");
+
+        assert_eq!(first_record.id, second_record.id);
+        assert_eq!(second_record.original_name, "report-renamed.pdf");
+        assert_eq!(
+            second_record.local_path,
+            "D:\\Downloads\\report-renamed.pdf"
+        );
+        assert_eq!(listed.len(), 1);
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn list_local_file_records_returns_recent_records_first() {
+        let db_path = test_db_path("local-file-list-order");
+        let older = test_local_file_record("file-older", "older.pdf", "2026-06-08T00:00:00.000Z");
+        let newer = test_local_file_record("file-newer", "newer.pdf", "2026-06-08T00:01:00.000Z");
+
+        upsert_local_file_record_at_path(&db_path, &older).expect("older should upsert");
+        upsert_local_file_record_at_path(&db_path, &newer).expect("newer should upsert");
+
+        let listed =
+            list_local_file_records_at_path(&db_path, Some(50)).expect("records should list");
+
+        assert_eq!(
+            listed
+                .iter()
+                .map(|record| record.file_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["file-newer", "file-older"]
+        );
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn local_file_record_rejects_empty_required_fields() {
+        let db_path = test_db_path("local-file-required");
+        let mut input = test_local_file_record("file-1", "report.pdf", "2026-06-08T00:00:00.000Z");
+        input.file_id = "  ".to_string();
+
+        let error = upsert_local_file_record_at_path(&db_path, &input)
+            .expect_err("empty file_id should fail");
+
+        assert!(error.to_string().contains("file_id is required"));
+        assert!(!db_path.exists());
+
+        cleanup_test_db(&db_path);
+    }
+
+    #[test]
+    fn clear_local_cache_keeps_local_file_records() {
+        let db_path = test_db_path("clear-keeps-local-files");
+        let input = test_local_file_record("file-1", "report.pdf", "2026-06-08T00:00:00.000Z");
+        let record =
+            upsert_local_file_record_at_path(&db_path, &input).expect("record should upsert");
+
+        clear_local_cache_at_path(&db_path).expect("cache should clear");
+
+        let listed =
+            list_local_file_records_at_path(&db_path, None).expect("records should still list");
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, record.id);
+        assert_eq!(listed[0].file_id, "file-1");
+
+        cleanup_test_db(&db_path);
+    }
+
     fn test_db_path(name: &str) -> PathBuf {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1305,6 +1825,86 @@ mod tests {
     fn cleanup_test_db(db_path: &Path) {
         if let Some(parent) = db_path.parent() {
             let _ = fs::remove_dir_all(parent);
+        }
+    }
+
+    fn create_v1_database_at_path(db_path: &Path) {
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).expect("test database directory should be created");
+        }
+
+        let connection = Connection::open(db_path).expect("database should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE local_cache_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE cached_conversations (
+                    id TEXT PRIMARY KEY,
+                    conversation_type TEXT NOT NULL,
+                    peer_user_id TEXT,
+                    title TEXT,
+                    avatar_url TEXT,
+                    last_message_id TEXT,
+                    last_message_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE cached_messages (
+                    id TEXT PRIMARY KEY,
+                    client_message_id TEXT,
+                    conversation_id TEXT NOT NULL,
+                    sender_id TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    ciphertext TEXT,
+                    nonce TEXT,
+                    encryption_version TEXT,
+                    metadata_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    delivered_at TEXT,
+                    read_at TEXT,
+                    edited_at TEXT,
+                    recalled_at TEXT,
+                    local_deleted_at TEXT
+                );
+
+                CREATE TABLE local_clear_watermarks (
+                    conversation_id TEXT PRIMARY KEY,
+                    cleared_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO local_cache_meta(key, value, updated_at)
+                VALUES ('schema_version', '1', '2026-06-08T00:00:00.000Z');
+                ",
+            )
+            .expect("v1 schema should be created");
+    }
+
+    fn test_local_file_record(
+        file_id: &str,
+        original_name: &str,
+        downloaded_at: &str,
+    ) -> LocalFileRecordInput {
+        LocalFileRecordInput {
+            file_id: file_id.to_string(),
+            conversation_id: Some("conversation-1".to_string()),
+            message_id: Some("message-1".to_string()),
+            original_name: original_name.to_string(),
+            safe_name: original_name.replace(' ', "_"),
+            mime_type: Some("application/pdf".to_string()),
+            size_bytes: Some(1024),
+            sha256: Some("sha256-test-value".to_string()),
+            local_path: format!("D:\\Downloads\\{original_name}"),
+            status: "completed".to_string(),
+            error_message: None,
+            downloaded_at: Some(downloaded_at.to_string()),
         }
     }
 
