@@ -19,6 +19,7 @@ import {
   type FileKind,
   type FileMetadataResponse,
 } from '../../api/files.api';
+import { saveDownloadedFile, upsertLocalFileRecord } from '../../api/localFiles.api';
 import { logout as requestLogout } from '../../api/auth.api';
 import { listFriends, type FriendItem } from '../../api/friends.api';
 import { AppLogo } from '../../components/AppLogo';
@@ -698,7 +699,21 @@ export function MainLayout(): JSX.Element {
 
     try {
       const blob = await downloadFile(file.id);
-      triggerBrowserDownload(blob, file.originalName);
+      const savedFile = await saveDownloadedFile(file.originalName, await blobToByteArray(blob));
+      await upsertLocalFileRecord({
+        fileId: file.id,
+        conversationId: file.conversationId,
+        messageId: file.messageId,
+        originalName: file.originalName,
+        safeName: savedFile.safeName,
+        mimeType: file.mimeType,
+        sizeBytes: savedFile.sizeBytes,
+        sha256: file.sha256,
+        localPath: savedFile.localPath,
+        status: 'completed',
+        errorMessage: null,
+        downloadedAt: new Date().toISOString(),
+      });
       setDownloadStates((current) => {
         const next = { ...current };
         delete next[file.id];
@@ -2918,17 +2933,6 @@ function formatFileBadge(originalName: string): FileBadge {
   return fileBadgeByExtension[extension] ?? { label: 'FILE', kind: 'generic', iconSrc: FILE_ICON_SOURCES.generic };
 }
 
-function triggerBrowserDownload(blob: Blob, originalName: string): void {
-  const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = objectUrl;
-  link.download = sanitizeDownloadName(originalName);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(objectUrl);
-}
-
 async function copyTextToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -2981,6 +2985,10 @@ async function updateTrayUnreadCount(unreadCount: number): Promise<void> {
   } catch {
     // Tray updates are best-effort and should never affect chat rendering.
   }
+}
+
+async function blobToByteArray(blob: Blob): Promise<number[]> {
+  return Array.from(new Uint8Array(await blob.arrayBuffer()));
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -3041,16 +3049,6 @@ async function openImagePreviewWindow(payload: ImagePreviewWindowPayload): Promi
 
   await readyPromise;
   await emitTo(label, IMAGE_PREVIEW_OPEN_EVENT, payload);
-}
-
-function sanitizeDownloadName(originalName: string): string {
-  const name = originalName
-    .split(/[\\/]/)
-    .pop()
-    ?.replace(/[\r\n]/g, '')
-    .trim();
-
-  return name || 'file';
 }
 
 interface ForwardTarget {

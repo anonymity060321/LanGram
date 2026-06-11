@@ -33,6 +33,19 @@ export interface LocalFileRecordInput {
   downloadedAt: string | null;
 }
 
+export interface SavedDownloadedFile {
+  localPath: string;
+  safeName: string;
+  sizeBytes: number;
+}
+
+export function saveDownloadedFile(
+  fileName: string,
+  bytes: number[],
+): Promise<SavedDownloadedFile> {
+  return invoke<SavedDownloadedFile>('save_downloaded_file', { fileName, bytes });
+}
+
 export function upsertLocalFileRecord(
   record: LocalFileRecordInput,
 ): Promise<LocalFileRecord> {

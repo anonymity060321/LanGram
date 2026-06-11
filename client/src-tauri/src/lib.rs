@@ -47,6 +47,14 @@ struct DownloadDirectoryStatus {
     is_default: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedDownloadedFile {
+    local_path: String,
+    safe_name: String,
+    size_bytes: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeviceIdentity {
@@ -175,6 +183,18 @@ fn reset_download_directory(app: AppHandle) -> Result<DownloadDirectoryStatus, S
     download_directory_status(&app, &config).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn save_downloaded_file(
+    app: AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<SavedDownloadedFile, String> {
+    let config = read_or_create_config(&app).map_err(|error| error.to_string())?;
+    let status = download_directory_status(&app, &config).map_err(|error| error.to_string())?;
+    save_downloaded_file_to_directory(Path::new(&status.effective_dir), &file_name, &bytes)
+        .map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -208,6 +228,7 @@ pub fn run() {
             get_download_directory_status,
             set_download_directory,
             reset_download_directory,
+            save_downloaded_file,
             local_cache::init_local_cache,
             local_cache::get_local_cache_status,
             local_cache::clear_local_cache,
@@ -484,6 +505,125 @@ fn ensure_download_directory_input(path: &str) -> Result<PathBuf, String> {
     ensure_directory(PathBuf::from(trimmed_path))
 }
 
+fn save_downloaded_file_to_directory(
+    directory: &Path,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<SavedDownloadedFile, ConfigError> {
+    let directory =
+        ensure_directory(directory.to_path_buf()).map_err(ConfigError::InvalidDownloadDirectory)?;
+    let safe_name = sanitize_download_file_name(file_name);
+    let (stem, extension) = split_file_name(&safe_name);
+
+    for attempt in 0..10_000 {
+        let candidate_name = if attempt == 0 {
+            safe_name.clone()
+        } else if extension.is_empty() {
+            format!("{stem} ({attempt})")
+        } else {
+            format!("{stem} ({attempt}).{extension}")
+        };
+        let candidate_path = directory.join(&candidate_name);
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate_path)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(bytes)?;
+                return Ok(SavedDownloadedFile {
+                    local_path: display_path_string(&candidate_path),
+                    safe_name: candidate_name,
+                    size_bytes: bytes.len() as i64,
+                });
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(ConfigError::Io(error)),
+        }
+    }
+
+    Err(ConfigError::InvalidDownloadDirectory(String::from(
+        "Could not create a unique download file name",
+    )))
+}
+
+fn sanitize_download_file_name(file_name: &str) -> String {
+    let name = file_name
+        .split(['/', '\\'])
+        .next_back()
+        .unwrap_or_default()
+        .replace(['\r', '\n'], "")
+        .trim()
+        .trim_matches('.')
+        .to_string();
+    let sanitized = name
+        .chars()
+        .map(|character| match character {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            character if character.is_control() => '_',
+            character => character,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+
+    let fallback = if sanitized.is_empty() {
+        String::from("file")
+    } else {
+        sanitized
+    };
+    if is_reserved_windows_file_name(&fallback) {
+        format!("_{fallback}")
+    } else {
+        fallback
+    }
+}
+
+fn split_file_name(file_name: &str) -> (String, String) {
+    match file_name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
+            (stem.to_string(), extension.to_string())
+        }
+        _ => (file_name.to_string(), String::new()),
+    }
+}
+
+fn is_reserved_windows_file_name(file_name: &str) -> bool {
+    let stem = file_name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 fn build_download_directory_status(
     configured_dir: Option<PathBuf>,
     effective_dir: PathBuf,
@@ -618,6 +758,55 @@ mod tests {
 
         assert_eq!(error, "Download directory path must point to a directory");
         let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn sanitize_download_file_name_removes_paths_and_invalid_characters() {
+        assert_eq!(
+            sanitize_download_file_name(r"..\unsafe<name>.pdf"),
+            "unsafe_name_.pdf"
+        );
+        assert_eq!(sanitize_download_file_name("  .  "), "file");
+        assert_eq!(sanitize_download_file_name("CON.txt"), "_CON.txt");
+    }
+
+    #[test]
+    fn save_downloaded_file_writes_to_directory() {
+        let directory = unique_test_path("save-file");
+
+        let saved = save_downloaded_file_to_directory(&directory, "report.pdf", b"hello")
+            .expect("file should save");
+
+        assert_eq!(saved.safe_name, "report.pdf");
+        assert_eq!(saved.size_bytes, 5);
+        assert_eq!(
+            fs::read(directory.join("report.pdf")).expect("saved file should read"),
+            b"hello"
+        );
+
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn save_downloaded_file_does_not_overwrite_existing_file() {
+        let directory = unique_test_path("save-file-conflict");
+        fs::create_dir_all(&directory).expect("test directory should be created");
+        fs::write(directory.join("report.pdf"), b"existing").expect("existing file should write");
+
+        let saved = save_downloaded_file_to_directory(&directory, "report.pdf", b"new")
+            .expect("file should save");
+
+        assert_eq!(saved.safe_name, "report (1).pdf");
+        assert_eq!(
+            fs::read(directory.join("report.pdf")).expect("existing file should read"),
+            b"existing"
+        );
+        assert_eq!(
+            fs::read(directory.join("report (1).pdf")).expect("new file should read"),
+            b"new"
+        );
+
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
