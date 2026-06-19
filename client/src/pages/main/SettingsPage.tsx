@@ -1,4 +1,12 @@
-import { ChangeEvent, FormEvent, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { logout as requestLogout } from '../../api/auth.api';
@@ -8,6 +16,7 @@ import {
   setDownloadDirectory,
   type DownloadDirectoryStatus,
 } from '../../api/downloadSettings.api';
+import { listLocalFileRecords, type LocalFileRecord } from '../../api/localFiles.api';
 import {
   getCurrentUserProfile,
   updateCurrentUserProfile,
@@ -61,6 +70,9 @@ export function SettingsPage(): JSX.Element {
     null,
   );
   const [isDownloadDirectorySaving, setIsDownloadDirectorySaving] = useState(false);
+  const [downloadRecords, setDownloadRecords] = useState<LocalFileRecord[]>([]);
+  const [isDownloadRecordsLoading, setIsDownloadRecordsLoading] = useState(false);
+  const [downloadRecordsError, setDownloadRecordsError] = useState<string | null>(null);
   const [localCacheNotice, setLocalCacheNotice] = useState<LocalCacheNotice | null>(null);
   const localCacheStatus = useLocalCacheStore((state) => state.status);
   const localCacheInitializationState = useLocalCacheStore((state) => state.initializationState);
@@ -69,6 +81,20 @@ export function SettingsPage(): JSX.Element {
   const isLocalCacheClearing = useLocalCacheStore((state) => state.isClearing);
   const refreshLocalCacheStatus = useLocalCacheStore((state) => state.refreshStatus);
   const clearLocalCache = useLocalCacheStore((state) => state.clearCache);
+
+  const refreshDownloadRecords = useCallback(async (): Promise<void> => {
+    setIsDownloadRecordsLoading(true);
+    setDownloadRecordsError(null);
+
+    try {
+      const records = await listLocalFileRecords(20);
+      setDownloadRecords(records);
+    } catch {
+      setDownloadRecordsError(t('settings.downloadRecordsLoadFailed'));
+    } finally {
+      setIsDownloadRecordsLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -87,10 +113,14 @@ export function SettingsPage(): JSX.Element {
 
     if (activeSection === 'storage') {
       void refreshDownloadDirectoryStatus().catch(() => {
-        setDownloadDirectoryNotice({ kind: 'error', message: t('settings.downloadDirectoryReadFailed') });
+        setDownloadDirectoryNotice({
+          kind: 'error',
+          message: t('settings.downloadDirectoryReadFailed'),
+        });
       });
+      void refreshDownloadRecords();
     }
-  }, [activeSection, refreshLocalCacheStatus, t]);
+  }, [activeSection, refreshDownloadRecords, refreshLocalCacheStatus, t]);
 
   useEffect(() => {
     if (!config) {
@@ -645,16 +675,55 @@ export function SettingsPage(): JSX.Element {
                       </div>
                     </div>
                   </div>
-                  <div className="settings-storage-card settings-storage-card--muted">
+                  <h3 className="settings-group-title">{t('settings.downloadRecords')}</h3>
+                  <div className="settings-storage-card settings-download-records-card">
                     <div className="settings-storage-main">
                       <div className="settings-row-text">
-                        <strong>{t('settings.storageSpace')}</strong>
-                        <span>{t('settings.storageManageComingSoon')}</span>
+                        <strong>{t('settings.downloadRecords')}</strong>
+                        <span>
+                          {isDownloadRecordsLoading
+                            ? t('chat.loading')
+                            : downloadRecords.length === 0
+                              ? t('settings.downloadRecordsEmptyHint')
+                              : `${downloadRecords.length}`}
+                        </span>
                       </div>
-                      <button type="button" className="secondary-button compact-button" disabled>
-                        {t('settings.storageManage')}
-                      </button>
                     </div>
+                    {downloadRecordsError ? (
+                      <p className="form-error">{downloadRecordsError}</p>
+                    ) : null}
+                    {downloadRecords.length === 0 && !isDownloadRecordsLoading ? (
+                      <div className="settings-download-records-empty">
+                        <strong>{t('settings.downloadRecordsEmpty')}</strong>
+                        <span>{t('settings.downloadRecordsEmptyHint')}</span>
+                      </div>
+                    ) : null}
+                    {downloadRecords.length > 0 ? (
+                      <ul className="settings-download-record-list">
+                        {downloadRecords.map((record) => {
+                          const fileName = getDownloadRecordFileName(record);
+                          return (
+                            <li className="settings-download-record-item" key={record.id}>
+                              <div className="settings-download-record-main">
+                                <strong title={fileName}>{fileName}</strong>
+                                <span title={record.localPath}>{record.localPath}</span>
+                              </div>
+                              <div className="settings-download-record-meta">
+                                <span>{formatFileSize(record.sizeBytes)}</span>
+                                <span>{formatDownloadDate(record.downloadedAt ?? record.updatedAt)}</span>
+                                <span
+                                  className={`settings-download-record-status is-${getDownloadRecordStatusClass(
+                                    record.status,
+                                  )}`}
+                                >
+                                  {t(getDownloadRecordStatusLabelKey(record.status))}
+                                </span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -921,6 +990,74 @@ type LocalCacheNotice = {
   kind: 'success' | 'error';
   message: string;
 };
+
+function getDownloadRecordFileName(record: LocalFileRecord): string {
+  return record.originalName.trim() || record.safeName.trim() || '-';
+}
+
+function formatFileSize(sizeBytes: number | null): string {
+  if (sizeBytes === null || !Number.isFinite(sizeBytes) || sizeBytes < 0) {
+    return '-';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = sizeBytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  if (unitIndex === 0) {
+    return `${value} ${units[unitIndex]}`;
+  }
+
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function formatDownloadDate(value: string | null): string {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+}
+
+function getDownloadRecordStatusLabelKey(status: string): TranslationKey {
+  const normalizedStatus = status.trim().toLowerCase();
+  if (normalizedStatus === 'completed') {
+    return 'settings.downloadRecordStatusCompleted';
+  }
+
+  if (normalizedStatus === 'failed') {
+    return 'settings.downloadRecordStatusFailed';
+  }
+
+  if (normalizedStatus === 'missing') {
+    return 'settings.downloadRecordStatusMissing';
+  }
+
+  return 'settings.downloadRecordStatusUnknown';
+}
+
+function getDownloadRecordStatusClass(status: string): string {
+  const normalizedStatus = status.trim().toLowerCase();
+  if (
+    normalizedStatus === 'completed' ||
+    normalizedStatus === 'failed' ||
+    normalizedStatus === 'missing'
+  ) {
+    return normalizedStatus;
+  }
+
+  return 'unknown';
+}
 
 function getNotificationPermissionLabelKey(
   permission: NotificationRuntimeStatus['permission'],

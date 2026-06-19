@@ -6615,6 +6615,114 @@ select:focus {
   background: color-mix(in srgb, var(--color-bg-panel-muted) 78%, var(--color-bg-elevated));
 }
 
+.settings-download-records-card {
+  gap: 10px;
+}
+
+.settings-download-records-empty {
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  padding: 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.settings-download-records-empty strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.settings-download-records-empty span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.settings-download-record-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+  list-style: none;
+}
+
+.settings-download-record-item {
+  min-width: 0;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  padding: 10px 11px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.settings-download-record-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.settings-download-record-main strong,
+.settings-download-record-main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-download-record-main strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.settings-download-record-main span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.settings-download-record-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.settings-download-record-meta > span {
+  min-height: 24px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-panel-muted);
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.settings-download-record-status {
+  color: var(--color-text-muted);
+  font-weight: 800;
+}
+
+.settings-download-record-status.is-completed {
+  background: color-mix(in srgb, #16a34a 12%, var(--color-bg-elevated));
+  color: #15803d;
+}
+
+.settings-download-record-status.is-failed {
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--color-bg-elevated));
+  color: var(--color-danger);
+}
+
+.settings-download-record-status.is-missing {
+  background: color-mix(in srgb, #f59e0b 14%, var(--color-bg-elevated));
+  color: #b45309;
+}
+
 .settings-account-badge {
   border-radius: var(--radius-pill);
   background: var(--color-interactive-active);
@@ -6709,6 +6817,31 @@ select:focus {
 
 :root[data-theme='dark'] .settings-storage-card--muted {
   background: color-mix(in srgb, var(--color-bg-panel-muted) 82%, var(--color-bg-elevated));
+}
+
+:root[data-theme='dark'] .settings-download-records-empty,
+:root[data-theme='dark'] .settings-download-record-item {
+  border-color: var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+:root[data-theme='dark'] .settings-download-record-meta > span {
+  background: var(--color-bg-panel-muted);
+}
+
+:root[data-theme='dark'] .settings-download-record-status.is-completed {
+  background: color-mix(in srgb, #22c55e 18%, var(--color-bg-elevated));
+  color: #86efac;
+}
+
+:root[data-theme='dark'] .settings-download-record-status.is-failed {
+  background: color-mix(in srgb, var(--color-danger) 18%, var(--color-bg-elevated));
+  color: #fecaca;
+}
+
+:root[data-theme='dark'] .settings-download-record-status.is-missing {
+  background: color-mix(in srgb, #f59e0b 18%, var(--color-bg-elevated));
+  color: #fcd34d;
 }
 
 :root[data-theme='dark'] .settings-panel .danger-button {
@@ -7392,12 +7525,14 @@ select:focus {
   .settings-local-cache-header,
   .settings-local-cache-details div,
   .settings-storage-main,
+  .settings-download-record-item,
   .settings-download-directory-input {
     grid-template-columns: 1fr;
   }
 
   .settings-local-cache-actions,
   .settings-storage-actions,
+  .settings-download-record-meta,
   .settings-download-directory-actions,
   .settings-actions-row {
     justify-content: flex-start;
