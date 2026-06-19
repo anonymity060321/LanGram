@@ -101,6 +101,8 @@ export function MainLayout(): JSX.Element {
   const [activeView, setActiveView] = useState<MainView>('messages');
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
+  const [downloadSuccessNotice, setDownloadSuccessNotice] =
+    useState<DownloadSuccessNotice | null>(null);
   const [conversationUiState, setConversationUiState] = useState<ConversationUiState>(() =>
     loadConversationUiState(),
   );
@@ -311,6 +313,19 @@ export function MainLayout(): JSX.Element {
 
     return () => window.clearTimeout(timerId);
   }, [uploadState.error, uploadState.notice]);
+
+  useEffect(() => {
+    if (!downloadSuccessNotice) {
+      return undefined;
+    }
+
+    const currentNotice = downloadSuccessNotice;
+    const timerId = window.setTimeout(() => {
+      setDownloadSuccessNotice((current) => (current === currentNotice ? null : current));
+    }, 3000);
+
+    return () => window.clearTimeout(timerId);
+  }, [downloadSuccessNotice]);
 
   useEffect(() => {
     if (!conversationContextMenu) {
@@ -713,6 +728,11 @@ export function MainLayout(): JSX.Element {
         status: 'completed',
         errorMessage: null,
         downloadedAt: new Date().toISOString(),
+      });
+      setDownloadSuccessNotice({
+        fileId: file.id,
+        message: formatDownloadSavedNotice(t, savedFile.localPath),
+        path: savedFile.localPath,
       });
       setDownloadStates((current) => {
         const next = { ...current };
@@ -1158,6 +1178,13 @@ export function MainLayout(): JSX.Element {
               <div className={`file-upload-status ${uploadState.error ? 'is-error' : ''}`}>
                 <span>{uploadState.error ?? t('chat.uploadSuccess')}</span>
                 {uploadState.notice ? <small>{uploadState.notice}</small> : null}
+              </div>
+            ) : null}
+            {downloadSuccessNotice ? (
+              <div className="file-download-success" role="status" aria-live="polite">
+                <span title={downloadSuccessNotice.path || downloadSuccessNotice.message}>
+                  {downloadSuccessNotice.message}
+                </span>
               </div>
             ) : null}
             {messageLimitNotice ? (
@@ -2795,6 +2822,12 @@ interface FileUploadState {
   error: string | null;
 }
 
+interface DownloadSuccessNotice {
+  fileId: string;
+  message: string;
+  path: string;
+}
+
 type FileDownloadStatus = 'downloading' | 'failed';
 type MainView = 'messages' | 'contacts';
 type MessageMenuAction = 'copy' | 'download' | 'forward' | 'retry' | 'edit' | 'recall' | 'deleteLocal';
@@ -2895,6 +2928,18 @@ function isSupportedUpload(file: File, requestedKind: FileKind): boolean {
 
 function formatUploadNotice(metadata: FileMetadataResponse): string {
   return `${metadata.originalName} (${formatFileSize(Number(metadata.sizeBytes))})`;
+}
+
+function formatDownloadSavedNotice(
+  t: ReturnType<typeof useI18n>['t'],
+  localPath: string,
+): string {
+  const normalizedPath = localPath.trim();
+  if (!normalizedPath) {
+    return t('chat.downloadSaved');
+  }
+
+  return t('chat.downloadSavedTo').replace('{{path}}', normalizedPath);
 }
 
 function formatFileSize(sizeBytes: number): string {
