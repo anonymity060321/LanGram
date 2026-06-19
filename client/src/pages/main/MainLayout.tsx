@@ -4,11 +4,13 @@ import {
   FormEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
+  type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
@@ -28,7 +30,7 @@ import { useI18n } from '../../i18n';
 import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
 import { useNetworkStore, type NetworkStatus } from '../../stores/network.store';
-import { useSettingsStore } from '../../stores/settings.store';
+import { useSettingsStore, type SendShortcutPreference } from '../../stores/settings.store';
 import {
   loadConversationUiState,
   saveConversationUiState,
@@ -42,6 +44,39 @@ import {
 } from '../../utils/desktopNotification';
 import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
 import { FriendsWorkspace } from './FriendsPage';
+
+function useDismissOnOutsideOrEscape<T extends HTMLElement>(
+  isOpen: boolean,
+  layerRef: RefObject<T | null>,
+  setIsOpen: (isOpen: boolean) => void,
+): void {
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      if (layerRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, layerRef, setIsOpen]);
+}
 
 export function MainLayout(): JSX.Element {
   const { t } = useI18n();
@@ -89,6 +124,8 @@ export function MainLayout(): JSX.Element {
   const setSearchQuery = useChatStore((state) => state.setSearchQuery);
   const localClearWatermarks = useChatStore((state) => state.localClearWatermarks);
   const enableNotifications = useSettingsStore((state) => state.config?.enableNotifications ?? true);
+  const sendShortcut = useSettingsStore((state) => state.config?.sendShortcut ?? 'enter');
+  const updateConfig = useSettingsStore((state) => state.updateConfig);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
   const [messageLimitNotice, setMessageLimitNotice] = useState<string | null>(null);
@@ -100,6 +137,10 @@ export function MainLayout(): JSX.Element {
   });
   const [activeView, setActiveView] = useState<MainView>('messages');
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+  const [isChatActionsOpen, setIsChatActionsOpen] = useState(false);
+  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
+  const [isSendShortcutMenuOpen, setIsSendShortcutMenuOpen] = useState(false);
+  const [isEmojiPanelOpen, setIsEmojiPanelOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
   const [downloadSuccessNotice, setDownloadSuccessNotice] =
     useState<DownloadSuccessNotice | null>(null);
@@ -111,8 +152,12 @@ export function MainLayout(): JSX.Element {
     useState<ConversationContextMenuState | null>(null);
   const [pageAttentionKey, setPageAttentionKey] = useState(0);
   const appMenuRef = useRef<HTMLDivElement>(null);
+  const chatActionsRef = useRef<HTMLDivElement>(null);
+  const sendShortcutRef = useRef<HTMLDivElement>(null);
+  const emojiPanelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
   const isMessageComposingRef = useRef(false);
   const lastNotificationMessageRef = useRef<string | null>(null);
   const hasRequestedNotificationPermissionRef = useRef(false);
@@ -121,6 +166,11 @@ export function MainLayout(): JSX.Element {
   const hasObservedOnlineForSyncRef = useRef(networkStatus === 'online');
   const previousNetworkStatusForSyncRef = useRef<NetworkStatus>(networkStatus);
   const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
+
+  useDismissOnOutsideOrEscape(isAppMenuOpen, appMenuRef, setIsAppMenuOpen);
+  useDismissOnOutsideOrEscape(isChatActionsOpen, chatActionsRef, setIsChatActionsOpen);
+  useDismissOnOutsideOrEscape(isSendShortcutMenuOpen, sendShortcutRef, setIsSendShortcutMenuOpen);
+  useDismissOnOutsideOrEscape(isEmojiPanelOpen, emojiPanelRef, setIsEmojiPanelOpen);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationId) ?? null;
   const isUsingCachedMessages = selectedConversationId
@@ -196,33 +246,6 @@ export function MainLayout(): JSX.Element {
     connect(accessToken, () => notifySessionReplaced());
     return () => disconnect();
   }, [accessToken, connect, disconnect, notifySessionReplaced]);
-
-  useEffect(() => {
-    if (!isAppMenuOpen) {
-      return undefined;
-    }
-
-    function handlePointerDown(event: PointerEvent): void {
-      if (appMenuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setIsAppMenuOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') {
-        setIsAppMenuOpen(false);
-      }
-    }
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isAppMenuOpen]);
 
   useEffect(() => {
     if (!messageLimitNotice) {
@@ -378,6 +401,11 @@ export function MainLayout(): JSX.Element {
       closeConversation();
     }
   }, [closeConversation, conversationUiState.hiddenConversations, selectedConversationId]);
+
+  useEffect(() => {
+    setIsChatActionsOpen(false);
+    setIsChatSearchOpen(false);
+  }, [selectedConversationId]);
 
   useEffect(() => {
     function notifyVisibilityChange(): void {
@@ -577,16 +605,58 @@ export function MainLayout(): JSX.Element {
   }
 
   function handleMessageDraftKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
-    if (event.key !== 'Enter' || event.shiftKey) {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing || isMessageComposingRef.current) {
       return;
     }
 
-    if (event.nativeEvent.isComposing || isMessageComposingRef.current) {
+    if (event.shiftKey) {
       return;
     }
 
-    event.preventDefault();
-    void submitMessageDraft();
+    if (sendShortcut === 'enter') {
+      event.preventDefault();
+      void submitMessageDraft();
+      return;
+    }
+
+    if (sendShortcut === 'ctrlEnter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void submitMessageDraft();
+    }
+  }
+
+  async function handleSendShortcutChange(nextShortcut: SendShortcutPreference): Promise<void> {
+    setIsSendShortcutMenuOpen(false);
+    if (nextShortcut === sendShortcut) {
+      return;
+    }
+
+    await updateConfig({ sendShortcut: nextShortcut });
+  }
+
+  function insertEmoji(emoji: string): void {
+    const textarea = messageTextareaRef.current;
+    const selectionStart = textarea?.selectionStart ?? messageDraft.length;
+    const selectionEnd = textarea?.selectionEnd ?? messageDraft.length;
+    const nextDraft = `${messageDraft.slice(0, selectionStart)}${emoji}${messageDraft.slice(selectionEnd)}`;
+
+    if (nextDraft.length > MESSAGE_DRAFT_MAX_LENGTH) {
+      setMessageLimitNotice(t('chat.messageLengthLimitReached'));
+      return;
+    }
+
+    setMessageDraft(nextDraft);
+    setIsEmojiPanelOpen(false);
+    requestAnimationFrame(() => {
+      const currentTextarea = messageTextareaRef.current;
+      if (!currentTextarea) {
+        return;
+      }
+
+      const nextCursorPosition = selectionStart + emoji.length;
+      currentTextarea.focus();
+      currentTextarea.setSelectionRange(nextCursorPosition, nextCursorPosition);
+    });
   }
 
   async function handleFileSelected(
@@ -760,6 +830,16 @@ export function MainLayout(): JSX.Element {
       ...current,
       [selectedConversationId]: new Date().toISOString(),
     }));
+  }
+
+  function openConversationSearch(): void {
+    setIsChatSearchOpen(true);
+    setIsChatActionsOpen(false);
+  }
+
+  function handleClearLocalConversationFromMenu(): void {
+    setIsChatActionsOpen(false);
+    handleClearLocalConversation();
   }
 
   function handleConversationContextMenu(event: MouseEvent, conversation: Conversation): void {
@@ -1085,14 +1165,39 @@ export function MainLayout(): JSX.Element {
             </span>
           </div>
           {selectedConversation ? (
-            <button
-              type="button"
-              className="secondary-button compact-button"
-              onClick={handleClearLocalConversation}
-              disabled={messages.length === 0}
-            >
-              {t('chat.clearLocal')}
-            </button>
+            <div className="chat-header-actions" ref={chatActionsRef}>
+              {isChatActionsOpen ? (
+                <div className="chat-actions-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="chat-actions-menu-item"
+                    onClick={openConversationSearch}
+                  >
+                    {t('chat.searchCurrentConversation')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="chat-actions-menu-item is-danger"
+                    onClick={handleClearLocalConversationFromMenu}
+                    disabled={messages.length === 0}
+                  >
+                    {t('chat.clearLocalRecords')}
+                  </button>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="chat-more-button"
+                aria-label={t('chat.moreActions')}
+                aria-expanded={isChatActionsOpen}
+                title={t('chat.moreActions')}
+                onClick={() => setIsChatActionsOpen((isOpen) => !isOpen)}
+              >
+                <span aria-hidden="true">...</span>
+              </button>
+            </div>
           ) : null}
         </header>
         {selectedConversation ? (
@@ -1104,52 +1209,54 @@ export function MainLayout(): JSX.Element {
                 t={t}
               />
             </div>
-            <div className="chat-search-bar">
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder={t('chat.searchPlaceholder')}
-              />
-              {searchQuery.trim() ? (
-                <div className="chat-search-actions">
-                  <span className={searchResults.length === 0 ? 'is-empty' : ''}>
-                    {searchResults.length === 0
-                      ? t('chat.searchNoResults')
-                      : `${Math.max(activeSearchResultIndex + 1, 1)} / ${searchResults.length}`}
-                  </span>
-                  <button
-                    type="button"
-                    className="chat-search-button"
-                    aria-label={t('chat.searchPrevious')}
-                    title={t('chat.searchPrevious')}
-                    disabled={searchResults.length === 0}
-                    onClick={goToPreviousSearchResult}
-                  >
-                    &uarr;
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-search-button"
-                    aria-label={t('chat.searchNext')}
-                    title={t('chat.searchNext')}
-                    disabled={searchResults.length === 0}
-                    onClick={goToNextSearchResult}
-                  >
-                    &darr;
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-search-button"
-                    aria-label={t('chat.searchClear')}
-                    title={t('chat.searchClear')}
-                    onClick={clearSearch}
-                  >
-                    &times;
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            {isChatSearchOpen ? (
+              <div className="chat-search-bar">
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder={t('chat.searchPlaceholder')}
+                />
+                {searchQuery.trim() ? (
+                  <div className="chat-search-actions">
+                    <span className={searchResults.length === 0 ? 'is-empty' : ''}>
+                      {searchResults.length === 0
+                        ? t('chat.searchNoResults')
+                        : `${Math.max(activeSearchResultIndex + 1, 1)} / ${searchResults.length}`}
+                    </span>
+                    <button
+                      type="button"
+                      className="chat-search-button"
+                      aria-label={t('chat.searchPrevious')}
+                      title={t('chat.searchPrevious')}
+                      disabled={searchResults.length === 0}
+                      onClick={goToPreviousSearchResult}
+                    >
+                      &uarr;
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-search-button"
+                      aria-label={t('chat.searchNext')}
+                      title={t('chat.searchNext')}
+                      disabled={searchResults.length === 0}
+                      onClick={goToNextSearchResult}
+                    >
+                      &darr;
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-search-button"
+                      aria-label={t('chat.searchClear')}
+                      title={t('chat.searchClear')}
+                      onClick={clearSearch}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="chat-message-area">
               {isUsingCachedMessages ? (
                 <p className="chat-cache-notice">{t('chat.showingCachedMessages')}</p>
@@ -1194,6 +1301,34 @@ export function MainLayout(): JSX.Element {
             ) : null}
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <div className="message-input-toolbar" aria-label={t('chat.attachments')}>
+                <div className="emoji-tool" ref={emojiPanelRef}>
+                  <button
+                    type="button"
+                    className="composer-tool-button"
+                    aria-label={t('chat.emoji')}
+                    title={t('chat.emoji')}
+                    aria-expanded={isEmojiPanelOpen}
+                    onClick={() => setIsEmojiPanelOpen((isOpen) => !isOpen)}
+                  >
+                    <img src="/vector_icon/smile.svg" alt="" aria-hidden="true" />
+                    <span>{t('chat.emoji')}</span>
+                  </button>
+                  {isEmojiPanelOpen ? (
+                    <div className="emoji-panel" role="menu" aria-label={t('chat.insertEmoji')}>
+                      {COMPOSER_EMOJIS.map((emoji) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="emoji-panel-item"
+                          key={emoji}
+                          onClick={() => insertEmoji(emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   className="composer-tool-button"
@@ -1235,6 +1370,7 @@ export function MainLayout(): JSX.Element {
               </div>
               <div className="message-editor">
                 <textarea
+                  ref={messageTextareaRef}
                   value={messageDraft}
                   onChange={(event) => handleMessageDraftChange(event.target.value)}
                   onCompositionStart={() => {
@@ -1248,13 +1384,55 @@ export function MainLayout(): JSX.Element {
                   rows={3}
                   maxLength={MESSAGE_DRAFT_MAX_LENGTH}
                 />
-                <button
-                  type="submit"
-                  className="primary-button message-send-button"
-                  disabled={!messageDraft.trim()}
-                >
-                  {t('chat.send')}
-                </button>
+                <div className="message-send-wrapper" ref={sendShortcutRef}>
+                  <div className={`message-send-control${messageDraft.trim() ? '' : ' is-empty'}`}>
+                    <button
+                      type="submit"
+                      className="primary-button message-send-button"
+                      disabled={!messageDraft.trim()}
+                    >
+                      {t('chat.send')}
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button message-send-shortcut-button"
+                      aria-label={t('chat.sendShortcut')}
+                      aria-expanded={isSendShortcutMenuOpen}
+                      title={t('chat.sendShortcut')}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setIsSendShortcutMenuOpen((isOpen) => !isOpen);
+                      }}
+                    >
+                      <span aria-hidden="true">{isSendShortcutMenuOpen ? '∨' : '∧'}</span>
+                    </button>
+                  </div>
+                  {isSendShortcutMenuOpen ? (
+                    <div className="send-shortcut-menu" role="menu" aria-label={t('chat.sendShortcut')}>
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={sendShortcut === 'enter'}
+                        className="send-shortcut-menu-item"
+                        onClick={() => void handleSendShortcutChange('enter')}
+                      >
+                        <span aria-hidden="true">{sendShortcut === 'enter' ? '✓' : ''}</span>
+                        <span>{t('chat.sendWithEnter')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={sendShortcut === 'ctrlEnter'}
+                        className="send-shortcut-menu-item"
+                        onClick={() => void handleSendShortcutChange('ctrlEnter')}
+                      >
+                        <span aria-hidden="true">{sendShortcut === 'ctrlEnter' ? '✓' : ''}</span>
+                        <span>{t('chat.sendWithCtrlEnter')}</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </form>
           </div>
@@ -1759,7 +1937,7 @@ function MessageList({
     return () => window.clearTimeout(timerId);
   }, [messageNotice]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const conversationChanged = previousConversationIdRef.current !== conversationId;
     const lastMessageChanged = previousLastMessageIdRef.current !== lastMessageId;
     const messageAdded = messages.length > previousMessageCountRef.current && lastMessageChanged;
@@ -1785,7 +1963,12 @@ function MessageList({
       return;
     }
 
-    requestAnimationFrame(() => scrollToMessageBottom(conversationChanged ? 'auto' : 'smooth'));
+    if (conversationChanged || loadingFinished) {
+      scrollToMessageBottom('auto');
+      return;
+    }
+
+    requestAnimationFrame(() => scrollToMessageBottom(getBottomScrollBehavior('smooth')));
   }, [conversationId, isLoading, lastMessageId, lastMessageIsOwn, messages.length]);
 
   useEffect(() => {
@@ -1947,13 +2130,27 @@ function MessageList({
       return;
     }
 
-    list.scrollTo({
-      top: list.scrollHeight,
-      behavior,
-    });
+    if (behavior === 'auto') {
+      list.scrollTop = list.scrollHeight;
+    } else {
+      list.scrollTo({
+        top: list.scrollHeight,
+        behavior,
+      });
+    }
     isAtBottomRef.current = true;
     setIsJumpToBottomVisible(false);
     setHasNewMessagesPrompt(false);
+  }
+
+  function getBottomScrollBehavior(preferredBehavior: ScrollBehavior): ScrollBehavior {
+    const list = listRef.current;
+    if (!list || preferredBehavior !== 'smooth') {
+      return preferredBehavior;
+    }
+
+    const distanceToBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    return distanceToBottom > 640 ? 'auto' : 'smooth';
   }
 
   async function copyMessageText(message: ChatMessage): Promise<void> {
@@ -2040,6 +2237,7 @@ function MessageList({
             previousMessage && !showTimeDivider && previousMessage.isOwn === message.isOwn,
           );
           const canRetryMessage = message.isOwn && message.status === 'failed' && message.messageType === 'TEXT';
+          const visibleOwnStatus = getVisibleOwnMessageStatus(message);
 
           return (
             <Fragment key={message.id}>
@@ -2103,11 +2301,12 @@ function MessageList({
                     </p>
                   )}
                   <div className="message-meta">
-                    <span className={message.status === 'failed' ? 'message-status-failed' : ''}>
-                      {message.isOwn && message.status !== 'recalled'
-                        ? t(`chat.status.${message.status}`)
-                        : formatTime(message.recalledAt ?? message.createdAt)}
-                    </span>
+                    {message.isOwn && visibleOwnStatus ? (
+                      <span className={message.status === 'failed' ? 'message-status-failed' : ''}>
+                        {t(`chat.status.${visibleOwnStatus}`)}
+                      </span>
+                    ) : null}
+                    {!message.isOwn ? <span>{formatTime(message.recalledAt ?? message.createdAt)}</span> : null}
                     {canRetryMessage ? (
                       <button
                         type="button"
@@ -2483,6 +2682,14 @@ function isWithinRecallWindow(message: ChatMessage): boolean {
 
 function canEditMessage(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 15 * 60 * 1000;
+}
+
+function getVisibleOwnMessageStatus(message: ChatMessage): 'sending' | 'failed' | null {
+  if (message.status === 'sending' || message.status === 'failed') {
+    return message.status;
+  }
+
+  return null;
 }
 
 function renderMessageBody(
@@ -2886,6 +3093,7 @@ type FileBadge = {
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const MESSAGE_DRAFT_MAX_LENGTH = 5000;
+const COMPOSER_EMOJIS = ['😀', '😂', '😊', '😍', '👍', '👏', '🙏', '❤️', '🔥', '🎉', '😢', '😅'];
 const MESSAGE_TIME_DIVIDER_INTERVAL_MS = 5 * 60 * 1000;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_UPLOAD_MIME_TYPES = new Set([

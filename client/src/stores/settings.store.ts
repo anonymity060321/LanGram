@@ -4,6 +4,7 @@ import { setApiBaseUrl } from '../api/http';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type LanguagePreference = 'system' | 'zh-CN' | 'en-US';
+export type SendShortcutPreference = 'enter' | 'ctrlEnter';
 
 export interface ClientConfig {
   serverUrl: string;
@@ -13,6 +14,7 @@ export interface ClientConfig {
   downloadDir: string | null;
   enableNotifications: boolean;
   closeToTray: boolean;
+  sendShortcut: SendShortcutPreference;
 }
 
 interface SettingsState {

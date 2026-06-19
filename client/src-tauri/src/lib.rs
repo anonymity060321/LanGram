@@ -37,6 +37,8 @@ struct ClientConfig {
     enable_notifications: bool,
     #[serde(default = "default_close_to_tray")]
     close_to_tray: bool,
+    #[serde(default)]
+    send_shortcut: SendShortcutPreference,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +89,14 @@ enum LanguagePreference {
     ZhCn,
     #[serde(rename = "en-US")]
     EnUs,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+enum SendShortcutPreference {
+    #[default]
+    Enter,
+    CtrlEnter,
 }
 
 #[tauri::command]
@@ -392,6 +402,7 @@ fn default_config() -> ClientConfig {
         download_dir: None,
         enable_notifications: default_enable_notifications(),
         close_to_tray: default_close_to_tray(),
+        send_shortcut: SendShortcutPreference::Enter,
     }
 }
 

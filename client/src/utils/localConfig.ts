@@ -11,6 +11,7 @@ const fallbackConfig: ClientConfig = {
   downloadDir: null,
   enableNotifications: true,
   closeToTray: true,
+  sendShortcut: 'enter',
 };
 
 export async function loadClientConfig(): Promise<ClientConfig> {
