@@ -35,6 +35,14 @@ export interface MessageRecallPayload {
   messageId: string;
 }
 
+export interface MessageRecalledPayload {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  recalledByUserId: string;
+  recalledAt: Date;
+}
+
 export interface MessageEditPayload {
   conversationId: string;
   messageId: string;

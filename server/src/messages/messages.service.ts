@@ -66,6 +66,7 @@ export interface RecallEventPayload {
   conversationId: string;
   messageId: string;
   senderId: string;
+  recalledByUserId: string;
   recalledAt: Date;
 }
 
@@ -372,6 +373,12 @@ export class MessagesService {
       throw new BadRequestException('Message recall window has expired');
     }
 
+    const peerIds = await this.getConversationPeerIds(conversationId, userId);
+    if (peerIds.length !== 1) {
+      throw new BadRequestException('Only direct message recall is supported');
+    }
+    await this.assertDirectFriendship(userId, peerIds[0]);
+
     const recalledAt = new Date();
     await this.prisma.message.update({
       where: { id: messageId },
@@ -385,6 +392,7 @@ export class MessagesService {
       conversationId: message.conversationId,
       messageId: message.id,
       senderId: message.senderId,
+      recalledByUserId: userId,
       recalledAt,
     };
   }

@@ -293,6 +293,7 @@ describe('RealtimeGateway', () => {
       conversationId: 'conversation-id',
       messageId: 'message-id',
       senderId: 'user-a',
+      recalledByUserId: 'user-a',
       recalledAt,
     });
     messagesService.getConversationPeerIds.mockResolvedValue(['user-b']);
@@ -311,11 +312,11 @@ describe('RealtimeGateway', () => {
     );
     expect(sender.emit).toHaveBeenCalledWith(
       REALTIME_EVENTS.MESSAGE_RECALLED,
-      expect.objectContaining({ messageId: 'message-id', recalledAt }),
+      expect.objectContaining({ messageId: 'message-id', recalledByUserId: 'user-a', recalledAt }),
     );
     expect(receiver.emit).toHaveBeenCalledWith(
       REALTIME_EVENTS.MESSAGE_RECALLED,
-      expect.objectContaining({ messageId: 'message-id', recalledAt }),
+      expect.objectContaining({ messageId: 'message-id', recalledByUserId: 'user-a', recalledAt }),
     );
   });
 

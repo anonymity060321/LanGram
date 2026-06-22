@@ -62,6 +62,7 @@ export interface MessageRecalledPayload {
   conversationId: string;
   messageId: string;
   senderId: string;
+  recalledByUserId?: string;
   recalledAt: string;
 }
 

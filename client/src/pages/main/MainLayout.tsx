@@ -163,6 +163,8 @@ export function MainLayout(): JSX.Element {
   const [pendingConversationActivationId, setPendingConversationActivationId] = useState<string | null>(null);
   const [pendingDeleteFriend, setPendingDeleteFriend] = useState<PendingFriendDelete | null>(null);
   const [isDeletingFriend, setIsDeletingFriend] = useState(false);
+  const [openAddFriendPanelKey, setOpenAddFriendPanelKey] = useState(0);
+  const [nonFriendNoticePulseKey, setNonFriendNoticePulseKey] = useState(0);
   const [pageAttentionKey, setPageAttentionKey] = useState(0);
   const appMenuRef = useRef<HTMLDivElement>(null);
   const chatActionsRef = useRef<HTMLDivElement>(null);
@@ -201,8 +203,19 @@ export function MainLayout(): JSX.Element {
     selectedConversation?.peer
       ? isPeerKnownNonFriend(selectedConversation.peer.id, friends, hasLoadedFriends, trustedFriendPeerId)
       : false;
+  const selectedPeerFriendship = selectedConversation?.peer
+    ? friends.find((item) => item.friend.id === selectedConversation.peer?.id) ?? null
+    : null;
+  const isSelectedPeerNonFriend = isFriendshipRequiredError || isSelectedPeerKnownNonFriend;
+  const isSelectedPeerFriend =
+    !isSelectedPeerNonFriend &&
+    (Boolean(selectedPeerFriendship) ||
+      Boolean(
+        selectedConversation?.peer &&
+          trustedFriendPeerId === selectedConversation.peer.id,
+      ));
   const chatTopNotice =
-    selectedConversation && (isFriendshipRequiredError || isSelectedPeerKnownNonFriend)
+    selectedConversation && isSelectedPeerNonFriend
       ? t('chat.notFriendsCannotSend')
       : null;
   const visibleChatError = isFriendshipRequiredError ? null : chatError;
@@ -701,14 +714,15 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
-    if (
-      selectedConversation?.peer &&
-      isPeerKnownNonFriend(selectedConversation.peer.id, friends, hasLoadedFriends, trustedFriendPeerId)
-    ) {
+    const plaintext = messageDraft.trim();
+
+    if (selectedConversation?.peer && isSelectedPeerNonFriend) {
+      createFailedTextMessage(selectedConversationId, plaintext, user.id);
+      setNonFriendNoticePulseKey((current) => current + 1);
+      setMessageDraft('');
       return;
     }
 
-    const plaintext = messageDraft.trim();
     setMessageDraft('');
     setMessageLimitNotice(isNetworkOnline ? null : t('network.unavailableSend'));
     if (!isNetworkOnline) {
@@ -981,7 +995,7 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
-    const friendship = friends.find((item) => item.friend.id === selectedConversation.peer?.id);
+    const friendship = selectedPeerFriendship;
     if (!friendship) {
       window.alert(t('chat.deleteFriendFailed'));
       return;
@@ -1037,6 +1051,12 @@ export function MainLayout(): JSX.Element {
     }
 
     setPendingDeleteFriend(null);
+  }
+
+  function handleAddFriendFromMenu(): void {
+    setIsChatActionsOpen(false);
+    setActiveView('contacts');
+    setOpenAddFriendPanelKey((current) => current + 1);
   }
 
   function togglePinnedConversation(): void {
@@ -1264,6 +1284,8 @@ export function MainLayout(): JSX.Element {
           className="main-friends-shell"
           onConversationOpened={() => setActiveView('messages')}
           onMessageFriend={handleMessageFriend}
+          openAddPanelKey={openAddFriendPanelKey}
+          addPanelNotice={t('chat.addFriendHint')}
         />
       ) : (
         <>
@@ -1399,20 +1421,26 @@ export function MainLayout(): JSX.Element {
                     >
                       <span>{t('chat.clearLocalRecords')}</span>
                     </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="chat-actions-panel-item is-danger"
-                      onClick={() => void handleDeleteFriendFromMenu()}
-                      disabled={!selectedConversation?.peer || !friends.some((item) => item.friend.id === selectedConversation.peer?.id)}
-                      title={
-                        selectedConversation?.peer && friends.some((item) => item.friend.id === selectedConversation.peer?.id)
-                          ? undefined
-                          : t('chat.comingSoon')
-                      }
-                    >
-                      <span>{t('chat.deleteFriend')}</span>
-                    </button>
+                    {selectedConversation?.peer && isSelectedPeerFriend ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-actions-panel-item is-danger"
+                        onClick={() => void handleDeleteFriendFromMenu()}
+                      >
+                        <span>{t('chat.deleteFriend')}</span>
+                      </button>
+                    ) : null}
+                    {selectedConversation?.peer && isSelectedPeerNonFriend ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-actions-panel-item is-primary"
+                        onClick={handleAddFriendFromMenu}
+                      >
+                        <span>{t('chat.addFriend')}</span>
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -1439,7 +1467,12 @@ export function MainLayout(): JSX.Element {
               />
             </div>
             {chatTopNotice ? (
-              <div className="chat-top-notice" role="status">
+              <div
+                key={nonFriendNoticePulseKey}
+                className={`chat-top-notice${nonFriendNoticePulseKey > 0 ? ' is-attention' : ''}`}
+                role="alert"
+                aria-live="polite"
+              >
                 {chatTopNotice}
               </div>
             ) : null}
@@ -2373,7 +2406,13 @@ function MessageList({
         break;
       case 'recall':
         if (!canRecallMessage(message)) {
-          setMessageNotice({ message: t('chat.recallFailed'), isError: true });
+          setMessageNotice({
+            message:
+              message.isOwn && !isLocalPendingMessage(message) && !isWithinRecallWindow(message)
+                ? t('chat.recallExpired')
+                : t('chat.recallFailed'),
+            isError: true,
+          });
           return;
         }
         onRecallMessage(message.id);
@@ -2472,7 +2511,7 @@ function MessageList({
                   ) : (
                     <p>
                       {message.status === 'recalled'
-                        ? t('chat.messageRecalled')
+                        ? getRecalledMessageLabel(message, t)
                         : renderMessageBody(
                             message,
                             searchQuery,
@@ -2807,7 +2846,7 @@ function buildMessageMenuActions(
   }
 
   if (message.isOwn && canShowRecallMenuItem(message)) {
-    actions.push({ action: 'recall', labelKey: 'chat.recall', isDanger: true });
+    actions.push({ action: 'recall', labelKey: 'chat.recallMessage', isDanger: true });
   }
 
   actions.push({ action: 'deleteLocal', labelKey: 'chat.deleteLocal', isDanger: true });
@@ -2894,6 +2933,13 @@ function canRecallMessage(message: ChatMessage): boolean {
 
 function isWithinRecallWindow(message: ChatMessage): boolean {
   return Date.now() - new Date(message.createdAt).getTime() <= 2 * 60 * 1000;
+}
+
+function getRecalledMessageLabel(
+  message: ChatMessage,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  return message.isOwn ? t('chat.youRecalledMessage') : t('chat.peerRecalledMessage');
 }
 
 function canEditMessage(message: ChatMessage): boolean {

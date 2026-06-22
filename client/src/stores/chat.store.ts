@@ -1539,10 +1539,13 @@ function handleRealtimeError(
     return;
   }
 
-  if (payload.code === 'FRIENDSHIP_REQUIRED' || payload.message === 'FRIENDSHIP_REQUIRED') {
+  if (isFriendshipRequiredRealtimeError(payload)) {
     set((state: ChatState) => ({
       error: 'FRIENDSHIP_REQUIRED',
-      messagesByConversation: markOwnSendingMessagesFailed(state.messagesByConversation),
+      messagesByConversation: markLatestOwnSendingMessageFailed(
+        state.messagesByConversation,
+        state.selectedConversationId,
+      ),
     }));
     return;
   }
@@ -1550,24 +1553,60 @@ function handleRealtimeError(
   set({ error: payload.message });
 }
 
-function markOwnSendingMessagesFailed(
+function isFriendshipRequiredRealtimeError(payload: RealtimeErrorPayload): boolean {
+  return (
+    payload.code === 'FRIENDSHIP_REQUIRED' ||
+    payload.code === 'NOT_FRIENDS' ||
+    payload.message === 'FRIENDSHIP_REQUIRED' ||
+    payload.message === 'NOT_FRIENDS'
+  );
+}
+
+function markLatestOwnSendingMessageFailed(
   messagesByConversation: Record<string, ChatMessage[]>,
+  preferredConversationId: string | null,
 ): Record<string, ChatMessage[]> {
-  let didChange = false;
+  let targetConversationId: string | null = null;
+  let targetMessageId: string | null = null;
+  let targetCreatedAt = -Infinity;
+
+  const entries = preferredConversationId
+    ? [[preferredConversationId, messagesByConversation[preferredConversationId] ?? []] as const]
+    : Object.entries(messagesByConversation);
+
+  for (const [conversationId, messages] of entries) {
+    for (const message of messages) {
+      if (!message.isOwn || message.status !== 'sending') {
+        continue;
+      }
+
+      const createdAt = new Date(message.createdAt).getTime();
+      if (createdAt > targetCreatedAt) {
+        targetCreatedAt = createdAt;
+        targetConversationId = conversationId;
+        targetMessageId = message.clientMessageId ?? message.id;
+      }
+    }
+  }
+
+  if (!targetConversationId || !targetMessageId) {
+    return messagesByConversation;
+  }
+
   const nextMessagesByConversation: Record<string, ChatMessage[]> = {};
 
   for (const [conversationId, messages] of Object.entries(messagesByConversation)) {
-    nextMessagesByConversation[conversationId] = messages.map((message) => {
-      if (!message.isOwn || message.status !== 'sending') {
-        return message;
-      }
-
-      didChange = true;
-      return { ...message, status: 'failed' };
-    });
+    nextMessagesByConversation[conversationId] =
+      conversationId === targetConversationId
+        ? messages.map((message) =>
+            message.id === targetMessageId || message.clientMessageId === targetMessageId
+              ? { ...message, status: 'failed' }
+              : message,
+          )
+        : messages;
   }
 
-  return didChange ? nextMessagesByConversation : messagesByConversation;
+  return nextMessagesByConversation;
 }
 
 async function decryptSafely(

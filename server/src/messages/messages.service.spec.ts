@@ -358,6 +358,10 @@ describe('MessagesService', () => {
   it('allows the sender to recall a message within two minutes', async () => {
     const prisma = createMockPrisma();
     prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findMany.mockResolvedValue([
+      { userId: 'user-a' },
+      { userId: 'user-b' },
+    ]);
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -374,6 +378,7 @@ describe('MessagesService', () => {
       conversationId: 'conversation-id',
       messageId: 'message-id',
       senderId: 'user-a',
+      recalledByUserId: 'user-a',
     });
     expect(prisma.message.update).toHaveBeenCalledWith({
       where: { id: 'message-id' },
@@ -382,6 +387,29 @@ describe('MessagesService', () => {
         recalledAt: expect.any(Date),
       },
     });
+  });
+
+  it('rejects recall when direct conversation members are no longer friends', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findMany.mockResolvedValue([
+      { userId: 'user-a' },
+      { userId: 'user-b' },
+    ]);
+    prisma.friendship.findUnique.mockResolvedValue(null);
+    prisma.message.findFirst.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      senderId: 'user-a',
+      status: MessageStatus.SENT,
+      createdAt: new Date(),
+    });
+    const service = createService(prisma);
+
+    await expect(
+      service.recallMessage('user-a', 'conversation-id', 'message-id'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
   });
 
   it('rejects recall from a non-sender', async () => {
@@ -399,6 +427,18 @@ describe('MessagesService', () => {
     await expect(
       service.recallMessage('user-b', 'conversation-id', 'message-id'),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects recall for a missing message', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.message.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(
+      service.recallMessage('user-a', 'conversation-id', 'missing-message-id'),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
 

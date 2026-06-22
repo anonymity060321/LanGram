@@ -54,11 +54,15 @@ export function FriendsWorkspace({
   showBackLink = false,
   onConversationOpened,
   onMessageFriend,
+  openAddPanelKey = 0,
+  addPanelNotice = null,
 }: {
   className?: string;
   showBackLink?: boolean;
   onConversationOpened?: (conversationId: string) => void;
   onMessageFriend?: (friendship: FriendItem) => Promise<boolean>;
+  openAddPanelKey?: number;
+  addPanelNotice?: string | null;
 }): JSX.Element {
   const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
@@ -98,6 +102,17 @@ export function FriendsWorkspace({
       setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable')),
     );
   }, [isNetworkOnline, refreshFriendsData, t]);
+
+  useEffect(() => {
+    if (openAddPanelKey <= 0) {
+      return;
+    }
+
+    setSelectedFriendshipId(null);
+    setActivePanel('add');
+    setNotice(addPanelNotice);
+    setError(null);
+  }, [addPanelNotice, openAddPanelKey]);
 
   useEffect(() => {
     function handleFriendRequestChanged(): void {

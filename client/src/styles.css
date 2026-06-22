@@ -817,6 +817,10 @@ textarea,
   font-weight: 620;
 }
 
+.chat-top-notice.is-attention {
+  animation: chat-notice-attention 520ms ease-out;
+}
+
 .chat-header span {
   display: block;
   color: var(--color-text-muted);
@@ -3814,6 +3818,24 @@ textarea,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes chat-notice-attention {
+  from {
+    border-color: color-mix(in srgb, var(--color-danger) 58%, var(--color-border));
+    background: color-mix(in srgb, var(--color-danger-soft) 76%, var(--color-bg-elevated));
+  }
+
+  to {
+    border-color: color-mix(in srgb, var(--color-danger) 28%, var(--color-border));
+    background: var(--color-danger-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-top-notice.is-attention {
+    animation: none;
   }
 }
 
@@ -7370,6 +7392,22 @@ select:focus {
 .chat-actions-panel-item:focus-visible {
   background: var(--color-interactive-hover);
   outline: 0;
+}
+
+.chat-actions-panel-item.is-primary {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+.chat-actions-panel-item.is-primary span,
+.chat-actions-panel-item.is-primary strong {
+  color: #ffffff;
+}
+
+.chat-actions-panel-item.is-primary:hover:not(:disabled),
+.chat-actions-panel-item.is-primary:focus-visible {
+  background: var(--color-primary-hover);
+  color: #ffffff;
 }
 
 .chat-actions-panel-item.is-danger {
