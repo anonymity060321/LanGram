@@ -2267,6 +2267,11 @@ function MessageList({
 
   function handleContextMenu(event: MouseEvent, message: ChatMessage): void {
     event.preventDefault();
+    if (message.status === 'recalled') {
+      setContextMenu(null);
+      return;
+    }
+
     setContextMenu({
       message,
       ...getContextMenuPosition(event.clientX, event.clientY),
@@ -2392,6 +2397,11 @@ function MessageList({
       case 'download':
         if (message.file) {
           void onDownloadFile(message.file);
+        }
+        break;
+      case 'preview':
+        if (message.messageType === 'IMAGE' && message.file) {
+          void openImagePreview(message.file);
         }
         break;
       case 'forward':
@@ -2726,8 +2736,11 @@ function MessageContextMenu({
   downloadStatus?: FileDownloadStatus;
   onAction: (action: MessageMenuAction, message: ChatMessage) => void;
   onClose: () => void;
-}): JSX.Element {
+}): JSX.Element | null {
   const actions = buildMessageMenuActions(message, downloadStatus);
+  if (actions.length === 0) {
+    return null;
+  }
 
   return (
     <div
@@ -2819,12 +2832,16 @@ function buildMessageMenuActions(
   downloadStatus?: FileDownloadStatus,
 ): MessageMenuItem[] {
   if (message.status === 'recalled') {
-    return [{ action: 'deleteLocal', labelKey: 'chat.deleteLocal', isDanger: true }];
+    return [];
   }
 
   const actions: MessageMenuItem[] = [];
   if (canCopyMessage(message)) {
     actions.push({ action: 'copy', labelKey: 'chat.copy' });
+  }
+
+  if (message.messageType === 'IMAGE' && message.file) {
+    actions.push({ action: 'preview', labelKey: 'chat.openImagePreview' });
   }
 
   if (message.file) {
@@ -3299,7 +3316,15 @@ interface DownloadSuccessNotice {
 
 type FileDownloadStatus = 'downloading' | 'failed';
 type MainView = 'messages' | 'contacts';
-type MessageMenuAction = 'copy' | 'download' | 'forward' | 'retry' | 'edit' | 'recall' | 'deleteLocal';
+type MessageMenuAction =
+  | 'copy'
+  | 'preview'
+  | 'download'
+  | 'forward'
+  | 'retry'
+  | 'edit'
+  | 'recall'
+  | 'deleteLocal';
 type MessageContextMenuState = {
   message: ChatMessage;
   x: number;
