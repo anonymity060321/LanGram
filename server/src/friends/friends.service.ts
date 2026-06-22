@@ -10,6 +10,8 @@ import { randomInt } from 'crypto';
 import { FriendRequestStatus, Prisma } from '@prisma/client';
 import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { REALTIME_EVENTS, type FriendRequestChangedPayload } from '../realtime/realtime.events';
+import { RealtimeSessionService } from '../realtime/realtime-session.service';
 
 const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
 const PAIRING_CODE_LENGTH = 8;
@@ -38,6 +40,7 @@ export class FriendsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly presenceService: PresenceService,
+    private readonly realtimeSessionService: RealtimeSessionService,
   ) {}
 
   async createPairingCode(userId: string): Promise<{ pairingCode: string; expiresAt: Date }> {
@@ -95,6 +98,7 @@ export class FriendsService {
       });
     });
 
+    this.notifyFriendRequestChanged([userId, code.userId]);
     return this.toFriendRequestDto(request);
   }
 
@@ -156,6 +160,7 @@ export class FriendsService {
       return updated;
     });
 
+    this.notifyFriendRequestChanged([request.requester.id, request.addressee.id]);
     return this.toFriendRequestDto(acceptedRequest);
   }
 
@@ -182,6 +187,7 @@ export class FriendsService {
       include: this.friendRequestInclude(),
     });
 
+    this.notifyFriendRequestChanged([request.requester.id, request.addressee.id]);
     return this.toFriendRequestDto(rejectedRequest);
   }
 
@@ -235,8 +241,16 @@ export class FriendsService {
     }
 
     await this.prisma.friendship.delete({ where: { id: friendship.id } });
+    this.notifyFriendRequestChanged([friendship.userAId, friendship.userBId]);
 
     return { deleted: true, id: friendship.id };
+  }
+
+  private notifyFriendRequestChanged(userIds: string[]): void {
+    const payload: FriendRequestChangedPayload = { reason: 'friend_request_changed' };
+    for (const userId of new Set(userIds)) {
+      this.realtimeSessionService.getSocket(userId)?.emit(REALTIME_EVENTS.FRIEND_REQUEST_CHANGED, payload);
+    }
   }
 
   private async findMatchingPairingCode(pairingCode: string): Promise<{ id: string; userId: string } | null> {

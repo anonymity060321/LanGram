@@ -26,6 +26,9 @@ interface MockPrisma {
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
+  friendship: {
+    findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
+  };
   messageDelivery: {
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     findMany: MockFunction<(args: unknown) => Promise<unknown[]>>;
@@ -54,6 +57,9 @@ function createMockPrisma(): MockPrisma {
     fileAsset: {
       findFirst: jest.fn(),
       update: jest.fn(),
+    },
+    friendship: {
+      findUnique: jest.fn().mockResolvedValue({ id: 'friendship-id' }),
     },
     messageDelivery: {
       findFirst: jest.fn(),
@@ -246,6 +252,19 @@ describe('MessagesService', () => {
   it('rejects sends from non-members', async () => {
     const prisma = createMockPrisma();
     prisma.conversationMember.findMany.mockResolvedValue([{ userId: 'user-b' }]);
+    const service = createService(prisma);
+
+    await expect(service.sendTextMessage(sendInput())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects sends when direct conversation members are no longer friends', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findMany.mockResolvedValue([
+      { userId: 'user-a' },
+      { userId: 'user-b' },
+    ]);
+    prisma.friendship.findUnique.mockResolvedValue(null);
     const service = createService(prisma);
 
     await expect(service.sendTextMessage(sendInput())).rejects.toBeInstanceOf(ForbiddenException);

@@ -12,6 +12,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
+  FRIEND_REQUEST_CHANGED: 'friend:request:changed',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
 } as const;
@@ -97,6 +98,10 @@ export interface SessionKickedPayload {
   reason: 'new_device_login';
 }
 
+export interface FriendRequestChangedPayload {
+  reason: 'friend_request_changed';
+}
+
 export type RealtimeConnectionStatus =
   | 'online'
   | 'connecting'
@@ -111,6 +116,7 @@ interface RealtimeHandlers {
   onMessageRecalled: (payload: MessageRecalledPayload) => void;
   onMessageEdited: (payload: MessageEditedPayload) => void;
   onPresenceUpdate: (payload: PresenceUpdatePayload) => void;
+  onFriendRequestChanged?: (payload: FriendRequestChangedPayload) => void;
   onSessionKicked: (payload: SessionKickedPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
   onConnectionStatusChange?: (status: RealtimeConnectionStatus) => void;
@@ -146,6 +152,9 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.MESSAGE_RECALLED, handlers.onMessageRecalled);
   socket.on(REALTIME_EVENTS.MESSAGE_EDITED, handlers.onMessageEdited);
   socket.on(REALTIME_EVENTS.PRESENCE_UPDATE, handlers.onPresenceUpdate);
+  if (handlers.onFriendRequestChanged) {
+    socket.on(REALTIME_EVENTS.FRIEND_REQUEST_CHANGED, handlers.onFriendRequestChanged);
+  }
   socket.on(REALTIME_EVENTS.SESSION_KICKED, handlers.onSessionKicked);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
   socket.on('connect_error', (error) => {

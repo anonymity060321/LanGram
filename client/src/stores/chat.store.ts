@@ -136,13 +136,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const result = await listConversations();
       const userId = currentUserId ?? get().currentUserId;
       const conversations = userId ? await enrichConversations(result.conversations) : result.conversations;
+      const selectedConversationId = get().selectedConversationId;
+      const selectedConversation =
+        selectedConversationId && !conversations.some((item) => item.id === selectedConversationId)
+          ? get().conversations.find((item) => item.id === selectedConversationId) ?? null
+          : null;
+      const nextConversations = selectedConversation
+        ? sortConversations([selectedConversation, ...conversations])
+        : conversations;
       set({
-        conversations,
+        conversations: nextConversations,
         currentUserId: userId ?? null,
         isLoadingConversations: false,
         isUsingCachedConversations: false,
       });
-      void cacheConversationSummaries(conversations);
+      void cacheConversationSummaries(nextConversations);
     } catch (error) {
       if (isNetworkRequestError(error)) {
         useNetworkStore.getState().setStatus('reconnecting');
@@ -171,6 +179,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentUserId,
       conversations: clearConversationUnread(state.conversations, conversationId),
       messagePaginationByConversation: {
+        ...state.messagePaginationByConversation,
         [conversationId]: { hasMore: false, nextCursor: null, isLoadingOlder: false },
       },
       isLoadingMessages: true,
@@ -206,6 +215,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             [conversationId]: mergedMessages,
           },
           messagePaginationByConversation: {
+            ...state.messagePaginationByConversation,
             [conversationId]: {
               hasMore: reachedLocalClear ? false : result.hasMore,
               nextCursor: reachedLocalClear ? null : result.nextCursor,
@@ -380,11 +390,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ error: null });
     try {
       const conversation = await createDirectConversation(friendUserId);
+      const conversationId = conversation.id;
+      let openedConversations: Conversation[] = [];
       set((state) => ({
-        conversations: upsertConversation(state.conversations, conversation),
+        conversations: (openedConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+        )),
+        selectedConversationId: conversationId,
+        currentUserId,
+        messagesByConversation: {
+          ...state.messagesByConversation,
+          [conversationId]: state.messagesByConversation[conversationId] ?? [],
+        },
+        messagePaginationByConversation: {
+          ...state.messagePaginationByConversation,
+          [conversationId]: state.messagePaginationByConversation[conversationId] ?? {
+            hasMore: false,
+            nextCursor: null,
+            isLoadingOlder: false,
+          },
+        },
       }));
-      await get().selectConversation(conversation.id, currentUserId);
-      return conversation.id;
+      void cacheConversationSummaries(openedConversations);
+      await get().selectConversation(conversationId, currentUserId);
+      let selectedConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (selectedConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+        )),
+        selectedConversationId: conversationId,
+        currentUserId,
+        messagesByConversation: {
+          ...state.messagesByConversation,
+          [conversationId]: state.messagesByConversation[conversationId] ?? [],
+        },
+        messagePaginationByConversation: {
+          ...state.messagePaginationByConversation,
+          [conversationId]: state.messagePaginationByConversation[conversationId] ?? {
+            hasMore: false,
+            nextCursor: null,
+            isLoadingOlder: false,
+          },
+        },
+      }));
+      void cacheConversationSummaries(selectedConversations);
+      return conversationId;
     } catch {
       set({ error: 'Failed to open conversation' });
       return null;
@@ -410,6 +462,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
       onPresenceUpdate: (payload) => {
         get().updatePresence(payload);
+      },
+      onFriendRequestChanged: () => {
+        window.dispatchEvent(new Event('langram:friend-request-changed'));
       },
       onSessionKicked,
       onError: (payload) => {
@@ -1484,7 +1539,35 @@ function handleRealtimeError(
     return;
   }
 
+  if (payload.code === 'FRIENDSHIP_REQUIRED' || payload.message === 'FRIENDSHIP_REQUIRED') {
+    set((state: ChatState) => ({
+      error: 'FRIENDSHIP_REQUIRED',
+      messagesByConversation: markOwnSendingMessagesFailed(state.messagesByConversation),
+    }));
+    return;
+  }
+
   set({ error: payload.message });
+}
+
+function markOwnSendingMessagesFailed(
+  messagesByConversation: Record<string, ChatMessage[]>,
+): Record<string, ChatMessage[]> {
+  let didChange = false;
+  const nextMessagesByConversation: Record<string, ChatMessage[]> = {};
+
+  for (const [conversationId, messages] of Object.entries(messagesByConversation)) {
+    nextMessagesByConversation[conversationId] = messages.map((message) => {
+      if (!message.isOwn || message.status !== 'sending') {
+        return message;
+      }
+
+      didChange = true;
+      return { ...message, status: 'failed' };
+    });
+  }
+
+  return didChange ? nextMessagesByConversation : messagesByConversation;
 }
 
 async function decryptSafely(
@@ -1708,6 +1791,26 @@ function upsertConversation(
   const next = [...conversations];
   next[index] = conversation;
   return next;
+}
+
+function upsertOpenedConversation(
+  conversations: Conversation[],
+  conversation: Conversation,
+): Conversation[] {
+  const existing = conversations.find((item) => item.id === conversation.id);
+  if (!existing) {
+    return upsertConversation(conversations, conversation);
+  }
+
+  return upsertConversation(conversations, {
+    ...existing,
+    ...conversation,
+    lastMessage: conversation.lastMessage ?? existing.lastMessage,
+    lastMessageAt: conversation.lastMessageAt ?? existing.lastMessageAt,
+    lastMessagePlaintext: conversation.lastMessagePlaintext ?? existing.lastMessagePlaintext,
+    lastMessageDecryptionFailed:
+      conversation.lastMessageDecryptionFailed ?? existing.lastMessageDecryptionFailed,
+  });
 }
 
 function updateConversationPresence(

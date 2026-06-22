@@ -144,6 +144,8 @@ export class MessagesService {
       throw new BadRequestException('Only direct text messages are supported');
     }
 
+    await this.assertDirectFriendship(input.senderId, receiverIds[0]);
+
     if (input.replyToMessageId) {
       await this.assertMessageInConversation(input.conversationId, input.replyToMessageId);
     }
@@ -549,6 +551,27 @@ export class MessagesService {
     if (!message) {
       throw new BadRequestException('Reply target does not belong to this conversation');
     }
+  }
+
+  private async assertDirectFriendship(userId: string, peerId: string): Promise<void> {
+    const [userAId, userBId] = this.normalizeUserPair(userId, peerId);
+    const friendship = await this.prisma.friendship.findUnique({
+      where: {
+        userAId_userBId: {
+          userAId,
+          userBId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!friendship) {
+      throw new ForbiddenException('FRIENDSHIP_REQUIRED');
+    }
+  }
+
+  private normalizeUserPair(userId: string, peerId: string): [string, string] {
+    return userId < peerId ? [userId, peerId] : [peerId, userId];
   }
 
   private messageSelect(): Prisma.MessageSelect {

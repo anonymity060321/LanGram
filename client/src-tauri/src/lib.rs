@@ -39,6 +39,10 @@ struct ClientConfig {
     close_to_tray: bool,
     #[serde(default)]
     send_shortcut: SendShortcutPreference,
+    #[serde(default)]
+    pinned_conversation_ids: Vec<String>,
+    #[serde(default)]
+    muted_conversation_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -403,6 +407,8 @@ fn default_config() -> ClientConfig {
         enable_notifications: default_enable_notifications(),
         close_to_tray: default_close_to_tray(),
         send_shortcut: SendShortcutPreference::Enter,
+        pinned_conversation_ids: Vec::new(),
+        muted_conversation_ids: Vec::new(),
     }
 }
 

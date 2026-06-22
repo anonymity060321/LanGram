@@ -8,6 +8,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
+  FRIEND_REQUEST_CHANGED: 'friend:request:changed',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
 } as const;
@@ -49,6 +50,10 @@ export interface RealtimeErrorPayload {
 
 export interface SessionKickedPayload {
   reason: 'new_device_login';
+}
+
+export interface FriendRequestChangedPayload {
+  reason: 'friend_request_changed';
 }
 
 export interface PresenceUpdatePayload {

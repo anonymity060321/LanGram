@@ -53,10 +53,12 @@ export function FriendsWorkspace({
   className = '',
   showBackLink = false,
   onConversationOpened,
+  onMessageFriend,
 }: {
   className?: string;
   showBackLink?: boolean;
   onConversationOpened?: (conversationId: string) => void;
+  onMessageFriend?: (friendship: FriendItem) => Promise<boolean>;
 }): JSX.Element {
   const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
@@ -76,6 +78,8 @@ export function FriendsWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [pendingDeleteFriend, setPendingDeleteFriend] = useState<FriendItem | null>(null);
+  const [isDeletingFriend, setIsDeletingFriend] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
 
   const refreshFriendsData = useCallback(async (): Promise<void> => {
@@ -93,6 +97,17 @@ export function FriendsWorkspace({
     void refreshFriendsData().catch(() =>
       setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable')),
     );
+  }, [isNetworkOnline, refreshFriendsData, t]);
+
+  useEffect(() => {
+    function handleFriendRequestChanged(): void {
+      void refreshFriendsData().catch(() =>
+        setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable')),
+      );
+    }
+
+    window.addEventListener('langram:friend-request-changed', handleFriendRequestChanged);
+    return () => window.removeEventListener('langram:friend-request-changed', handleFriendRequestChanged);
   }, [isNetworkOnline, refreshFriendsData, t]);
 
   useEffect(() => {
@@ -175,6 +190,7 @@ export function FriendsWorkspace({
       setInputCode('');
       setNotice(t('friends.requestSent'));
       await refreshFriendsData();
+      window.dispatchEvent(new Event('langram:friend-request-changed'));
       setSelectedFriendshipId(null);
       setActivePanel('requests');
     } catch {
@@ -197,6 +213,7 @@ export function FriendsWorkspace({
         setNotice(t('friends.requestRejected'));
       }
       await refreshFriendsData();
+      window.dispatchEvent(new Event('langram:friend-request-changed'));
     } catch {
       setError(isNetworkOnline ? t('friends.actionFailed') : t('friends.networkUnavailable'));
     } finally {
@@ -204,7 +221,7 @@ export function FriendsWorkspace({
     }
   }
 
-  async function handleOpenChat(friendUserId: string): Promise<void> {
+  async function handleOpenChat(item: FriendItem): Promise<void> {
     if (!user) {
       return;
     }
@@ -214,34 +231,58 @@ export function FriendsWorkspace({
       return;
     }
 
-    const conversationId = await openDirectConversation(friendUserId, user.id);
+    if (onMessageFriend) {
+      const opened = await onMessageFriend(item);
+      if (!opened) {
+        setError(t('friends.actionFailed'));
+      }
+      return;
+    }
+
+    const conversationId = await openDirectConversation(item.friend.id, user.id);
     if (conversationId) {
       unhideConversationInUiState(conversationId);
       onConversationOpened?.(conversationId);
     }
   }
 
-  async function handleDeleteFriend(item: FriendItem): Promise<void> {
-    if (!window.confirm(t('friends.deleteConfirm'))) {
+  function handleDeleteFriend(item: FriendItem): void {
+    setPendingDeleteFriend(item);
+  }
+
+  async function confirmDeleteFriend(): Promise<void> {
+    if (!pendingDeleteFriend) {
       return;
     }
 
     setIsBusy(true);
+    setIsDeletingFriend(true);
     setError(null);
     setNotice(null);
     try {
-      await deleteFriend(item.id);
+      await deleteFriend(pendingDeleteFriend.id);
       setNotice(t('friends.deleteSuccess'));
-      if (selectedFriendshipId === item.id) {
+      if (selectedFriendshipId === pendingDeleteFriend.id) {
         setSelectedFriendshipId(null);
         setActivePanel('empty');
       }
+      setPendingDeleteFriend(null);
       await refreshFriendsData();
+      window.dispatchEvent(new Event('langram:friend-request-changed'));
     } catch {
       setError(isNetworkOnline ? t('friends.deleteFailed') : t('friends.networkUnavailable'));
     } finally {
       setIsBusy(false);
+      setIsDeletingFriend(false);
     }
+  }
+
+  function cancelDeleteFriend(): void {
+    if (isDeletingFriend) {
+      return;
+    }
+
+    setPendingDeleteFriend(null);
   }
 
   async function handleClearRequests(): Promise<void> {
@@ -406,6 +447,17 @@ export function FriendsWorkspace({
             onClearRequests={handleClearRequests}
           />
         ) : null}
+        {pendingDeleteFriend ? (
+          <FriendDeleteConfirmDialog
+            title={t('friends.deleteFriendConfirmTitle')}
+            message={t('friends.deleteFriendConfirm')}
+            cancelLabel={t('common.cancel')}
+            confirmLabel={t('friends.deleteFriendConfirmAction')}
+            isBusy={isDeletingFriend}
+            onCancel={cancelDeleteFriend}
+            onConfirm={() => void confirmDeleteFriend()}
+          />
+        ) : null}
       </section>
     </section>
   );
@@ -466,8 +518,8 @@ function FriendProfileCard({
   selectedFriend: FriendItem | null;
   isBusy: boolean;
   t: ReturnType<typeof useI18n>['t'];
-  onOpenChat: (friendUserId: string) => Promise<void>;
-  onDeleteFriend: (item: FriendItem) => Promise<void>;
+  onOpenChat: (item: FriendItem) => Promise<void>;
+  onDeleteFriend: (item: FriendItem) => void;
 }): JSX.Element {
   if (!selectedFriend) {
     return <ContactsEmptyState t={t} />;
@@ -500,9 +552,9 @@ function FriendProfileCard({
           type="button"
           className="primary-button"
           disabled={isBusy}
-          onClick={() => void onOpenChat(selectedFriend.friend.id)}
+          onClick={() => void onOpenChat(selectedFriend)}
         >
-          {t('friends.openChat')}
+          {t('friends.sendMessage')}
         </button>
         <button
           type="button"
@@ -514,6 +566,62 @@ function FriendProfileCard({
         </button>
       </div>
     </aside>
+  );
+}
+
+export function FriendDeleteConfirmDialog({
+  title,
+  message,
+  cancelLabel,
+  confirmLabel,
+  isBusy,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="confirm-dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-friend-confirm-title">
+        <header>
+          <strong id="delete-friend-confirm-title">{title}</strong>
+        </header>
+        <p>{message}</p>
+        <footer className="confirm-dialog-actions">
+          <button type="button" className="secondary-button compact-button" disabled={isBusy} onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          <button type="button" className="danger-button compact-button" disabled={isBusy} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

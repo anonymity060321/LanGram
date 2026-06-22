@@ -4,6 +4,7 @@ import { FriendRequestStatus } from '@prisma/client';
 import { FriendsService } from './friends.service';
 import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeSessionService } from '../realtime/realtime-session.service';
 
 type MockFunction<T extends (...args: never[]) => unknown> = jest.MockedFunction<T>;
 
@@ -71,10 +72,14 @@ function createService(prisma: MockPrisma): FriendsService {
       lastSeenAt: user.lastSeenAt ?? null,
     })),
   };
+  const realtimeSessionService = {
+    getSocket: jest.fn(() => null),
+  };
 
   return new FriendsService(
     prisma as unknown as PrismaService,
     presenceService as unknown as PresenceService,
+    realtimeSessionService as unknown as RealtimeSessionService,
   );
 }
 

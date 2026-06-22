@@ -15,6 +15,8 @@ export interface ClientConfig {
   enableNotifications: boolean;
   closeToTray: boolean;
   sendShortcut: SendShortcutPreference;
+  pinnedConversationIds: string[];
+  mutedConversationIds: string[];
 }
 
 interface SettingsState {

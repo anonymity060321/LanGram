@@ -12,6 +12,8 @@ const fallbackConfig: ClientConfig = {
   enableNotifications: true,
   closeToTray: true,
   sendShortcut: 'enter',
+  pinnedConversationIds: [],
+  mutedConversationIds: [],
 };
 
 export async function loadClientConfig(): Promise<ClientConfig> {

@@ -3,6 +3,7 @@ import { GuestLoginPage } from '../pages/auth/GuestLoginPage';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { RegisterPage } from '../pages/auth/RegisterPage';
 import { FriendsPage } from '../pages/main/FriendsPage';
+import { ConversationSearchWindow } from '../pages/main/ConversationSearchWindow';
 import { ImagePreviewWindow } from '../pages/main/ImagePreviewWindow';
 import { MainLayout } from '../pages/main/MainLayout';
 import { SettingsPage } from '../pages/main/SettingsPage';
@@ -17,6 +18,7 @@ export function AppRoutes(): JSX.Element {
       <Route path="/auth/register" element={<RegisterPage />} />
       <Route path="/auth/guest" element={<GuestLoginPage />} />
       <Route path="/preview/image" element={<ImagePreviewWindow />} />
+      <Route path="/conversation-search" element={<ConversationSearchWindow />} />
       <Route
         path="/"
         element={isAuthenticated ? <MainLayout /> : <Navigate to="/auth/login" replace />}

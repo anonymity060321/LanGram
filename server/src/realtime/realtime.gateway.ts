@@ -260,6 +260,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   private toErrorPayload(error: unknown): RealtimeErrorPayload {
     if (error instanceof Error) {
+      if (error.message === 'FRIENDSHIP_REQUIRED') {
+        return {
+          code: 'FRIENDSHIP_REQUIRED',
+          message: 'FRIENDSHIP_REQUIRED',
+        };
+      }
+
       return {
         code: error.name,
         message: error.message,

@@ -23,7 +23,7 @@ import {
 } from '../../api/files.api';
 import { saveDownloadedFile, upsertLocalFileRecord } from '../../api/localFiles.api';
 import { logout as requestLogout } from '../../api/auth.api';
-import { listFriends, type FriendItem } from '../../api/friends.api';
+import { deleteFriend, listFriendRequests, listFriends, type FriendItem } from '../../api/friends.api';
 import { AppLogo } from '../../components/AppLogo';
 import { UserAvatar } from '../../components/UserAvatar';
 import { useI18n } from '../../i18n';
@@ -31,6 +31,12 @@ import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
 import { useNetworkStore, type NetworkStatus } from '../../stores/network.store';
 import { useSettingsStore, type SendShortcutPreference } from '../../stores/settings.store';
+import {
+  CONVERSATION_SEARCH_OPEN_EVENT,
+  CONVERSATION_SEARCH_READY_EVENT,
+  type ConversationSearchMessage,
+  type ConversationSearchPayload,
+} from './ConversationSearchWindow';
 import {
   loadConversationUiState,
   saveConversationUiState,
@@ -43,7 +49,10 @@ import {
   showDesktopNotification,
 } from '../../utils/desktopNotification';
 import { isCompressibleImage, prepareImageUploadFile } from '../../utils/imageCompression';
-import { FriendsWorkspace } from './FriendsPage';
+import { FriendDeleteConfirmDialog, FriendsWorkspace } from './FriendsPage';
+
+const EMPTY_SEARCH_MATCH_IDS = new Set<string>();
+const EMPTY_CONVERSATION_IDS: string[] = [];
 
 function useDismissOnOutsideOrEscape<T extends HTMLElement>(
   isOpen: boolean,
@@ -94,7 +103,6 @@ export function MainLayout(): JSX.Element {
   );
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
   const chatError = useChatStore((state) => state.error);
-  const searchQuery = useChatStore((state) => state.searchQuery);
   const networkStatus = useNetworkStore((state) => state.status);
   const networkLastChangedAt = useNetworkStore((state) => state.lastChangedAt);
   const isNetworkOnline = useNetworkStore((state) => state.online);
@@ -121,12 +129,15 @@ export function MainLayout(): JSX.Element {
   const recallMessage = useChatStore((state) => state.recallMessage);
   const deleteLocalMessage = useChatStore((state) => state.deleteLocalMessage);
   const clearLocalConversation = useChatStore((state) => state.clearLocalConversation);
-  const setSearchQuery = useChatStore((state) => state.setSearchQuery);
   const localClearWatermarks = useChatStore((state) => state.localClearWatermarks);
-  const enableNotifications = useSettingsStore((state) => state.config?.enableNotifications ?? true);
+  const settingsConfig = useSettingsStore((state) => state.config);
+  const enableNotifications = settingsConfig?.enableNotifications ?? true;
   const sendShortcut = useSettingsStore((state) => state.config?.sendShortcut ?? 'enter');
   const updateConfig = useSettingsStore((state) => state.updateConfig);
   const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [hasLoadedFriends, setHasLoadedFriends] = useState(false);
+  const [trustedFriendPeerId, setTrustedFriendPeerId] = useState<string | null>(null);
+  const [pendingFriendRequestCount, setPendingFriendRequestCount] = useState(0);
   const [messageDraft, setMessageDraft] = useState('');
   const [messageLimitNotice, setMessageLimitNotice] = useState<string | null>(null);
   const [reconnectedNoticeVisible, setReconnectedNoticeVisible] = useState(false);
@@ -138,7 +149,6 @@ export function MainLayout(): JSX.Element {
   const [activeView, setActiveView] = useState<MainView>('messages');
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [isChatActionsOpen, setIsChatActionsOpen] = useState(false);
-  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
   const [isSendShortcutMenuOpen, setIsSendShortcutMenuOpen] = useState(false);
   const [isEmojiPanelOpen, setIsEmojiPanelOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
@@ -150,6 +160,9 @@ export function MainLayout(): JSX.Element {
   const [readConversationOverrides, setReadConversationOverrides] = useState<Record<string, string>>({});
   const [conversationContextMenu, setConversationContextMenu] =
     useState<ConversationContextMenuState | null>(null);
+  const [pendingConversationActivationId, setPendingConversationActivationId] = useState<string | null>(null);
+  const [pendingDeleteFriend, setPendingDeleteFriend] = useState<PendingFriendDelete | null>(null);
+  const [isDeletingFriend, setIsDeletingFriend] = useState(false);
   const [pageAttentionKey, setPageAttentionKey] = useState(0);
   const appMenuRef = useRef<HTMLDivElement>(null);
   const chatActionsRef = useRef<HTMLDivElement>(null);
@@ -166,6 +179,7 @@ export function MainLayout(): JSX.Element {
   const hasObservedOnlineForSyncRef = useRef(networkStatus === 'online');
   const previousNetworkStatusForSyncRef = useRef<NetworkStatus>(networkStatus);
   const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
+  const pendingActivationInFlightRef = useRef<string | null>(null);
 
   useDismissOnOutsideOrEscape(isAppMenuOpen, appMenuRef, setIsAppMenuOpen);
   useDismissOnOutsideOrEscape(isChatActionsOpen, chatActionsRef, setIsChatActionsOpen);
@@ -182,6 +196,16 @@ export function MainLayout(): JSX.Element {
     : selectedConversation?.peer
     ? formatPresence(selectedConversation.peer.isOnline, selectedConversation.peer.lastSeenAt, t)
     : t('presence.online');
+  const isFriendshipRequiredError = chatError === 'FRIENDSHIP_REQUIRED' || chatError === 'NOT_FRIENDS';
+  const isSelectedPeerKnownNonFriend =
+    selectedConversation?.peer
+      ? isPeerKnownNonFriend(selectedConversation.peer.id, friends, hasLoadedFriends, trustedFriendPeerId)
+      : false;
+  const chatTopNotice =
+    selectedConversation && (isFriendshipRequiredError || isSelectedPeerKnownNonFriend)
+      ? t('chat.notFriendsCannotSend')
+      : null;
+  const visibleChatError = isFriendshipRequiredError ? null : chatError;
   const messages = useMemo(
     () => (selectedConversationId ? messagesByConversation[selectedConversationId] ?? [] : []),
     [messagesByConversation, selectedConversationId],
@@ -189,20 +213,24 @@ export function MainLayout(): JSX.Element {
   const selectedMessagePagination = selectedConversationId
     ? messagePaginationByConversation[selectedConversationId] ?? null
     : null;
-  const searchResults = useMemo(
-    () => buildSearchResults(messages, searchQuery),
-    [messages, searchQuery],
-  );
-  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1);
-  const activeSearchMessageId =
-    activeSearchResultIndex >= 0 ? searchResults[activeSearchResultIndex]?.messageId ?? null : null;
-  const searchMatchIds = useMemo(
-    () => new Set(searchResults.map((result) => result.messageId)),
-    [searchResults],
+  const pinnedConversationIds = settingsConfig?.pinnedConversationIds ?? EMPTY_CONVERSATION_IDS;
+  const mutedConversationIds = settingsConfig?.mutedConversationIds ?? EMPTY_CONVERSATION_IDS;
+  const isSelectedConversationPinned = selectedConversationId
+    ? pinnedConversationIds.includes(selectedConversationId)
+    : false;
+  const isSelectedConversationMuted = selectedConversationId
+    ? mutedConversationIds.includes(selectedConversationId)
+    : false;
+  const effectiveConversationUiState = useMemo(
+    () => ({
+      ...conversationUiState,
+      pinnedIds: pinnedConversationIds,
+    }),
+    [conversationUiState, pinnedConversationIds],
   );
   const displayedConversations = useMemo(
-    () => buildDisplayedConversations(conversations, conversationUiState, messagesByConversation, localClearWatermarks),
-    [conversationUiState, conversations, localClearWatermarks, messagesByConversation],
+    () => buildDisplayedConversations(conversations, effectiveConversationUiState, messagesByConversation, localClearWatermarks),
+    [conversations, effectiveConversationUiState, localClearWatermarks, messagesByConversation],
   );
   const totalUnreadCount = useMemo(
     () =>
@@ -211,7 +239,7 @@ export function MainLayout(): JSX.Element {
           conversation,
           messagesByConversation[conversation.id] ?? [],
           localClearWatermarks,
-          conversationUiState.manualUnreadIds,
+          effectiveConversationUiState.manualUnreadIds,
           readConversationOverrides,
           t,
         );
@@ -219,23 +247,54 @@ export function MainLayout(): JSX.Element {
         return total + preview.unreadCount;
       }, 0),
     [
-      conversationUiState.manualUnreadIds,
       displayedConversations,
+      effectiveConversationUiState.manualUnreadIds,
       localClearWatermarks,
       messagesByConversation,
       readConversationOverrides,
       t,
     ],
   );
+  const refreshFriendRequestCount = useCallback(async (): Promise<void> => {
+    const result = await listFriendRequests();
+    setPendingFriendRequestCount(
+      result.incoming.filter((request) => request.status === 'PENDING').length,
+    );
+  }, []);
 
   useEffect(() => {
     if (user) {
       void loadConversations(user.id);
+      void refreshFriendRequestCount();
     }
+    setHasLoadedFriends(false);
     void listFriends()
-      .then((result) => setFriends(result.friends))
-      .catch(() => setFriends([]));
-  }, [loadConversations, user]);
+      .then((result) => {
+        setFriends(result.friends);
+        setHasLoadedFriends(true);
+      })
+      .catch(() => {
+        setFriends([]);
+        setHasLoadedFriends(false);
+      });
+  }, [loadConversations, refreshFriendRequestCount, user]);
+
+  useEffect(() => {
+    function handleFriendRequestChanged(): void {
+      void refreshFriendRequestCount();
+      void listFriends()
+        .then((result) => {
+          setFriends(result.friends);
+          setHasLoadedFriends(true);
+        })
+        .catch(() => {
+          setHasLoadedFriends(false);
+        });
+    }
+
+    window.addEventListener('langram:friend-request-changed', handleFriendRequestChanged);
+    return () => window.removeEventListener('langram:friend-request-changed', handleFriendRequestChanged);
+  }, [refreshFriendRequestCount]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -404,7 +463,6 @@ export function MainLayout(): JSX.Element {
 
   useEffect(() => {
     setIsChatActionsOpen(false);
-    setIsChatSearchOpen(false);
   }, [selectedConversationId]);
 
   useEffect(() => {
@@ -421,22 +479,6 @@ export function MainLayout(): JSX.Element {
       document.removeEventListener('visibilitychange', notifyVisibilityChange);
     };
   }, []);
-
-  useEffect(() => {
-    const hasSearchQuery = searchQuery.trim().length > 0;
-    if (!hasSearchQuery || searchResults.length === 0) {
-      setActiveSearchResultIndex(-1);
-      return;
-    }
-
-    setActiveSearchResultIndex((current) => {
-      if (current >= 0 && current < searchResults.length) {
-        return current;
-      }
-
-      return 0;
-    });
-  }, [searchQuery, searchResults.length]);
 
   useEffect(() => {
     setFriends((current) =>
@@ -459,14 +501,31 @@ export function MainLayout(): JSX.Element {
     [conversations, selectedConversationId, t, visibleFriends],
   );
 
-  const handleSelectConversation = useCallback(async (conversationId: string): Promise<void> => {
+  const unhideConversation = useCallback((conversationId: string): void => {
+    unhideConversationInUiState(conversationId);
+    setConversationUiState((current) => {
+      if (!current.hiddenConversations[conversationId]) {
+        return current;
+      }
+
+      const hiddenConversations = { ...current.hiddenConversations };
+      delete hiddenConversations[conversationId];
+      return saveConversationUiState({ ...current, hiddenConversations });
+    });
+  }, []);
+
+  const activateConversation = useCallback(async (
+    conversationId: string,
+    options: { forceOpen?: boolean } = {},
+  ): Promise<boolean> => {
     if (!user) {
-      return;
+      return false;
     }
 
     setActiveView('messages');
     setConversationContextMenu(null);
-    setSearchQuery('');
+    setIsChatActionsOpen(false);
+    unhideConversation(conversationId);
     setConversationUiState((current) => {
       if (!current.manualUnreadIds.includes(conversationId)) {
         return current;
@@ -478,13 +537,48 @@ export function MainLayout(): JSX.Element {
       });
     });
     setReadConversationOverrides((current) => ({ ...current, [conversationId]: new Date().toISOString() }));
-    if (selectedConversationId === conversationId) {
+    if (!options.forceOpen && selectedConversationId === conversationId) {
       closeConversation();
-      return;
+      return true;
     }
 
     await selectConversation(conversationId, user.id);
-  }, [closeConversation, selectConversation, selectedConversationId, setSearchQuery, user]);
+    setActiveView('messages');
+    return true;
+  }, [closeConversation, selectConversation, selectedConversationId, unhideConversation, user]);
+
+  const handleSelectConversation = useCallback(async (conversationId: string): Promise<void> => {
+    await activateConversation(conversationId);
+  }, [activateConversation]);
+
+  useEffect(() => {
+    if (!pendingConversationActivationId || !user || activeView !== 'messages') {
+      return undefined;
+    }
+
+    if (!conversations.some((conversation) => conversation.id === pendingConversationActivationId)) {
+      return undefined;
+    }
+
+    if (pendingActivationInFlightRef.current === pendingConversationActivationId) {
+      return undefined;
+    }
+
+    pendingActivationInFlightRef.current = pendingConversationActivationId;
+    void activateConversation(pendingConversationActivationId, { forceOpen: true })
+      .then((didActivate) => {
+        if (didActivate) {
+          setPendingConversationActivationId(null);
+        }
+      })
+      .finally(() => {
+        if (pendingActivationInFlightRef.current === pendingConversationActivationId) {
+          pendingActivationInFlightRef.current = null;
+        }
+      });
+
+    return undefined;
+  }, [activateConversation, activeView, conversations, pendingConversationActivationId, user]);
 
   useEffect(() => {
     if (!latestIncomingMessage) {
@@ -494,6 +588,14 @@ export function MainLayout(): JSX.Element {
     if (!enableNotifications) {
       debugNotificationDiagnostic('message-notification-skipped', {
         reason: 'disabled',
+        conversationId: latestIncomingMessage.conversationId,
+      });
+      return;
+    }
+
+    if (mutedConversationIds.includes(latestIncomingMessage.conversationId)) {
+      debugNotificationDiagnostic('message-notification-skipped', {
+        reason: 'muted',
         conversationId: latestIncomingMessage.conversationId,
       });
       return;
@@ -542,6 +644,7 @@ export function MainLayout(): JSX.Element {
     enableNotifications,
     handleSelectConversation,
     latestIncomingMessage,
+    mutedConversationIds,
     pageAttentionKey,
     selectedConversationId,
     t,
@@ -563,16 +666,29 @@ export function MainLayout(): JSX.Element {
     }
   }
 
-  async function handleOpenFriend(friendUserId: string): Promise<void> {
+  async function handleMessageFriend(friendship: FriendItem): Promise<boolean> {
     if (!user) {
-      return;
+      return false;
     }
 
-    const conversationId = await openDirectConversation(friendUserId, user.id);
-    if (conversationId) {
-      unhideConversation(conversationId);
-      setActiveView('messages');
+    if (!isNetworkOnline) {
+      return false;
     }
+
+    setTrustedFriendPeerId(friendship.friend.id);
+    setFriends((current) => upsertFriendship(current, friendship));
+    setConversationContextMenu(null);
+    setActiveView('messages');
+
+    const conversationId = await openDirectConversation(friendship.friend.id, user.id);
+    if (!conversationId) {
+      return false;
+    }
+
+    unhideConversation(conversationId);
+    setPendingConversationActivationId(conversationId);
+    setActiveView('messages');
+    return true;
   }
 
   async function handleSend(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -582,6 +698,13 @@ export function MainLayout(): JSX.Element {
 
   async function submitMessageDraft(): Promise<void> {
     if (!user || !selectedConversationId || !messageDraft.trim()) {
+      return;
+    }
+
+    if (
+      selectedConversation?.peer &&
+      isPeerKnownNonFriend(selectedConversation.peer.id, friends, hasLoadedFriends, trustedFriendPeerId)
+    ) {
       return;
     }
 
@@ -646,7 +769,6 @@ export function MainLayout(): JSX.Element {
     }
 
     setMessageDraft(nextDraft);
-    setIsEmojiPanelOpen(false);
     requestAnimationFrame(() => {
       const currentTextarea = messageTextareaRef.current;
       if (!currentTextarea) {
@@ -833,13 +955,110 @@ export function MainLayout(): JSX.Element {
   }
 
   function openConversationSearch(): void {
-    setIsChatSearchOpen(true);
     setIsChatActionsOpen(false);
+    if (!selectedConversation) {
+      return;
+    }
+
+    void openConversationSearchWindow(
+      buildConversationSearchPayload(
+        selectedConversation,
+        messages,
+        user?.id ?? null,
+        user?.displayName ?? t('app.name'),
+      ),
+      t('chat.searchWindowTitle'),
+    );
   }
 
   function handleClearLocalConversationFromMenu(): void {
     setIsChatActionsOpen(false);
     handleClearLocalConversation();
+  }
+
+  async function handleDeleteFriendFromMenu(): Promise<void> {
+    if (!selectedConversationId || !selectedConversation?.peer || !user) {
+      return;
+    }
+
+    const friendship = friends.find((item) => item.friend.id === selectedConversation.peer?.id);
+    if (!friendship) {
+      window.alert(t('chat.deleteFriendFailed'));
+      return;
+    }
+
+    setPendingDeleteFriend({ friendship, conversationId: selectedConversationId });
+  }
+
+  async function confirmDeleteFriendFromMenu(): Promise<void> {
+    if (!pendingDeleteFriend || !user) {
+      return;
+    }
+
+    setIsChatActionsOpen(false);
+    setIsDeletingFriend(true);
+    try {
+      await deleteFriend(pendingDeleteFriend.friendship.id);
+      setTrustedFriendPeerId((current) =>
+        current === pendingDeleteFriend.friendship.friend.id ? null : current,
+      );
+      setFriends((current) => current.filter((item) => item.id !== pendingDeleteFriend.friendship.id));
+      setHasLoadedFriends(true);
+      if (pendingDeleteFriend.conversationId) {
+        const deletedConversationId = pendingDeleteFriend.conversationId;
+        setConversationUiState((current) =>
+          saveConversationUiState({
+            ...current,
+            manualUnreadIds: current.manualUnreadIds.filter((id) => id !== deletedConversationId),
+            hiddenConversations: {
+              ...current.hiddenConversations,
+              [deletedConversationId]: new Date().toISOString(),
+            },
+          }),
+        );
+        void updateConfig({
+          pinnedConversationIds: pinnedConversationIds.filter((id) => id !== deletedConversationId),
+          mutedConversationIds: mutedConversationIds.filter((id) => id !== deletedConversationId),
+        });
+      }
+      setPendingDeleteFriend(null);
+      closeConversation();
+      await loadConversations(user.id);
+    } catch {
+      window.alert(isNetworkOnline ? t('chat.deleteFriendFailed') : t('friends.networkUnavailable'));
+    } finally {
+      setIsDeletingFriend(false);
+    }
+  }
+
+  function cancelDeleteFriendFromMenu(): void {
+    if (isDeletingFriend) {
+      return;
+    }
+
+    setPendingDeleteFriend(null);
+  }
+
+  function togglePinnedConversation(): void {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    const nextPinnedIds = pinnedConversationIds.includes(selectedConversationId)
+      ? pinnedConversationIds.filter((id) => id !== selectedConversationId)
+      : [...pinnedConversationIds, selectedConversationId];
+    void updateConfig({ pinnedConversationIds: nextPinnedIds });
+  }
+
+  function toggleMutedConversation(): void {
+    if (!selectedConversationId) {
+      return;
+    }
+
+    const nextMutedIds = mutedConversationIds.includes(selectedConversationId)
+      ? mutedConversationIds.filter((id) => id !== selectedConversationId)
+      : [...mutedConversationIds, selectedConversationId];
+    void updateConfig({ mutedConversationIds: nextMutedIds });
   }
 
   function handleConversationContextMenu(event: MouseEvent, conversation: Conversation): void {
@@ -851,25 +1070,21 @@ export function MainLayout(): JSX.Element {
   }
 
   function pinConversation(conversationId: string): void {
-    setConversationUiState((current) => {
-      if (current.pinnedIds.includes(conversationId)) {
-        return current;
-      }
+    if (pinnedConversationIds.includes(conversationId)) {
+      return;
+    }
 
-      return saveConversationUiState({
-        ...current,
-        pinnedIds: [...current.pinnedIds, conversationId],
-      });
-    });
+    void updateConfig({ pinnedConversationIds: [...pinnedConversationIds, conversationId] });
   }
 
   function unpinConversation(conversationId: string): void {
-    setConversationUiState((current) =>
-      saveConversationUiState({
-        ...current,
-        pinnedIds: current.pinnedIds.filter((id) => id !== conversationId),
-      }),
-    );
+    if (!pinnedConversationIds.includes(conversationId)) {
+      return;
+    }
+
+    void updateConfig({
+      pinnedConversationIds: pinnedConversationIds.filter((id) => id !== conversationId),
+    });
   }
 
   function markConversationUnread(conversationId: string): void {
@@ -913,7 +1128,7 @@ export function MainLayout(): JSX.Element {
 
     setConversationUiState((current) =>
       saveConversationUiState({
-        pinnedIds: current.pinnedIds.filter((id) => id !== conversationId),
+        ...current,
         manualUnreadIds: current.manualUnreadIds.filter((id) => id !== conversationId),
         hiddenConversations: {
           ...current.hiddenConversations,
@@ -921,6 +1136,10 @@ export function MainLayout(): JSX.Element {
         },
       }),
     );
+    void updateConfig({
+      pinnedConversationIds: pinnedConversationIds.filter((id) => id !== conversationId),
+      mutedConversationIds: mutedConversationIds.filter((id) => id !== conversationId),
+    });
     setReadConversationOverrides((current) => {
       const next = { ...current };
       delete next[conversationId];
@@ -929,19 +1148,6 @@ export function MainLayout(): JSX.Element {
     if (selectedConversationId === conversationId) {
       closeConversation();
     }
-  }
-
-  function unhideConversation(conversationId: string): void {
-    unhideConversationInUiState(conversationId);
-    setConversationUiState((current) => {
-      if (!current.hiddenConversations[conversationId]) {
-        return current;
-      }
-
-      const hiddenConversations = { ...current.hiddenConversations };
-      delete hiddenConversations[conversationId];
-      return saveConversationUiState({ ...current, hiddenConversations });
-    });
   }
 
   function handleConversationMenuAction(action: ConversationMenuAction, conversation: Conversation): void {
@@ -965,41 +1171,6 @@ export function MainLayout(): JSX.Element {
       default:
         break;
     }
-  }
-
-  function goToNextSearchResult(): void {
-    if (searchResults.length === 0) {
-      return;
-    }
-
-    setActiveSearchResultIndex((current) => (current + 1 + searchResults.length) % searchResults.length);
-  }
-
-  function goToPreviousSearchResult(): void {
-    if (searchResults.length === 0) {
-      return;
-    }
-
-    setActiveSearchResultIndex((current) => (current - 1 + searchResults.length) % searchResults.length);
-  }
-
-  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
-    if (event.key !== 'Enter') {
-      return;
-    }
-
-    event.preventDefault();
-    if (event.shiftKey) {
-      goToPreviousSearchResult();
-      return;
-    }
-
-    goToNextSearchResult();
-  }
-
-  function clearSearch(): void {
-    setSearchQuery('');
-    setActiveSearchResultIndex(-1);
   }
 
   async function handleLoadOlderMessages(): Promise<boolean> {
@@ -1042,6 +1213,11 @@ export function MainLayout(): JSX.Element {
           >
             <NavIcon src={NAV_ICON_SOURCES.contacts} fallback="C" label={t('main.navContacts')} />
             <strong>{t('main.navContacts')}</strong>
+            {pendingFriendRequestCount > 0 ? (
+              <span className="app-nav-unread" aria-label={`${t('main.navContacts')} ${formatUnreadCount(pendingFriendRequestCount)}`}>
+                {formatUnreadCount(pendingFriendRequestCount)}
+              </span>
+            ) : null}
           </button>
         </nav>
         <div className="app-nav-menu" ref={appMenuRef}>
@@ -1087,6 +1263,7 @@ export function MainLayout(): JSX.Element {
         <FriendsWorkspace
           className="main-friends-shell"
           onConversationOpened={() => setActiveView('messages')}
+          onMessageFriend={handleMessageFriend}
         />
       ) : (
         <>
@@ -1108,15 +1285,15 @@ export function MainLayout(): JSX.Element {
                 conversation,
                 messagesByConversation[conversation.id] ?? [],
                 localClearWatermarks,
-                conversationUiState.manualUnreadIds,
+                effectiveConversationUiState.manualUnreadIds,
                 readConversationOverrides,
                 t,
               );
-              const isPinned = conversationUiState.pinnedIds.includes(conversation.id);
+              const isPinned = effectiveConversationUiState.pinnedIds.includes(conversation.id);
               return (
                 <button
                   type="button"
-                  className={`conversation-item ${
+                  className={`conversation-item ${isPinned ? 'is-pinned' : ''} ${
                     selectedConversationId === conversation.id ? 'is-active' : ''
                   }`}
                   key={conversation.id}
@@ -1137,7 +1314,6 @@ export function MainLayout(): JSX.Element {
                     </span>
                     <span className="conversation-item-meta">
                       <small>{preview.summary}</small>
-                      {isPinned ? <span className="conversation-pin">&uarr;</span> : null}
                       {preview.unreadCount > 0 ? (
                         <span className="conversation-unread">
                           {preview.unreadCount > 99 ? '99+' : preview.unreadCount}
@@ -1167,24 +1343,77 @@ export function MainLayout(): JSX.Element {
           {selectedConversation ? (
             <div className="chat-header-actions" ref={chatActionsRef}>
               {isChatActionsOpen ? (
-                <div className="chat-actions-menu" role="menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="chat-actions-menu-item"
-                    onClick={openConversationSearch}
-                  >
-                    {t('chat.searchCurrentConversation')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="chat-actions-menu-item is-danger"
-                    onClick={handleClearLocalConversationFromMenu}
-                    disabled={messages.length === 0}
-                  >
-                    {t('chat.clearLocalRecords')}
-                  </button>
+                <div className="chat-actions-panel" role="menu" aria-label={t('chat.moreActions')}>
+                  <div className="chat-actions-panel-section">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="chat-actions-panel-item"
+                      onClick={openConversationSearch}
+                    >
+                      <span>{t('chat.searchCurrentConversation')}</span>
+                      <span className="chat-actions-panel-arrow" aria-hidden="true">›</span>
+                    </button>
+                  </div>
+                  <div className="chat-actions-panel-section">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`chat-actions-panel-item${isSelectedConversationPinned ? ' is-enabled' : ''}`}
+                      aria-pressed={isSelectedConversationPinned}
+                      title={isSelectedConversationPinned ? t('chat.pinned') : undefined}
+                      onClick={togglePinnedConversation}
+                    >
+                      <span>{t('chat.pinConversation')}</span>
+                      <span className="chat-actions-panel-toggle" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`chat-actions-panel-item${isSelectedConversationMuted ? ' is-enabled' : ''}`}
+                      aria-pressed={isSelectedConversationMuted}
+                      title={isSelectedConversationMuted ? t('chat.muted') : undefined}
+                      onClick={toggleMutedConversation}
+                    >
+                      <span>{t('chat.muteConversation')}</span>
+                      <span className="chat-actions-panel-toggle" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="chat-actions-panel-item"
+                      disabled
+                      title={t('chat.comingSoon')}
+                    >
+                      <span>{t('chat.blockUser')}</span>
+                      <span className="chat-actions-panel-toggle" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="chat-actions-panel-section">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="chat-actions-panel-item"
+                      onClick={handleClearLocalConversationFromMenu}
+                      disabled={messages.length === 0}
+                    >
+                      <span>{t('chat.clearLocalRecords')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="chat-actions-panel-item is-danger"
+                      onClick={() => void handleDeleteFriendFromMenu()}
+                      disabled={!selectedConversation?.peer || !friends.some((item) => item.friend.id === selectedConversation.peer?.id)}
+                      title={
+                        selectedConversation?.peer && friends.some((item) => item.friend.id === selectedConversation.peer?.id)
+                          ? undefined
+                          : t('chat.comingSoon')
+                      }
+                    >
+                      <span>{t('chat.deleteFriend')}</span>
+                    </button>
+                  </div>
                 </div>
               ) : null}
               <button
@@ -1195,7 +1424,7 @@ export function MainLayout(): JSX.Element {
                 title={t('chat.moreActions')}
                 onClick={() => setIsChatActionsOpen((isOpen) => !isOpen)}
               >
-                <span aria-hidden="true">...</span>
+                <span className="chat-more-button-icon" aria-hidden="true" />
               </button>
             </div>
           ) : null}
@@ -1209,52 +1438,9 @@ export function MainLayout(): JSX.Element {
                 t={t}
               />
             </div>
-            {isChatSearchOpen ? (
-              <div className="chat-search-bar">
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  onKeyDown={handleSearchKeyDown}
-                  placeholder={t('chat.searchPlaceholder')}
-                />
-                {searchQuery.trim() ? (
-                  <div className="chat-search-actions">
-                    <span className={searchResults.length === 0 ? 'is-empty' : ''}>
-                      {searchResults.length === 0
-                        ? t('chat.searchNoResults')
-                        : `${Math.max(activeSearchResultIndex + 1, 1)} / ${searchResults.length}`}
-                    </span>
-                    <button
-                      type="button"
-                      className="chat-search-button"
-                      aria-label={t('chat.searchPrevious')}
-                      title={t('chat.searchPrevious')}
-                      disabled={searchResults.length === 0}
-                      onClick={goToPreviousSearchResult}
-                    >
-                      &uarr;
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-search-button"
-                      aria-label={t('chat.searchNext')}
-                      title={t('chat.searchNext')}
-                      disabled={searchResults.length === 0}
-                      onClick={goToNextSearchResult}
-                    >
-                      &darr;
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-search-button"
-                      aria-label={t('chat.searchClear')}
-                      title={t('chat.searchClear')}
-                      onClick={clearSearch}
-                    >
-                      &times;
-                    </button>
-                  </div>
-                ) : null}
+            {chatTopNotice ? (
+              <div className="chat-top-notice" role="status">
+                {chatTopNotice}
               </div>
             ) : null}
             <div className="chat-message-area">
@@ -1267,9 +1453,9 @@ export function MainLayout(): JSX.Element {
                 isLoading={isLoadingMessages}
                 hasMoreMessages={selectedMessagePagination?.hasMore ?? false}
                 isLoadingOlderMessages={selectedMessagePagination?.isLoadingOlder ?? false}
-                searchQuery={searchQuery}
-                activeSearchMessageId={activeSearchMessageId}
-                searchMatchIds={searchMatchIds}
+                searchQuery=""
+                activeSearchMessageId={null}
+                searchMatchIds={EMPTY_SEARCH_MATCH_IDS}
                 onLoadOlderMessages={handleLoadOlderMessages}
                 onDeleteLocalMessage={handleDeleteLocalMessage}
                 onRecallMessage={handleRecallMessage}
@@ -1301,30 +1487,42 @@ export function MainLayout(): JSX.Element {
             ) : null}
             <form className="message-input" onSubmit={(event) => void handleSend(event)}>
               <div className="message-input-toolbar" aria-label={t('chat.attachments')}>
-                <div className="emoji-tool" ref={emojiPanelRef}>
+                <div className="emoji-picker-wrapper" ref={emojiPanelRef}>
                   <button
                     type="button"
                     className="composer-tool-button"
                     aria-label={t('chat.emoji')}
                     title={t('chat.emoji')}
                     aria-expanded={isEmojiPanelOpen}
-                    onClick={() => setIsEmojiPanelOpen((isOpen) => !isOpen)}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setIsEmojiPanelOpen((isOpen) => !isOpen);
+                    }}
                   >
                     <img src="/vector_icon/smile.svg" alt="" aria-hidden="true" />
                     <span>{t('chat.emoji')}</span>
                   </button>
                   {isEmojiPanelOpen ? (
                     <div className="emoji-panel" role="menu" aria-label={t('chat.insertEmoji')}>
-                      {COMPOSER_EMOJIS.map((emoji) => (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="emoji-panel-item"
-                          key={emoji}
-                          onClick={() => insertEmoji(emoji)}
-                        >
-                          {emoji}
-                        </button>
+                      {EMOJI_GROUPS.map((group) => (
+                        <section className="emoji-panel-section" key={group.id}>
+                          <h3 className="emoji-panel-title">{t(group.labelKey)}</h3>
+                          <div className="emoji-grid">
+                            {group.items.map((emoji) => (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="emoji-option"
+                                key={`${group.id}-${emoji}`}
+                                aria-label={emoji}
+                                onClick={() => insertEmoji(emoji)}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </section>
                       ))}
                     </div>
                   ) : null}
@@ -1442,7 +1640,7 @@ export function MainLayout(): JSX.Element {
             <p>{t('chat.selectConversation')}</p>
           </div>
         )}
-        {chatError ? <p className="chat-error">{chatError}</p> : null}
+        {visibleChatError ? <p className="chat-error">{visibleChatError}</p> : null}
       </section>
 
       <aside className="profile-panel">
@@ -1455,33 +1653,6 @@ export function MainLayout(): JSX.Element {
         <strong>{profileUser?.displayName ?? t('app.name')}</strong>
         <span className="presence-text">{profilePresence}</span>
         <span>{profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}</span>
-        <section className="profile-section">
-          <h2>{t('chat.startChat')}</h2>
-          {visibleFriends.length === 0 ? <p>{t('chat.noFriendsToStart')}</p> : null}
-          <div className="friend-start-list">
-            {visibleFriends.map((friend) => (
-              <button
-                type="button"
-                className="friend-start-button"
-                key={friend.id}
-                onClick={() => void handleOpenFriend(friend.friend.id)}
-              >
-                <UserAvatar
-                  userId={friend.friend.id}
-                  displayName={friend.friend.displayName}
-                  avatarUrl={friend.friend.avatarUrl}
-                  size="sm"
-                />
-                <span>
-                  <strong>{friend.friend.displayName}</strong>
-                  <small>
-                    {formatPresence(friend.friend.isOnline, friend.friend.lastSeenAt, t)}
-                  </small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
       </aside>
         </>
       )}
@@ -1489,7 +1660,9 @@ export function MainLayout(): JSX.Element {
         ? createPortal(
             <ConversationContextMenu
               conversation={conversationContextMenu.conversation}
-              isPinned={conversationUiState.pinnedIds.includes(conversationContextMenu.conversation.id)}
+              isPinned={effectiveConversationUiState.pinnedIds.includes(
+                conversationContextMenu.conversation.id,
+              )}
               isUnread={
                 getVisibleConversationPreview(
                   conversationContextMenu.conversation,
@@ -1509,6 +1682,17 @@ export function MainLayout(): JSX.Element {
             document.body,
           )
         : null}
+      {pendingDeleteFriend ? (
+        <FriendDeleteConfirmDialog
+          title={t('friends.deleteFriendConfirmTitle')}
+          message={t('friends.deleteFriendConfirm')}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={t('friends.deleteFriendConfirmAction')}
+          isBusy={isDeletingFriend}
+          onCancel={cancelDeleteFriendFromMenu}
+          onConfirm={() => void confirmDeleteFriendFromMenu()}
+        />
+      ) : null}
     </main>
   );
 }
@@ -2645,6 +2829,38 @@ function isLocalPendingMessage(message: ChatMessage): boolean {
   );
 }
 
+function isCurrentPeerFriend(peerId: string, friends: FriendItem[]): boolean {
+  return friends.some((item) => item.friend.id === peerId);
+}
+
+function isPeerKnownNonFriend(
+  peerId: string,
+  friends: FriendItem[],
+  hasLoadedFriends: boolean,
+  trustedFriendPeerId: string | null,
+): boolean {
+  if (!hasLoadedFriends) {
+    return false;
+  }
+
+  if (trustedFriendPeerId === peerId) {
+    return false;
+  }
+
+  return !isCurrentPeerFriend(peerId, friends);
+}
+
+function upsertFriendship(friends: FriendItem[], friendship: FriendItem): FriendItem[] {
+  const index = friends.findIndex((item) => item.id === friendship.id || item.friend.id === friendship.friend.id);
+  if (index === -1) {
+    return [friendship, ...friends];
+  }
+
+  const next = [...friends];
+  next[index] = friendship;
+  return next;
+}
+
 function canShowRecallMenuItem(message: ChatMessage): boolean {
   return (
     message.isOwn &&
@@ -3069,8 +3285,10 @@ type ConversationPreview = {
   time: string | null;
   unreadCount: number;
 };
-type SearchResult = {
-  messageId: string;
+type EmojiGroup = {
+  id: string;
+  labelKey: Parameters<ReturnType<typeof useI18n>['t']>[0];
+  items: string[];
 };
 type ImagePreviewState =
   | { status: 'loading'; objectUrl: null }
@@ -3093,7 +3311,23 @@ type FileBadge = {
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const MESSAGE_DRAFT_MAX_LENGTH = 5000;
-const COMPOSER_EMOJIS = ['😀', '😂', '😊', '😍', '👍', '👏', '🙏', '❤️', '🔥', '🎉', '😢', '😅'];
+const EMOJI_GROUPS: EmojiGroup[] = [
+  {
+    id: 'common',
+    labelKey: 'chat.emojiGroupCommon',
+    items: ['😀', '😂', '😊', '😍', '🥰', '😎', '😭', '😅', '👍', '👏', '🙏', '❤️', '🔥', '🎉', '✨'],
+  },
+  {
+    id: 'faces',
+    labelKey: 'chat.emojiGroupFaces',
+    items: ['🙂', '😄', '😁', '😆', '😉', '😋', '😘', '🤔', '😐', '😴', '😢', '😡', '😱', '🤯', '🥳'],
+  },
+  {
+    id: 'gestures',
+    labelKey: 'chat.emojiGroupGestures',
+    items: ['👋', '👌', '✌️', '🤝', '🙌', '💪', '🤟', '👀', '💯', '✅', '❌', '⭐', '💡', '📌', '🚀'],
+  },
+];
 const MESSAGE_TIME_DIVIDER_INTERVAL_MS = 5 * 60 * 1000;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_UPLOAD_MIME_TYPES = new Set([
@@ -3304,6 +3538,111 @@ async function openImagePreviewWindow(payload: ImagePreviewWindowPayload): Promi
   await emitTo(label, IMAGE_PREVIEW_OPEN_EVENT, payload);
 }
 
+async function openConversationSearchWindow(
+  payload: ConversationSearchPayload,
+  title: string,
+): Promise<void> {
+  if (!(await isTauriRuntime())) {
+    return;
+  }
+
+  const label = `conversation-search-${payload.conversationId.replace(/[^a-zA-Z0-9-/:_]/g, '_')}-${Date.now()}`;
+  const [{ WebviewWindow }, { emitTo, listen }] = await Promise.all([
+    import('@tauri-apps/api/webviewWindow'),
+    import('@tauri-apps/api/event'),
+  ]);
+  let resolveReady: (() => void) | null = null;
+  let rejectReady: ((error: Error) => void) | null = null;
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  const timeoutId = window.setTimeout(() => {
+    unlistenReady();
+    rejectReady?.(new Error('Conversation search window did not report ready'));
+  }, 5000);
+  const unlistenReady = await listen<{ label: string }>(CONVERSATION_SEARCH_READY_EVENT, (event) => {
+    if (event.payload.label !== label) {
+      return;
+    }
+
+    window.clearTimeout(timeoutId);
+    unlistenReady();
+    resolveReady?.();
+  });
+
+  const webview = new WebviewWindow(label, {
+    url: '/#/conversation-search',
+    title,
+    width: 760,
+    height: 640,
+    minWidth: 520,
+    minHeight: 520,
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    void webview.once('tauri://created', () => resolve());
+    void webview.once<string>('tauri://error', (event) => reject(new Error(event.payload)));
+  });
+
+  await readyPromise;
+  await emitTo(label, CONVERSATION_SEARCH_OPEN_EVENT, payload);
+  window.setTimeout(() => {
+    void emitTo(label, CONVERSATION_SEARCH_OPEN_EVENT, payload);
+  }, 150);
+}
+
+function buildConversationSearchPayload(
+  conversation: Conversation,
+  messages: ChatMessage[],
+  currentUserId: string | null,
+  currentUserName: string,
+): ConversationSearchPayload {
+  const peerName = conversation.peer?.displayName ?? 'LanGram';
+  const peerAvatarUrl = conversation.peer?.avatarUrl ?? null;
+
+  return {
+    conversationId: conversation.id,
+    title: peerName,
+    messages: (messages.length > 0 ? messages : buildConversationSearchFallbackMessages(conversation))
+      .filter((message) => message.status !== 'recalled')
+      .map((message) => {
+        const isCurrentUser = Boolean(currentUserId && message.senderId === currentUserId);
+        return {
+          id: message.id,
+          senderName: isCurrentUser ? currentUserName : peerName,
+          avatarUrl: isCurrentUser ? null : peerAvatarUrl,
+          plaintext: message.plaintext,
+          messageType: message.messageType,
+          fileName: message.file?.originalName ?? null,
+          createdAt: message.createdAt,
+        } satisfies ConversationSearchMessage;
+      }),
+  };
+}
+
+function buildConversationSearchFallbackMessages(conversation: Conversation): ChatMessage[] {
+  if (!conversation.lastMessage || conversation.lastMessage.status === 'RECALLED') {
+    return [];
+  }
+
+  return [
+    {
+      id: conversation.lastMessage.id,
+      conversationId: conversation.id,
+      senderId: conversation.lastMessage.senderId,
+      messageType: conversation.lastMessage.messageType,
+      plaintext: conversation.lastMessagePlaintext ?? '',
+      file: conversation.lastMessage.file,
+      status: conversation.lastMessage.status.toLowerCase() as ChatMessage['status'],
+      createdAt: conversation.lastMessage.createdAt,
+      editedAt: conversation.lastMessage.editedAt,
+      recalledAt: conversation.lastMessage.recalledAt,
+      isOwn: false,
+    },
+  ];
+}
+
 interface ForwardTarget {
   id: string;
   type: 'conversation' | 'friend';
@@ -3311,6 +3650,11 @@ interface ForwardTarget {
   conversationId: string;
   friendUserId: string;
   isCurrentChat: boolean;
+}
+
+interface PendingFriendDelete {
+  friendship: FriendItem;
+  conversationId: string | null;
 }
 
 function buildForwardTargets(
@@ -3337,25 +3681,6 @@ function buildForwardTargets(
       isCurrentChat: false,
     })),
   ];
-}
-
-function buildSearchResults(messages: ChatMessage[], query: string): SearchResult[] {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  if (!normalizedQuery) {
-    return [];
-  }
-
-  return messages
-    .filter((message) => message.status !== 'recalled')
-    .filter((message) => {
-      const searchableText =
-        message.messageType === 'FILE' || message.messageType === 'IMAGE'
-          ? message.file?.originalName ?? ''
-          : message.plaintext;
-
-      return searchableText.toLocaleLowerCase().includes(normalizedQuery);
-    })
-    .map((message) => ({ messageId: message.id }));
 }
 
 function renderHighlightedText(text: string, query: string): Array<string | JSX.Element> | string {
