@@ -2405,7 +2405,22 @@ textarea,
 
 .message-row {
   display: flex;
+  align-items: flex-end;
   justify-content: flex-start;
+  gap: 8px;
+}
+
+.message-avatar-slot {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.message-avatar-slot.is-placeholder {
+  pointer-events: none;
 }
 
 .message-row.is-compact {

@@ -1483,6 +1483,8 @@ export function MainLayout(): JSX.Element {
               <MessageList
                 conversationId={selectedConversation.id}
                 messages={messages}
+                currentUserProfile={user}
+                peerProfile={selectedConversation.peer}
                 isLoading={isLoadingMessages}
                 hasMoreMessages={selectedMessagePagination?.hasMore ?? false}
                 isLoadingOlderMessages={selectedMessagePagination?.isLoadingOlder ?? false}
@@ -2051,9 +2053,17 @@ function formatConversationTime(
   return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
 }
 
+type MessageAvatarProfile = {
+  id?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+};
+
 function MessageList({
   conversationId,
   messages,
+  currentUserProfile,
+  peerProfile,
   isLoading,
   hasMoreMessages,
   isLoadingOlderMessages,
@@ -2072,6 +2082,8 @@ function MessageList({
 }: {
   conversationId: string;
   messages: ChatMessage[];
+  currentUserProfile: MessageAvatarProfile | null;
+  peerProfile: MessageAvatarProfile | null;
   isLoading: boolean;
   hasMoreMessages: boolean;
   isLoadingOlderMessages: boolean;
@@ -2465,12 +2477,16 @@ function MessageList({
         ) : null}
         {messages.map((message, index) => {
           const previousMessage = messages[index - 1] ?? null;
+          const nextMessage = messages[index + 1] ?? null;
           const showTimeDivider = shouldShowMessageTimeDivider(previousMessage, message);
+          const showMessageAvatar = shouldShowMessageAvatar(message, nextMessage);
           const isSameDirectionGroup = Boolean(
-            previousMessage && !showTimeDivider && previousMessage.isOwn === message.isOwn,
+            previousMessage && !showTimeDivider && isMessageInSameAvatarGroup(previousMessage, message),
           );
           const canRetryMessage = message.isOwn && message.status === 'failed' && message.messageType === 'TEXT';
           const visibleOwnStatus = getVisibleOwnMessageStatus(message);
+          const showEditedMarker = Boolean(message.editedAt && message.status !== 'recalled');
+          const showMessageMeta = Boolean(visibleOwnStatus || canRetryMessage || showEditedMarker);
 
           return (
             <Fragment key={message.id}>
@@ -2489,6 +2505,13 @@ function MessageList({
                   messageRefs.current[message.id] = element;
                 }}
               >
+                {!message.isOwn ? (
+                  <MessageAvatarSlot
+                    message={message}
+                    profile={peerProfile}
+                    showAvatar={showMessageAvatar}
+                  />
+                ) : null}
                 <div
                   className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''} ${
                     message.status === 'failed' ? 'is-failed' : ''
@@ -2533,27 +2556,33 @@ function MessageList({
                           )}
                     </p>
                   )}
-                  <div className="message-meta">
-                    {message.isOwn && visibleOwnStatus ? (
-                      <span className={message.status === 'failed' ? 'message-status-failed' : ''}>
-                        {t(`chat.status.${visibleOwnStatus}`)}
-                      </span>
-                    ) : null}
-                    {!message.isOwn ? <span>{formatTime(message.recalledAt ?? message.createdAt)}</span> : null}
-                    {canRetryMessage ? (
-                      <button
-                        type="button"
-                        className="message-retry-button"
-                        onClick={() => void onRetryMessage(message.id)}
-                      >
-                        {t('chat.retrySending')}
-                      </button>
-                    ) : null}
-                    {message.editedAt && message.status !== 'recalled' ? (
-                      <span>{t('chat.edited')}</span>
-                    ) : null}
-                  </div>
+                  {showMessageMeta ? (
+                    <div className="message-meta">
+                      {message.isOwn && visibleOwnStatus ? (
+                        <span className={message.status === 'failed' ? 'message-status-failed' : ''}>
+                          {t(`chat.status.${visibleOwnStatus}`)}
+                        </span>
+                      ) : null}
+                      {canRetryMessage ? (
+                        <button
+                          type="button"
+                          className="message-retry-button"
+                          onClick={() => void onRetryMessage(message.id)}
+                        >
+                          {t('chat.retrySending')}
+                        </button>
+                      ) : null}
+                      {showEditedMarker ? <span>{t('chat.edited')}</span> : null}
+                    </div>
+                  ) : null}
                 </div>
+                {message.isOwn ? (
+                  <MessageAvatarSlot
+                    message={message}
+                    profile={currentUserProfile}
+                    showAvatar={showMessageAvatar}
+                  />
+                ) : null}
               </article>
             </Fragment>
           );
@@ -2661,6 +2690,29 @@ function MessageList({
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function shouldShowMessageAvatar(message: ChatMessage, nextMessage: ChatMessage | null): boolean {
+  if (!nextMessage) {
+    return true;
+  }
+
+  return !isMessageInSameAvatarGroup(message, nextMessage);
+}
+
+function isMessageInSameAvatarGroup(message: ChatMessage, nextMessage: ChatMessage): boolean {
+  if (message.senderId !== nextMessage.senderId) {
+    return false;
+  }
+
+  const messageTime = new Date(message.createdAt).getTime();
+  const nextMessageTime = new Date(nextMessage.createdAt).getTime();
+  if (!Number.isFinite(messageTime) || !Number.isFinite(nextMessageTime)) {
+    return false;
+  }
+
+  const diff = nextMessageTime - messageTime;
+  return diff >= 0 && diff <= MESSAGE_AVATAR_GROUP_WINDOW_MS;
 }
 
 function shouldShowMessageTimeDivider(previousMessage: ChatMessage | null, message: ChatMessage): boolean {
@@ -2824,6 +2876,31 @@ function ConversationContextMenu({
         </button>
       ))}
     </div>
+  );
+}
+
+function MessageAvatarSlot({
+  message,
+  profile,
+  showAvatar,
+}: {
+  message: ChatMessage;
+  profile: MessageAvatarProfile | null;
+  showAvatar: boolean;
+}): JSX.Element {
+  if (!showAvatar) {
+    return <span className="message-avatar-slot is-placeholder" aria-hidden="true" />;
+  }
+
+  return (
+    <span className="message-avatar-slot" onContextMenu={(event) => event.preventDefault()}>
+      <UserAvatar
+        userId={profile?.id ?? message.senderId}
+        displayName={profile?.displayName}
+        avatarUrl={profile?.avatarUrl}
+        size="sm"
+      />
+    </span>
   );
 }
 
@@ -3399,6 +3476,7 @@ const EMOJI_GROUPS: EmojiGroup[] = [
     items: ['👋', '👌', '✌️', '🤝', '🙌', '💪', '🤟', '👀', '💯', '✅', '❌', '⭐', '💡', '📌', '🚀'],
   },
 ];
+const MESSAGE_AVATAR_GROUP_WINDOW_MS = 5 * 60 * 1000;
 const MESSAGE_TIME_DIVIDER_INTERVAL_MS = 5 * 60 * 1000;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_UPLOAD_MIME_TYPES = new Set([
@@ -3786,4 +3864,3 @@ function renderHighlightedText(text: string, query: string): Array<string | JSX.
 
   return fragments;
 }
-
