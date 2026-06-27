@@ -280,6 +280,72 @@ describe('RealtimeGateway', () => {
     );
   });
 
+  it('broadcasts GROUP IMAGE message:new only to receivers returned by the message service', async () => {
+    const { gateway, authService, messagesService } = createGateway();
+    const sender = createSocket('sender-socket');
+    const receiverB = createSocket('receiver-b-socket');
+    const receiverC = createSocket('receiver-c-socket');
+    const outsider = createSocket('outsider-socket');
+    authService.authenticate
+      .mockResolvedValueOnce({ id: 'user-a', sessionId: 'session-a', accountType: 'GUEST' })
+      .mockResolvedValueOnce({ id: 'user-b', sessionId: 'session-b', accountType: 'GUEST' })
+      .mockResolvedValueOnce({ id: 'user-c', sessionId: 'session-c', accountType: 'GUEST' })
+      .mockResolvedValueOnce({ id: 'user-d', sessionId: 'session-d', accountType: 'GUEST' });
+    messagesService.listUndeliveredMessages.mockResolvedValue([]);
+    messagesService.sendTextMessage.mockResolvedValue({
+      message: {
+        ...messagePayload(),
+        messageType: MessageType.IMAGE,
+        file: {
+          id: 'file-id',
+          originalName: 'photo.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: '1024',
+        },
+      },
+      receiverIds: ['user-b', 'user-c'],
+    });
+    messagesService.markDelivered.mockImplementation(async (receiverId: string, messageId: string) => ({
+      conversationId: 'conversation-id',
+      messageId,
+      receiverId,
+      deliveredAt: new Date('2026-05-19T00:00:01.000Z'),
+    }));
+
+    await gateway.handleConnection(sender as never);
+    await gateway.handleConnection(receiverB as never);
+    await gateway.handleConnection(receiverC as never);
+    await gateway.handleConnection(outsider as never);
+    await gateway.handleMessageSend(sender as never, {
+      clientMessageId: 'client-message-id',
+      conversationId: 'conversation-id',
+      messageType: 'IMAGE',
+      ciphertext: 'ciphertext-value',
+      nonce: 'nonce-value',
+      encryptionVersion: 'mvp-v1',
+      fileId: 'file-id',
+    });
+
+    expect(receiverB.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_NEW,
+      expect.objectContaining({ messageId: 'message-id' }),
+    );
+    expect(receiverC.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_NEW,
+      expect.objectContaining({ messageId: 'message-id' }),
+    );
+    expect(outsider.emit).not.toHaveBeenCalledWith(
+      REALTIME_EVENTS.MESSAGE_NEW,
+      expect.objectContaining({ messageId: 'message-id' }),
+    );
+    expect(messagesService.sendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageType: MessageType.IMAGE,
+        fileId: 'file-id',
+      }),
+    );
+  });
+
   it('handles message:recall and emits message:recalled to both peers', async () => {
     const { gateway, authService, messagesService } = createGateway();
     const sender = createSocket('sender-socket');

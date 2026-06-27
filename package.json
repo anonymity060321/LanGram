@@ -14,5 +14,8 @@
   },
   "devDependencies": {
     "prettier": "^3.3.3"
+  },
+  "dependencies": {
+    "file-icon-vectors": "^1.0.0"
   }
 }

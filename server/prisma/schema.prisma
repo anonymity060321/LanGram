@@ -44,8 +44,16 @@ enum FriendRequestStatus {
 
 enum ConversationType {
   DIRECT
+  GROUP
 
   @@map("conversation_type")
+}
+
+enum ConversationMemberRole {
+  OWNER
+  MEMBER
+
+  @@map("conversation_member_role")
 }
 
 enum MessageType {
@@ -106,6 +114,7 @@ model User {
   friendshipsAsUserA     Friendship[]         @relation("FriendshipUserA")
   friendshipsAsUserB     Friendship[]         @relation("FriendshipUserB")
   conversationMembers    ConversationMember[]
+  createdConversations   Conversation[]       @relation("ConversationCreator")
   sentMessages           Message[]            @relation("MessageSender")
   messageDeliveries      MessageDelivery[]    @relation("MessageDeliveryReceiver")
 
@@ -244,34 +253,44 @@ model Friendship {
 }
 
 model Conversation {
-  id            String           @id @default(uuid()) @db.Uuid
-  type          ConversationType
-  directUserAId String?          @map("direct_user_a_id") @db.Uuid
-  directUserBId String?          @map("direct_user_b_id") @db.Uuid
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
+  id              String           @id @default(uuid()) @db.Uuid
+  type            ConversationType
+  title           String?
+  createdByUserId String?          @map("created_by_user_id") @db.Uuid
+  directUserAId   String?          @map("direct_user_a_id") @db.Uuid
+  directUserBId   String?          @map("direct_user_b_id") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
 
-  members  ConversationMember[]
-  messages Message[]
-  files    FileAsset[]
+  createdBy User?                @relation("ConversationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  members   ConversationMember[]
+  messages  Message[]
+  files     FileAsset[]
 
   @@unique([type, directUserAId, directUserBId])
+  @@index([type])
+  @@index([createdByUserId])
   @@map("conversations")
 }
 
 model ConversationMember {
-  id                String    @id @default(uuid()) @db.Uuid
-  conversationId    String    @map("conversation_id") @db.Uuid
-  userId            String    @map("user_id") @db.Uuid
-  lastReadMessageId String?   @map("last_read_message_id") @db.Uuid
-  lastReadAt        DateTime? @map("last_read_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
+  id                String                 @id @default(uuid()) @db.Uuid
+  conversationId    String                 @map("conversation_id") @db.Uuid
+  userId            String                 @map("user_id") @db.Uuid
+  role              ConversationMemberRole @default(MEMBER)
+  groupNickname     String?                @map("group_nickname")
+  lastReadMessageId String?                @map("last_read_message_id") @db.Uuid
+  lastReadAt        DateTime?              @map("last_read_at")
+  joinedAt          DateTime               @default(now()) @map("joined_at")
+  leftAt            DateTime?              @map("left_at")
+  createdAt         DateTime               @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
   user         User         @relation(fields: [userId], references: [id])
 
   @@unique([conversationId, userId])
-  @@index([userId])
+  @@index([conversationId, leftAt])
+  @@index([userId, leftAt])
   @@map("conversation_members")
 }
 

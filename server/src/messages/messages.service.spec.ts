@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { MessageStatus, MessageType } from '@prisma/client';
+import { ConversationType, MessageStatus, MessageType } from '@prisma/client';
 import { MessagesService } from './messages.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -8,10 +8,12 @@ type MockFunction<T extends (...args: never[]) => unknown> = jest.MockedFunction
 interface MockPrisma {
   $transaction: jest.MockedFunction<(args: unknown) => Promise<unknown>>;
   conversation: {
+    findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   conversationMember: {
     findMany: MockFunction<(args: unknown) => Promise<unknown[]>>;
+    findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
@@ -40,10 +42,12 @@ interface MockPrisma {
 function createMockPrisma(): MockPrisma {
   const prisma = {
     conversation: {
+      findUnique: jest.fn().mockResolvedValue(conversationForSendingFixture()),
       update: jest.fn(),
     },
     conversationMember: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
@@ -84,6 +88,17 @@ function createMockPrisma(): MockPrisma {
   return prisma;
 }
 
+function conversationForSendingFixture(
+  type: ConversationType = ConversationType.DIRECT,
+  members: Array<{ userId: string }> = [{ userId: 'user-a' }, { userId: 'user-b' }],
+): unknown {
+  return {
+    id: 'conversation-id',
+    type,
+    members,
+  };
+}
+
 function createService(prisma: MockPrisma): MessagesService {
   return new MessagesService(prisma as unknown as PrismaService);
 }
@@ -104,6 +119,27 @@ function messageFixture(): unknown {
   };
 }
 
+function fileAssetFixture(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    id: 'file-id',
+    uploaderId: 'user-a',
+    conversationId: 'conversation-id',
+    messageId: 'message-id',
+    kind: 'IMAGE',
+    originalName: 'photo.jpg',
+    safeName: 'file-id.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: BigInt(1024),
+    sha256: 'a'.repeat(64),
+    width: 800,
+    height: 600,
+    status: 'ATTACHED',
+    createdAt: new Date('2026-05-19T00:00:00.000Z'),
+    updatedAt: new Date('2026-05-19T00:00:00.000Z'),
+    deletedAt: null,
+    ...overrides,
+  };
+}
 function sendInput(): Parameters<MessagesService['sendTextMessage']>[0] {
   return {
     clientMessageId: 'client-message-id',
@@ -120,10 +156,6 @@ function sendInput(): Parameters<MessagesService['sendTextMessage']>[0] {
 describe('MessagesService', () => {
   it('stores only encrypted text message payloads and creates receiver deliveries', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findMany.mockResolvedValue([
-      { userId: 'user-a' },
-      { userId: 'user-b' },
-    ]);
     prisma.message.create.mockResolvedValue(messageFixture());
     prisma.message.findUniqueOrThrow.mockResolvedValue(messageFixture());
     prisma.conversation.update.mockResolvedValue({});
@@ -179,28 +211,7 @@ describe('MessagesService', () => {
 
   it('attaches uploaded file metadata when sending IMAGE messages', async () => {
     const prisma = createMockPrisma();
-    const fileAsset = {
-      id: 'file-id',
-      uploaderId: 'user-a',
-      conversationId: 'conversation-id',
-      messageId: 'message-id',
-      kind: 'IMAGE',
-      originalName: 'photo.jpg',
-      safeName: 'file-id.jpg',
-      mimeType: 'image/jpeg',
-      sizeBytes: BigInt(1024),
-      sha256: 'a'.repeat(64),
-      width: 800,
-      height: 600,
-      status: 'ATTACHED',
-      createdAt: new Date('2026-05-19T00:00:00.000Z'),
-      updatedAt: new Date('2026-05-19T00:00:00.000Z'),
-      deletedAt: null,
-    };
-    prisma.conversationMember.findMany.mockResolvedValue([
-      { userId: 'user-a' },
-      { userId: 'user-b' },
-    ]);
+    const fileAsset = fileAssetFixture();
     prisma.fileAsset.findFirst.mockResolvedValue({ id: 'file-id' });
     prisma.message.create.mockResolvedValue({
       ...(messageFixture() as Record<string, unknown>),
@@ -226,7 +237,9 @@ describe('MessagesService', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           id: 'file-id',
+          uploaderId: 'user-a',
           conversationId: 'conversation-id',
+          kind: MessageType.IMAGE,
           status: 'UPLOADED',
         }),
       }),
@@ -249,9 +262,64 @@ describe('MessagesService', () => {
     expect(JSON.stringify(result.message)).not.toContain('storagePath');
   });
 
+  it('attaches uploaded file metadata when sending FILE messages', async () => {
+    const prisma = createMockPrisma();
+    const fileAsset = fileAssetFixture({
+      kind: 'FILE',
+      originalName: 'report.docx',
+      safeName: 'file-id.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      width: null,
+      height: null,
+    });
+    prisma.fileAsset.findFirst.mockResolvedValue({ id: 'file-id' });
+    prisma.message.create.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.FILE,
+      fileAsset: null,
+    });
+    prisma.fileAsset.update.mockResolvedValue({});
+    prisma.message.findUniqueOrThrow.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.FILE,
+      fileAsset,
+    });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.sendTextMessage({
+      ...sendInput(),
+      messageType: MessageType.FILE,
+      fileId: 'file-id',
+    });
+
+    expect(prisma.friendship.findUnique).toHaveBeenCalled();
+    expect(prisma.fileAsset.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'file-id',
+          uploaderId: 'user-a',
+          conversationId: 'conversation-id',
+          kind: MessageType.FILE,
+          status: 'UPLOADED',
+        }),
+      }),
+    );
+    expect(result.message).toMatchObject({
+      messageType: MessageType.FILE,
+      file: {
+        id: 'file-id',
+        originalName: 'report.docx',
+        sizeBytes: '1024',
+      },
+    });
+  });
+
   it('rejects sends from non-members', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findMany.mockResolvedValue([{ userId: 'user-b' }]);
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.DIRECT, [{ userId: 'user-b' }]),
+    );
     const service = createService(prisma);
 
     await expect(service.sendTextMessage(sendInput())).rejects.toBeInstanceOf(ForbiddenException);
@@ -260,14 +328,177 @@ describe('MessagesService', () => {
 
   it('rejects sends when direct conversation members are no longer friends', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findMany.mockResolvedValue([
-      { userId: 'user-a' },
-      { userId: 'user-b' },
-    ]);
     prisma.friendship.findUnique.mockResolvedValue(null);
     const service = createService(prisma);
 
     await expect(service.sendTextMessage(sendInput())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('allows group members to send encrypted text messages to all active members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.GROUP, [
+        { userId: 'user-a' },
+        { userId: 'user-b' },
+        { userId: 'user-c' },
+      ]),
+    );
+    prisma.message.create.mockResolvedValue(messageFixture());
+    prisma.message.findUniqueOrThrow.mockResolvedValue(messageFixture());
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.sendTextMessage(sendInput());
+    const createArgs = prisma.message.create.mock.calls[0][0] as {
+      data: { deliveries: { create: Array<{ receiverId: string }> } };
+    };
+
+    expect(prisma.friendship.findUnique).not.toHaveBeenCalled();
+    expect(createArgs.data.deliveries.create).toEqual([
+      { receiverId: 'user-b' },
+      { receiverId: 'user-c' },
+    ]);
+    expect(result.receiverIds).toEqual(['user-b', 'user-c']);
+  });
+
+  it('rejects group sends from non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.GROUP, [
+        { userId: 'user-b' },
+        { userId: 'user-c' },
+      ]),
+    );
+    const service = createService(prisma);
+
+    await expect(service.sendTextMessage(sendInput())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('allows active group members to send IMAGE messages without friendship checks', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.GROUP, [
+        { userId: 'user-a' },
+        { userId: 'user-b' },
+        { userId: 'user-c' },
+      ]),
+    );
+    prisma.fileAsset.findFirst.mockResolvedValue({ id: 'file-id' });
+    prisma.message.create.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.IMAGE,
+      fileAsset: null,
+    });
+    prisma.fileAsset.update.mockResolvedValue({});
+    prisma.message.findUniqueOrThrow.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.IMAGE,
+      fileAsset: fileAssetFixture(),
+    });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.sendTextMessage({
+      ...sendInput(),
+      messageType: MessageType.IMAGE,
+      fileId: 'file-id',
+    });
+    const createArgs = prisma.message.create.mock.calls[0][0] as {
+      data: { deliveries: { create: Array<{ receiverId: string }> } };
+    };
+
+    expect(prisma.friendship.findUnique).not.toHaveBeenCalled();
+    expect(createArgs.data.deliveries.create).toEqual([
+      { receiverId: 'user-b' },
+      { receiverId: 'user-c' },
+    ]);
+    expect(result.message).toMatchObject({ messageType: MessageType.IMAGE });
+    expect(result.receiverIds).toEqual(['user-b', 'user-c']);
+  });
+
+  it('allows active group members to send FILE messages', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.GROUP, [
+        { userId: 'user-a' },
+        { userId: 'user-b' },
+        { userId: 'user-c' },
+      ]),
+    );
+    prisma.fileAsset.findFirst.mockResolvedValue({ id: 'file-id' });
+    prisma.message.create.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.FILE,
+      fileAsset: null,
+    });
+    prisma.fileAsset.update.mockResolvedValue({});
+    prisma.message.findUniqueOrThrow.mockResolvedValue({
+      ...(messageFixture() as Record<string, unknown>),
+      messageType: MessageType.FILE,
+      fileAsset: fileAssetFixture({
+        kind: 'FILE',
+        originalName: 'slides.pptx',
+        safeName: 'file-id.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        width: null,
+        height: null,
+      }),
+    });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.sendTextMessage({
+      ...sendInput(),
+      messageType: MessageType.FILE,
+      fileId: 'file-id',
+    });
+
+    expect(prisma.friendship.findUnique).not.toHaveBeenCalled();
+    expect(result.message).toMatchObject({
+      messageType: MessageType.FILE,
+      file: {
+        originalName: 'slides.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      },
+    });
+    expect(result.receiverIds).toEqual(['user-b', 'user-c']);
+  });
+  it('rejects GROUP IMAGE messages from non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.GROUP, [
+        { userId: 'user-b' },
+        { userId: 'user-c' },
+      ]),
+    );
+    const service = createService(prisma);
+
+    await expect(
+      service.sendTextMessage({
+        ...sendInput(),
+        messageType: MessageType.IMAGE,
+        fileId: 'file-id',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.fileAsset.findFirst).not.toHaveBeenCalled();
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps DIRECT IMAGE and FILE messages behind friendship checks', async () => {
+    const prisma = createMockPrisma();
+    prisma.friendship.findUnique.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(
+      service.sendTextMessage({
+        ...sendInput(),
+        messageType: MessageType.FILE,
+        fileId: 'file-id',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.fileAsset.findFirst).not.toHaveBeenCalled();
     expect(prisma.message.create).not.toHaveBeenCalled();
   });
 
@@ -322,7 +553,7 @@ describe('MessagesService', () => {
 
   it('marks read messages and updates read delivery state', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       senderId: 'user-a',
@@ -357,7 +588,7 @@ describe('MessagesService', () => {
 
   it('allows the sender to recall a message within two minutes', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.conversationMember.findMany.mockResolvedValue([
       { userId: 'user-a' },
       { userId: 'user-b' },
@@ -391,7 +622,7 @@ describe('MessagesService', () => {
 
   it('rejects recall when direct conversation members are no longer friends', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.conversationMember.findMany.mockResolvedValue([
       { userId: 'user-a' },
       { userId: 'user-b' },
@@ -414,7 +645,7 @@ describe('MessagesService', () => {
 
   it('rejects recall from a non-sender', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -432,7 +663,7 @@ describe('MessagesService', () => {
 
   it('rejects recall for a missing message', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue(null);
     const service = createService(prisma);
 
@@ -444,7 +675,7 @@ describe('MessagesService', () => {
 
   it('rejects recall after two minutes', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -462,7 +693,7 @@ describe('MessagesService', () => {
 
   it('rejects repeated recall', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -481,7 +712,7 @@ describe('MessagesService', () => {
   it('allows the sender to edit a message within fifteen minutes', async () => {
     const prisma = createMockPrisma();
     const editedAt = new Date('2026-05-19T00:10:00.000Z');
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -534,7 +765,7 @@ describe('MessagesService', () => {
 
   it('rejects edit from a non-sender', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -556,7 +787,7 @@ describe('MessagesService', () => {
 
   it('rejects edit after fifteen minutes', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',
@@ -578,7 +809,7 @@ describe('MessagesService', () => {
 
   it('rejects editing recalled messages', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       conversationId: 'conversation-id',

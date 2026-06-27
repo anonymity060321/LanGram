@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import type { Conversation } from '../../api/conversations.api';
 import {
   acceptFriendRequest,
   clearFriendRequests,
@@ -20,7 +21,8 @@ import { useChatStore } from '../../stores/chat.store';
 import { useNetworkStore } from '../../stores/network.store';
 import { unhideConversationInUiState } from '../../utils/conversationUiState';
 
-type ContactsPanel = 'empty' | 'friend' | 'add' | 'requests';
+type ContactsPanel = 'empty' | 'friend' | 'add' | 'requests' | 'group';
+type ContactsListTab = 'friends' | 'groups';
 
 export function FriendsPage(): JSX.Element {
   const navigate = useNavigate();
@@ -66,10 +68,15 @@ export function FriendsWorkspace({
 }): JSX.Element {
   const { t } = useI18n();
   const user = useAuthStore((state) => state.user);
+  const conversations = useChatStore((state) => state.conversations);
+  const loadConversations = useChatStore((state) => state.loadConversations);
+  const selectConversation = useChatStore((state) => state.selectConversation);
   const openDirectConversation = useChatStore((state) => state.openDirectConversation);
+  const openGroupConversation = useChatStore((state) => state.openGroupConversation);
   const presenceByUserId = useChatStore((state) => state.presenceByUserId);
   const isNetworkOnline = useNetworkStore((state) => state.online);
   const [activePanel, setActivePanel] = useState<ContactsPanel>('empty');
+  const [activeListTab, setActiveListTab] = useState<ContactsListTab>('friends');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState<string | null>(null);
   const [inputCode, setInputCode] = useState('');
@@ -78,6 +85,8 @@ export function FriendsWorkspace({
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [selectedFriendshipId, setSelectedFriendshipId] = useState<string | null>(null);
   const [friendSearchQuery, setFriendSearchQuery] = useState('');
+  const [groupName, setGroupName] = useState('');
+  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([]);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -85,6 +94,14 @@ export function FriendsWorkspace({
   const [pendingDeleteFriend, setPendingDeleteFriend] = useState<FriendItem | null>(null);
   const [isDeletingFriend, setIsDeletingFriend] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    void loadConversations(user.id);
+  }, [loadConversations, user]);
 
   const refreshFriendsData = useCallback(async (): Promise<void> => {
     const [requestsResult, friendsResult] = await Promise.all([
@@ -170,6 +187,10 @@ export function FriendsWorkspace({
   const filteredFriends = useMemo(
     () => filterFriends(friends, friendSearchQuery),
     [friendSearchQuery, friends],
+  );
+  const filteredGroupConversations = useMemo(
+    () => filterGroupConversations(conversations, friendSearchQuery),
+    [conversations, friendSearchQuery],
   );
   const selectedFriend = useMemo(
     () => friends.find((item) => item.id === selectedFriendshipId) ?? null,
@@ -261,6 +282,63 @@ export function FriendsWorkspace({
     }
   }
 
+  async function handleOpenGroupChat(conversation: Conversation): Promise<void> {
+    if (!user) {
+      return;
+    }
+
+    unhideConversationInUiState(conversation.id);
+    await selectConversation(conversation.id, user.id);
+    onConversationOpened?.(conversation.id);
+  }
+
+  async function handleCreateGroup(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!user) {
+      return;
+    }
+
+    if (!isNetworkOnline) {
+      setError(t('friends.networkUnavailable'));
+      return;
+    }
+
+    if (selectedGroupMemberIds.length === 0) {
+      setError(t('chat.noGroupMembersSelected'));
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const conversationId = await openGroupConversation(groupName, selectedGroupMemberIds, user.id);
+      if (!conversationId) {
+        setError(t('chat.createGroupFailed'));
+        return;
+      }
+
+      unhideConversationInUiState(conversationId);
+      setGroupName('');
+      setSelectedGroupMemberIds([]);
+      setSelectedFriendshipId(null);
+      setActivePanel('empty');
+      onConversationOpened?.(conversationId);
+    } catch {
+      setError(isNetworkOnline ? t('chat.createGroupFailed') : t('friends.networkUnavailable'));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function toggleGroupMember(friendUserId: string): void {
+    setSelectedGroupMemberIds((current) =>
+      current.includes(friendUserId)
+        ? current.filter((memberUserId) => memberUserId !== friendUserId)
+        : [...current, friendUserId],
+    );
+  }
+
   function handleDeleteFriend(item: FriendItem): void {
     setPendingDeleteFriend(item);
   }
@@ -327,6 +405,7 @@ export function FriendsWorkspace({
     }
 
     setSelectedFriendshipId(friendshipId);
+    setActiveListTab('friends');
     setActivePanel('friend');
   }
 
@@ -376,6 +455,19 @@ export function FriendsWorkspace({
                 >
                   {t('friends.addTitle')}
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsAddMenuOpen(false);
+                    setSelectedFriendshipId(null);
+                    setActivePanel('group');
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  {t('chat.createGroup')}
+                </button>
               </div>
             ) : null}
           </div>
@@ -396,25 +488,50 @@ export function FriendsWorkspace({
             </strong>
           ) : null}
         </button>
-        <button
-          type="button"
-          className={`friends-nav-entry ${
-            activePanel === 'empty' || activePanel === 'friend' ? 'is-active' : ''
-          }`}
-          onClick={() => {
-            setSelectedFriendshipId(null);
-            setActivePanel('empty');
-          }}
-        >
-          <strong>{t('friends.listTitle')}</strong>
-          <span className="friends-nav-badge">{filteredFriends.length}</span>
-        </button>
-        <FriendListSection
-          friends={filteredFriends}
-          selectedFriend={activePanel === 'friend' ? selectedFriend : null}
-          t={t}
-          onSelectFriend={handleSelectFriend}
-        />
+        <div className="friends-list-tabs" role="tablist" aria-label={t('friends.listTitle')}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeListTab === 'friends'}
+            className={activeListTab === 'friends' ? 'is-active' : ''}
+            onClick={() => {
+              setActiveListTab('friends');
+              setSelectedFriendshipId(null);
+              setActivePanel('empty');
+            }}
+          >
+            <span>{t('friends.friendsTab')}</span>
+            <strong>{filteredFriends.length}</strong>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeListTab === 'groups'}
+            className={activeListTab === 'groups' ? 'is-active' : ''}
+            onClick={() => {
+              setActiveListTab('groups');
+              setSelectedFriendshipId(null);
+              setActivePanel('empty');
+            }}
+          >
+            <span>{t('friends.groupsTab')}</span>
+            <strong>{filteredGroupConversations.length}</strong>
+          </button>
+        </div>
+        {activeListTab === 'friends' ? (
+          <FriendListSection
+            friends={filteredFriends}
+            selectedFriend={activePanel === 'friend' ? selectedFriend : null}
+            t={t}
+            onSelectFriend={handleSelectFriend}
+          />
+        ) : (
+          <GroupConversationListSection
+            conversations={filteredGroupConversations}
+            t={t}
+            onOpenGroup={handleOpenGroupChat}
+          />
+        )}
       </aside>
 
       <section className="chat-panel friends-detail-panel">
@@ -448,6 +565,19 @@ export function FriendsWorkspace({
             onInputCodeChange={setInputCode}
             onGenerateCode={handleGenerateCode}
             onSubmitRequest={handleSubmitRequest}
+          />
+        ) : null}
+
+        {activePanel === 'group' ? (
+          <CreateGroupSection
+            friends={friends}
+            groupName={groupName}
+            selectedMemberIds={selectedGroupMemberIds}
+            isBusy={isBusy}
+            t={t}
+            onGroupNameChange={setGroupName}
+            onToggleMember={toggleGroupMember}
+            onSubmit={handleCreateGroup}
           />
         ) : null}
 
@@ -511,6 +641,56 @@ function FriendListSection({
   );
 }
 
+function GroupConversationListSection({
+  conversations,
+  t,
+  onOpenGroup,
+}: {
+  conversations: Conversation[];
+  t: ReturnType<typeof useI18n>['t'];
+  onOpenGroup: (conversation: Conversation) => Promise<void>;
+}): JSX.Element {
+  return (
+    <section className="friends-list-scroll" aria-label={t('friends.groupList')}>
+      {conversations.length === 0 ? <p className="empty-list">{t('friends.noGroups')}</p> : null}
+      <div className="request-list group-conversation-list">
+        {conversations.map((conversation) => (
+          <button
+            type="button"
+            className="friend-row group-conversation-row"
+            key={conversation.id}
+            onClick={() => void onOpenGroup(conversation)}
+          >
+            <GroupConversationSummary conversation={conversation} t={t} />
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function GroupConversationSummary({
+  conversation,
+  t,
+}: {
+  conversation: Conversation;
+  t: ReturnType<typeof useI18n>['t'];
+}): JSX.Element {
+  return (
+    <div className="friend-user-summary group-conversation-summary">
+      <UserAvatar
+        userId={conversation.id}
+        displayName={getGroupConversationTitle(conversation, t)}
+        avatarUrl={null}
+        size="sm"
+      />
+      <span className="friend-summary-text">
+        <strong className="friend-summary-name">{getGroupConversationTitle(conversation, t)}</strong>
+        <span className="friend-presence-line">{formatGroupConversationSubtitle(conversation, t)}</span>
+      </span>
+    </div>
+  );
+}
 function ContactsEmptyState({ t }: { t: ReturnType<typeof useI18n>['t'] }): JSX.Element {
   return (
     <section className="friends-detail-empty">
@@ -707,6 +887,79 @@ function AddFriendSection({
   );
 }
 
+function CreateGroupSection({
+  friends,
+  groupName,
+  selectedMemberIds,
+  isBusy,
+  t,
+  onGroupNameChange,
+  onToggleMember,
+  onSubmit,
+}: {
+  friends: FriendItem[];
+  groupName: string;
+  selectedMemberIds: string[];
+  isBusy: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onGroupNameChange: (value: string) => void;
+  onToggleMember: (friendUserId: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+}): JSX.Element {
+  return (
+    <section className="friends-add-page">
+      <div className="friends-panel friends-add-card friends-group-card">
+        <h2>{t('chat.createGroup')}</h2>
+        <form className="form-stack" onSubmit={(event) => void onSubmit(event)}>
+          <label>
+            <span>{t('chat.groupName')}</span>
+            <input
+              value={groupName}
+              maxLength={80}
+              onChange={(event) => onGroupNameChange(event.target.value)}
+              placeholder={t('chat.groupNamePlaceholder')}
+            />
+          </label>
+          <fieldset className="group-member-fieldset">
+            <legend>{t('chat.selectGroupMembers')}</legend>
+            <div className="group-member-list">
+              {friends.length === 0 ? <p className="empty-list">{t('friends.noFriends')}</p> : null}
+              {friends.map((friend) => {
+                const isSelected = selectedMemberIds.includes(friend.friend.id);
+                return (
+                  <label className="group-member-option" key={friend.id}>
+                    <span className="group-member-checkbox-wrap">
+                      <input
+                        className="group-member-checkbox"
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleMember(friend.friend.id)}
+                        aria-label={friend.friend.displayName || friend.friend.email || friend.friend.id}
+                      />
+                      <span className="group-member-checkmark" aria-hidden="true" />
+                    </span>
+                    <FriendSummary
+                      user={friend.friend}
+                      presenceLabel={formatPresence(friend.friend.isOnline, friend.friend.lastSeenAt, t)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={isBusy || !groupName.trim() || selectedMemberIds.length === 0}
+          >
+            {t('chat.createGroup')}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 function FriendRequestsSection({
   incoming,
   outgoing,
@@ -817,6 +1070,32 @@ function FriendSummary({
       </span>
     </div>
   );
+}
+
+function filterGroupConversations(conversations: Conversation[], query: string): Conversation[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const groups = conversations.filter((conversation) => conversation.type === 'GROUP');
+  if (!normalizedQuery) {
+    return groups;
+  }
+
+  return groups.filter((conversation) =>
+    getGroupConversationTitle(conversation, null).toLocaleLowerCase().includes(normalizedQuery),
+  );
+}
+
+function getGroupConversationTitle(
+  conversation: Conversation,
+  t: ReturnType<typeof useI18n>['t'] | null,
+): string {
+  return conversation.title?.trim() || t?.('chat.groupConversation') || conversation.id;
+}
+
+function formatGroupConversationSubtitle(
+  conversation: Conversation,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  return t('chat.groupMembers').replace('{{count}}', String(conversation.memberCount));
 }
 
 function filterFriends(friends: FriendItem[], query: string): FriendItem[] {

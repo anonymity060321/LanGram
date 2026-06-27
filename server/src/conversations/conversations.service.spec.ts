@@ -1,5 +1,10 @@
-import { ForbiddenException } from '@nestjs/common';
-import { ConversationType, MessageStatus, MessageType } from '@prisma/client';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  ConversationMemberRole,
+  ConversationType,
+  MessageStatus,
+  MessageType,
+} from '@prisma/client';
 import { ConversationsService } from './conversations.service';
 import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,12 +16,17 @@ interface MockPrisma {
   friendship: {
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
   };
+  user: {
+    findMany: MockFunction<(args: unknown) => Promise<unknown[]>>;
+  };
   conversation: {
     findMany: MockFunction<(args: unknown) => Promise<unknown[]>>;
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
+    findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     create: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   conversationMember: {
+    findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
@@ -35,12 +45,17 @@ function createMockPrisma(): MockPrisma {
     friendship: {
       findUnique: jest.fn(),
     },
+    user: {
+      findMany: jest.fn(),
+    },
     conversation: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
     },
     conversationMember: {
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
@@ -83,10 +98,12 @@ function conversationFixture(): unknown {
   return {
     id: 'conversation-id',
     type: ConversationType.DIRECT,
+    title: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),
     updatedAt: new Date('2026-05-19T00:00:00.000Z'),
     members: [
       {
+        groupNickname: null,
         user: {
           id: 'user-a',
           email: null,
@@ -95,10 +112,49 @@ function conversationFixture(): unknown {
         },
       },
       {
+        groupNickname: null,
         user: {
           id: 'user-b',
           email: null,
           displayName: 'User B',
+          accountType: 'GUEST',
+        },
+      },
+    ],
+  };
+}
+
+function groupConversationFixture(): unknown {
+  return {
+    ...(conversationFixture() as Record<string, unknown>),
+    id: 'group-conversation-id',
+    type: ConversationType.GROUP,
+    title: 'Team Room',
+    members: [
+      {
+        groupNickname: null,
+        user: {
+          id: 'user-a',
+          email: null,
+          displayName: 'User A',
+          accountType: 'GUEST',
+        },
+      },
+      {
+        groupNickname: null,
+        user: {
+          id: 'user-b',
+          email: null,
+          displayName: 'User B',
+          accountType: 'GUEST',
+        },
+      },
+      {
+        groupNickname: null,
+        user: {
+          id: 'user-c',
+          email: null,
+          displayName: 'User C',
           accountType: 'GUEST',
         },
       },
@@ -192,6 +248,37 @@ describe('ConversationsService', () => {
     );
   });
 
+  it('lists group conversations without requiring a peer', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findMany.mockResolvedValue([groupConversationFixture()]);
+    prisma.message.findFirst.mockResolvedValue(null);
+    prisma.messageDelivery.count.mockResolvedValue(0);
+    const service = createService(prisma);
+
+    const result = await service.listConversations('user-a') as {
+      conversations: Array<{
+        id: string;
+        type: ConversationType;
+        title: string;
+        peer: null;
+        memberCount: number;
+      }>;
+    };
+
+    expect(result.conversations[0]).toMatchObject({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      title: 'Team Room',
+      peer: null,
+      memberCount: 3,
+    });
+    expect(prisma.conversation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { members: { some: { userId: 'user-a', leftAt: null } } },
+      }),
+    );
+  });
+
   it('creates a direct conversation only for friends', async () => {
     const prisma = createMockPrisma();
     prisma.friendship.findUnique.mockResolvedValue({ id: 'friendship-id' });
@@ -240,9 +327,56 @@ describe('ConversationsService', () => {
     expect(prisma.conversation.create).not.toHaveBeenCalled();
   });
 
+  it('creates a group conversation with owner and member roles', async () => {
+    const prisma = createMockPrisma();
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-b' }, { id: 'user-c' }]);
+    prisma.friendship.findUnique.mockResolvedValue({ id: 'friendship-id' });
+    prisma.conversation.create.mockResolvedValue(groupConversationFixture());
+    const service = createService(prisma);
+
+    const result = await service.createGroupConversation('user-a', ' Team Room ', [
+      'user-b',
+      'user-c',
+      'user-b',
+    ]);
+    const createArgs = prisma.conversation.create.mock.calls[0][0] as {
+      data: { members: { create: Array<{ userId: string; role: ConversationMemberRole }> } };
+    };
+
+    expect(result).toMatchObject({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      title: 'Team Room',
+      memberCount: 3,
+      peer: null,
+    });
+    expect(createArgs.data).toMatchObject({
+      type: ConversationType.GROUP,
+      title: 'Team Room',
+      createdByUserId: 'user-a',
+    });
+    expect(createArgs.data.members.create).toEqual([
+      { userId: 'user-a', role: ConversationMemberRole.OWNER },
+      { userId: 'user-b', role: ConversationMemberRole.MEMBER },
+      { userId: 'user-c', role: ConversationMemberRole.MEMBER },
+    ]);
+  });
+
+  it('rejects group creation when a selected member is not a friend', async () => {
+    const prisma = createMockPrisma();
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-b' }]);
+    prisma.friendship.findUnique.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.createGroupConversation('user-a', 'Team Room', ['user-b'])).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.create).not.toHaveBeenCalled();
+  });
+
   it('rejects message reads for non-members', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue(null);
+    prisma.conversationMember.findFirst.mockResolvedValue(null);
     const service = createService(prisma);
 
     await expect(service.listMessages('user-c', 'conversation-id', {})).rejects.toBeInstanceOf(
@@ -253,7 +387,7 @@ describe('ConversationsService', () => {
 
   it('returns encrypted message payloads without plaintext fields', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findMany.mockResolvedValue([messageFixture()]);
     const service = createService(prisma);
 
@@ -273,7 +407,7 @@ describe('ConversationsService', () => {
 
   it('returns paginated encrypted messages with an older-message cursor', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'cursor-message',
       createdAt: new Date('2026-05-19T00:03:00.000Z'),
@@ -318,7 +452,7 @@ describe('ConversationsService', () => {
 
   it('marks a conversation read for members', async () => {
     const prisma = createMockPrisma();
-    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.conversationMember.findFirst.mockResolvedValue({ id: 'member-id' });
     prisma.message.findFirst.mockResolvedValue({
       id: 'message-id',
       createdAt: new Date('2026-05-19T00:00:00.000Z'),
@@ -344,6 +478,129 @@ describe('ConversationsService', () => {
           readAt: null,
         }),
       }),
+    );
+  });
+  it('updates the current group member nickname and returns it in the conversation DTO', async () => {
+    const prisma = createMockPrisma();
+    const updatedConversation = {
+      ...(groupConversationFixture() as Record<string, unknown>),
+      members: [
+        {
+          groupNickname: 'Captain',
+          user: {
+            id: 'user-a',
+            email: 'user-a@example.test',
+            displayName: 'User A',
+            accountType: 'EMAIL',
+          },
+        },
+        ...((groupConversationFixture() as { members: unknown[] }).members.slice(1)),
+      ],
+    };
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce(updatedConversation);
+    prisma.conversationMember.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupNickname('user-a', 'group-conversation-id', ' Captain ') as {
+      members: Array<{ id: string; groupNickname: string | null; displayName: string }>;
+    };
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          conversationId_userId: {
+            conversationId: 'group-conversation-id',
+            userId: 'user-a',
+          },
+        },
+        data: { groupNickname: 'Captain' },
+      }),
+    );
+    expect(result.members.find((member) => member.id === 'user-a')).toMatchObject({
+      displayName: 'User A',
+      groupNickname: 'Captain',
+    });
+  });
+
+  it('clears the current group member nickname for blank input', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce(groupConversationFixture());
+    prisma.conversationMember.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    await service.updateGroupNickname('user-a', 'group-conversation-id', '   ');
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { groupNickname: null } }),
+    );
+  });
+
+  it('rejects group nickname updates for non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(
+      service.updateGroupNickname('user-x', 'group-conversation-id', 'Guest'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group nickname updates for direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(
+      service.updateGroupNickname('user-a', 'conversation-id', 'Direct Alias'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('returns member group nicknames in listed group conversation DTOs without changing display names', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findMany.mockResolvedValue([
+      {
+        ...(groupConversationFixture() as Record<string, unknown>),
+        members: [
+          {
+            groupNickname: 'Captain',
+            user: {
+              id: 'user-a',
+              email: 'user-a@example.test',
+              displayName: 'User A',
+              accountType: 'EMAIL',
+            },
+          },
+          {
+            groupNickname: null,
+            user: {
+              id: 'user-b',
+              email: 'user-b@example.test',
+              displayName: 'User B',
+              accountType: 'EMAIL',
+            },
+          },
+        ],
+      },
+    ]);
+    prisma.message.findFirst.mockResolvedValue(null);
+    prisma.messageDelivery.count.mockResolvedValue(0);
+    const service = createService(prisma);
+
+    const result = await service.listConversations('user-a') as {
+      conversations: Array<{ members: Array<{ id: string; displayName: string; groupNickname: string | null }> }>;
+    };
+
+    expect(result.conversations[0].members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'user-a', displayName: 'User A', groupNickname: 'Captain' }),
+        expect.objectContaining({ id: 'user-b', displayName: 'User B', groupNickname: null }),
+      ]),
     );
   });
 });

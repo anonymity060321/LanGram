@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { FileStatus, MessageStatus, MessageType, Prisma } from '@prisma/client';
+import { ConversationType, FileKind, FileStatus, MessageStatus, MessageType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface SendTextMessageInput {
@@ -100,6 +100,12 @@ type MessageWithSender = {
   createdAt: Date;
 };
 
+type ConversationForSending = {
+  id: string;
+  type: ConversationType;
+  members: Array<{ userId: string }>;
+};
+
 type MessageFileAssetRecord = {
   id: string;
   uploaderId: string;
@@ -132,20 +138,22 @@ export class MessagesService {
   }> {
     this.assertMessageInput(input);
 
-    const members = await this.getConversationMembers(input.conversationId);
-    if (!members.some((member) => member.userId === input.senderId)) {
+    const conversation = await this.getConversationForSending(input.conversationId);
+    if (!conversation.members.some((member) => member.userId === input.senderId)) {
       throw new ForbiddenException('Conversation is not accessible');
     }
 
-    const receiverIds = members
+    const receiverIds = conversation.members
       .map((member) => member.userId)
       .filter((memberUserId) => memberUserId !== input.senderId);
 
-    if (receiverIds.length !== 1) {
-      throw new BadRequestException('Only direct text messages are supported');
-    }
+    if (conversation.type === ConversationType.DIRECT) {
+      if (receiverIds.length !== 1) {
+        throw new BadRequestException('Only direct text messages are supported');
+      }
 
-    await this.assertDirectFriendship(input.senderId, receiverIds[0]);
+      await this.assertDirectFriendship(input.senderId, receiverIds[0]);
+    }
 
     if (input.replyToMessageId) {
       await this.assertMessageInConversation(input.conversationId, input.replyToMessageId);
@@ -157,7 +165,9 @@ export class MessagesService {
         fileAsset = await tx.fileAsset.findFirst({
           where: {
             id: input.fileId ?? '',
+            uploaderId: input.senderId,
             conversationId: input.conversationId,
+            kind: input.messageType === MessageType.IMAGE ? FileKind.IMAGE : FileKind.FILE,
             status: FileStatus.UPLOADED,
             deletedAt: null,
           },
@@ -523,18 +533,37 @@ export class MessagesService {
 
   private async getConversationMembers(conversationId: string): Promise<Array<{ userId: string }>> {
     return this.prisma.conversationMember.findMany({
-      where: { conversationId },
+      where: { conversationId, leftAt: null },
       select: { userId: true },
     });
   }
 
-  private async assertConversationMember(userId: string, conversationId: string): Promise<void> {
-    const member = await this.prisma.conversationMember.findUnique({
-      where: {
-        conversationId_userId: {
-          conversationId,
-          userId,
+  private async getConversationForSending(conversationId: string): Promise<ConversationForSending> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        id: true,
+        type: true,
+        members: {
+          where: { leftAt: null },
+          select: { userId: true },
         },
+      },
+    });
+
+    if (!conversation) {
+      throw new BadRequestException('Conversation does not exist');
+    }
+
+    return conversation;
+  }
+
+  private async assertConversationMember(userId: string, conversationId: string): Promise<void> {
+    const member = await this.prisma.conversationMember.findFirst({
+      where: {
+        conversationId,
+        userId,
+        leftAt: null,
       },
       select: { id: true },
     });

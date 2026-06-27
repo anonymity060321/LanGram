@@ -60,6 +60,9 @@ const MAX_ORIGINAL_NAME_LENGTH = 180;
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_MIME_TYPES = new Set([
   'application/pdf',
+  'application/msword',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
   'application/zip',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -67,7 +70,30 @@ const FILE_MIME_TYPES = new Set([
   'text/csv',
   'text/plain',
 ]);
-
+const FILE_EXTENSION_MIME_TYPES = new Map<string, string>([
+  ['.txt', 'text/plain'],
+  ['.pdf', 'application/pdf'],
+  ['.doc', 'application/msword'],
+  ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['.xls', 'application/vnd.ms-excel'],
+  ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ['.ppt', 'application/vnd.ms-powerpoint'],
+  ['.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+  ['.csv', 'text/csv'],
+  ['.zip', 'application/zip'],
+]);
+const DANGEROUS_FILE_EXTENSIONS = new Set([
+  '.exe',
+  '.bat',
+  '.cmd',
+  '.msi',
+  '.ps1',
+  '.sh',
+  '.dll',
+  '.scr',
+  '.js',
+  '.vbs',
+]);
 @Injectable()
 export class FilesService {
   constructor(
@@ -108,7 +134,7 @@ export class FilesService {
 
   validateFileSize(sizeBytes: number): void {
     if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
-      throw new BadRequestException('File size must be a positive integer');
+      throw new BadRequestException('Empty files cannot be uploaded');
     }
 
     if (sizeBytes > MAX_FILE_SIZE_BYTES) {
@@ -116,19 +142,60 @@ export class FilesService {
     }
   }
 
-  validateMimeType(kind: FileKind, mimeType: string): void {
-    const normalizedMimeType = mimeType.trim().toLowerCase();
-    if (!normalizedMimeType) {
-      throw new BadRequestException('MIME type is required');
+  normalizeMimeType(mimeType: string | null | undefined): string {
+    return (mimeType ?? '').trim().toLowerCase();
+  }
+
+  getFileExtension(filename: string): string {
+    const safeName = this.sanitizeOriginalName(filename);
+    const lastDotIndex = safeName.lastIndexOf('.');
+    if (lastDotIndex <= 0 || lastDotIndex === safeName.length - 1) {
+      return '';
     }
 
-    if (kind === FileKind.IMAGE && !IMAGE_MIME_TYPES.has(normalizedMimeType)) {
-      throw new BadRequestException('Unsupported image MIME type');
+    return safeName.slice(lastDotIndex).toLowerCase();
+  }
+
+  isAllowedDocumentFile(mimeType: string | null | undefined, originalName: string): boolean {
+    const extension = this.getFileExtension(originalName);
+    if (DANGEROUS_FILE_EXTENSIONS.has(extension)) {
+      return false;
     }
 
-    if (kind === FileKind.FILE && !FILE_MIME_TYPES.has(normalizedMimeType)) {
+    const normalizedMimeType = this.normalizeMimeType(mimeType);
+    if (normalizedMimeType && FILE_MIME_TYPES.has(normalizedMimeType)) {
+      return true;
+    }
+
+    return FILE_EXTENSION_MIME_TYPES.has(extension);
+  }
+
+  validateMimeType(kind: FileKind, mimeType: string, originalName = ''): string {
+    const normalizedMimeType = this.normalizeMimeType(mimeType);
+
+    if (kind === FileKind.IMAGE) {
+      if (!normalizedMimeType || !IMAGE_MIME_TYPES.has(normalizedMimeType)) {
+        throw new BadRequestException('Unsupported image MIME type');
+      }
+
+      return normalizedMimeType;
+    }
+
+    const extension = this.getFileExtension(originalName);
+    if (DANGEROUS_FILE_EXTENSIONS.has(extension)) {
       throw new BadRequestException('Unsupported file MIME type');
     }
+
+    if (normalizedMimeType && FILE_MIME_TYPES.has(normalizedMimeType)) {
+      return normalizedMimeType;
+    }
+
+    const extensionMimeType = FILE_EXTENSION_MIME_TYPES.get(extension);
+    if (extensionMimeType) {
+      return extensionMimeType;
+    }
+
+    throw new BadRequestException('Unsupported file MIME type');
   }
 
   buildStoragePath(fileId: string, originalName: string): string {
@@ -145,11 +212,11 @@ export class FilesService {
 
   async createUploadedFileAsset(input: CreateUploadedFileAssetInput): Promise<FileMetadataResponse> {
     this.validateFileSize(input.sizeBytes);
-    this.validateMimeType(input.kind, input.mimeType);
+    const originalName = this.sanitizeOriginalName(input.originalName);
+    const mimeType = this.validateMimeType(input.kind, input.mimeType, originalName);
     this.validateSha256(input.sha256);
 
     const id = randomUUID();
-    const originalName = this.sanitizeOriginalName(input.originalName);
     const storagePath = this.buildStoragePath(id, originalName);
     const safeName = storagePath.split('/').at(-1) ?? id;
 
@@ -161,7 +228,7 @@ export class FilesService {
         kind: input.kind,
         originalName,
         safeName,
-        mimeType: input.mimeType.trim().toLowerCase(),
+        mimeType,
         sizeBytes: BigInt(input.sizeBytes),
         sha256: input.sha256.toLowerCase(),
         storagePath,
@@ -182,10 +249,10 @@ export class FilesService {
     try {
       await this.assertConversationMember(input.userId, input.conversationId);
       this.validateFileSize(input.file.size);
-      this.validateMimeType(input.kind, input.file.mimetype);
 
       const id = randomUUID();
       const originalName = this.sanitizeOriginalName(input.file.originalname);
+      const mimeType = this.validateMimeType(input.kind, input.file.mimetype, originalName);
       const storagePath = this.buildStoragePath(id, originalName);
       const safeName = storagePath.split('/').at(-1) ?? id;
       finalPath = this.toAbsoluteStoragePath(storagePath);
@@ -201,7 +268,7 @@ export class FilesService {
         kind: input.kind,
         originalName,
         safeName,
-        mimeType: input.file.mimetype.trim().toLowerCase(),
+        mimeType,
         sizeBytes: input.file.size,
         sha256,
         storagePath,

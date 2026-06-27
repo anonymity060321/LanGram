@@ -105,17 +105,47 @@ describe('FilesService', () => {
     expect(() => service.validateFileSize(200 * 1024 * 1024)).not.toThrow();
     expect(() => service.validateFileSize(200 * 1024 * 1024 + 1)).toThrow(BadRequestException);
     expect(() => service.validateFileSize(0)).toThrow(BadRequestException);
+    expect(() => service.validateFileSize(0)).toThrow('Empty files cannot be uploaded');
   });
 
-  it('validates image and file MIME types separately', () => {
+  it('validates image and document file types separately', () => {
     const service = createService(createMockPrisma());
 
     expect(() => service.validateMimeType(FileKind.IMAGE, 'image/jpeg')).not.toThrow();
-    expect(() => service.validateMimeType(FileKind.FILE, 'application/pdf')).not.toThrow();
-    expect(() => service.validateMimeType(FileKind.IMAGE, 'application/pdf')).toThrow(
+    expect(() => service.validateMimeType(FileKind.FILE, 'text/plain', 'notes.txt')).not.toThrow();
+    expect(() => service.validateMimeType(FileKind.FILE, 'application/pdf', 'report.pdf')).not.toThrow();
+    expect(() =>
+      service.validateMimeType(
+        FileKind.FILE,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'report.docx',
+      ),
+    ).not.toThrow();
+    expect(() =>
+      service.validateMimeType(
+        FileKind.FILE,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'budget.xlsx',
+      ),
+    ).not.toThrow();
+    expect(() =>
+      service.validateMimeType(
+        FileKind.FILE,
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'slides.pptx',
+      ),
+    ).not.toThrow();
+    expect(() => service.validateMimeType(FileKind.FILE, 'application/msword', 'report.doc')).not.toThrow();
+    expect(() => service.validateMimeType(FileKind.FILE, 'application/vnd.ms-excel', 'budget.xls')).not.toThrow();
+    expect(() => service.validateMimeType(FileKind.FILE, 'application/vnd.ms-powerpoint', 'slides.ppt')).not.toThrow();
+    expect(() => service.validateMimeType(FileKind.FILE, '', 'REPORT.DOCX')).not.toThrow();
+    expect(service.validateMimeType(FileKind.FILE, '', 'REPORT.DOCX')).toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    expect(() => service.validateMimeType(FileKind.IMAGE, 'application/pdf', 'report.pdf')).toThrow(
       BadRequestException,
     );
-    expect(() => service.validateMimeType(FileKind.FILE, 'application/x-msdownload')).toThrow(
+    expect(() => service.validateMimeType(FileKind.FILE, 'application/x-msdownload', 'installer.exe')).toThrow(
       BadRequestException,
     );
   });
@@ -595,6 +625,114 @@ describe('FilesService', () => {
     expect(createArgs.select).not.toHaveProperty('storagePath');
     expect(result).not.toHaveProperty('storagePath');
     expect(result.originalName).toBe('secret_.pdf');
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['notes.txt', 'text/plain', 'text/plain'],
+    ['report.pdf', 'application/pdf', 'application/pdf'],
+    ['report.doc', 'application/msword', 'application/msword'],
+    [
+      'report.docx',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
+    ['budget.xls', 'application/vnd.ms-excel', 'application/vnd.ms-excel'],
+    [
+      'budget.xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ],
+    ['slides.ppt', 'application/vnd.ms-powerpoint', 'application/vnd.ms-powerpoint'],
+    [
+      'slides.pptx',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ],
+    [
+      'empty-mime.docx',
+      '',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
+  ])('accepts document upload %s', async (originalname, mimetype, expectedMimeType) => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'langram-upload-test-'));
+    const tempFile = join(tempDir, 'upload.tmp');
+    await writeFile(tempFile, 'file-content');
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    prisma.fileAsset.create.mockImplementation(async (args: unknown) => {
+      const createArgs = args as {
+        data: {
+          id: string;
+          uploaderId: string;
+          conversationId: string;
+          kind: FileKind;
+          originalName: string;
+          safeName: string;
+          mimeType: string;
+          sizeBytes: bigint;
+          sha256: string;
+          width: number | null;
+          height: number | null;
+          status: FileStatus;
+        };
+      };
+
+      return {
+        ...createArgs.data,
+        messageId: null,
+        createdAt: new Date('2026-05-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-22T00:00:00.000Z'),
+        deletedAt: null,
+      };
+    });
+    const service = createService(prisma, join(tempDir, 'storage'));
+
+    const result = await service.saveUploadedFile({
+      userId: 'user-a',
+      conversationId: 'conversation-id',
+      kind: FileKind.FILE,
+      file: {
+        path: tempFile,
+        originalname,
+        mimetype,
+        size: 12,
+      },
+    });
+    const createArgs = prisma.fileAsset.create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+
+    expect(createArgs.data.mimeType).toBe(expectedMimeType);
+    expect(result.mimeType).toBe(expectedMimeType);
+    expect(result.originalName).toBe(originalname);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('rejects uploaded files with dangerous executable extensions', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'langram-upload-test-'));
+    const tempFile = join(tempDir, 'upload.tmp');
+    await writeFile(tempFile, 'file-content');
+    const prisma = createMockPrisma();
+    prisma.conversationMember.findUnique.mockResolvedValue({ id: 'member-id' });
+    const service = createService(prisma, join(tempDir, 'storage'));
+
+    await expect(
+      service.saveUploadedFile({
+        userId: 'user-a',
+        conversationId: 'conversation-id',
+        kind: FileKind.FILE,
+        file: {
+          path: tempFile,
+          originalname: 'installer.exe',
+          mimetype: 'application/pdf',
+          size: 12,
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.fileAsset.create).not.toHaveBeenCalled();
 
     await rm(tempDir, { recursive: true, force: true });
   });

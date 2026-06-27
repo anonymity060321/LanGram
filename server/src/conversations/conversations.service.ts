@@ -4,7 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConversationType, MessageStatus, Prisma } from '@prisma/client';
+import {
+  ConversationMemberRole,
+  ConversationType,
+  MessageStatus,
+  Prisma,
+  UserStatus,
+} from '@prisma/client';
 import { PresenceService } from '../presence/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
@@ -22,9 +28,10 @@ type UserSummary = {
 type ConversationWithMembers = {
   id: string;
   type: ConversationType;
+  title: string | null;
   createdAt: Date;
   updatedAt: Date;
-  members: Array<{ user: UserSummary }>;
+  members: Array<{ groupNickname: string | null; user: UserSummary }>;
 };
 
 type ConversationListItem = ConversationWithMembers & {
@@ -79,8 +86,7 @@ export class ConversationsService {
   async listConversations(userId: string): Promise<{ conversations: unknown[] }> {
     const conversations = await this.prisma.conversation.findMany({
       where: {
-        type: ConversationType.DIRECT,
-        members: { some: { userId } },
+        members: { some: { userId, leftAt: null } },
       },
       orderBy: { updatedAt: 'desc' },
       include: this.conversationInclude(),
@@ -161,6 +167,108 @@ export class ConversationsService {
     });
 
     return this.toConversationDto(conversation as unknown as ConversationWithMembers, userId);
+  }
+
+  async createGroupConversation(
+    userId: string,
+    title: string,
+    memberUserIds: string[],
+  ): Promise<unknown> {
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      throw new BadRequestException('Group title is required');
+    }
+
+    const uniqueMemberIds = Array.from(
+      new Set(memberUserIds.map((memberUserId) => memberUserId.trim()).filter(Boolean)),
+    ).filter((memberUserId) => memberUserId !== userId);
+
+    if (uniqueMemberIds.length < 1) {
+      throw new BadRequestException('Group conversations require at least one friend');
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: uniqueMemberIds },
+        status: UserStatus.ACTIVE,
+      },
+      select: { id: true },
+    });
+    const foundUserIds = new Set(users.map((user) => user.id));
+    if (uniqueMemberIds.some((memberUserId) => !foundUserIds.has(memberUserId))) {
+      throw new BadRequestException('One or more group members do not exist');
+    }
+
+    await Promise.all(
+      uniqueMemberIds.map((memberUserId) => this.assertFriendship(userId, memberUserId)),
+    );
+
+    const conversation = await this.prisma.conversation.create({
+      data: {
+        type: ConversationType.GROUP,
+        title: normalizedTitle,
+        createdByUserId: userId,
+        members: {
+          create: [
+            { userId, role: ConversationMemberRole.OWNER },
+            ...uniqueMemberIds.map((memberUserId) => ({
+              userId: memberUserId,
+              role: ConversationMemberRole.MEMBER,
+            })),
+          ],
+        },
+      },
+      include: this.conversationInclude(),
+    });
+
+    return this.toConversationDto(conversation as unknown as ConversationWithMembers, userId);
+  }
+
+  async updateGroupNickname(
+    userId: string,
+    conversationId: string,
+    groupNickname: string | null | undefined,
+  ): Promise<unknown> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    if (conversation.type !== ConversationType.GROUP) {
+      throw new BadRequestException('Group nickname can only be set for group conversations');
+    }
+
+    const normalizedNickname = groupNickname?.trim() || null;
+    await this.prisma.conversationMember.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: { groupNickname: normalizedNickname },
+    });
+
+    const updatedConversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!updatedConversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    return this.toConversationDto(updatedConversation as unknown as ConversationWithMembers, userId);
   }
 
   async listMessages(
@@ -245,12 +353,11 @@ export class ConversationsService {
   }
 
   private async assertConversationMember(userId: string, conversationId: string): Promise<void> {
-    const member = await this.prisma.conversationMember.findUnique({
+    const member = await this.prisma.conversationMember.findFirst({
       where: {
-        conversationId_userId: {
-          conversationId,
-          userId,
-        },
+        conversationId,
+        userId,
+        leftAt: null,
       },
       select: { id: true },
     });
@@ -285,10 +392,12 @@ export class ConversationsService {
   private conversationInclude(): Prisma.ConversationInclude {
     return {
       members: {
-        include: {
+        where: { leftAt: null },
+        select: {
+          groupNickname: true,
           user: { select: this.userSelect() },
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { joinedAt: 'asc' },
       },
     };
   }
@@ -351,7 +460,10 @@ export class ConversationsService {
     conversation: ConversationWithMembers | ConversationListItem,
     currentUserId: string,
   ): unknown {
-    const peer = conversation.members.find((member) => member.user.id !== currentUserId)?.user ?? null;
+    const peer =
+      conversation.type === ConversationType.DIRECT
+        ? conversation.members.find((member) => member.user.id !== currentUserId)?.user ?? null
+        : null;
     const listItem =
       'lastMessage' in conversation
         ? conversation
@@ -360,8 +472,12 @@ export class ConversationsService {
     return {
       id: conversation.id,
       type: conversation.type,
+      title: conversation.title,
       peer: peer ? this.toUserDto(peer) : null,
-      members: conversation.members.map((member) => this.toUserDto(member.user)),
+      members: conversation.members.map((member) =>
+        this.toConversationMemberDto(member.user, member.groupNickname),
+      ),
+      memberCount: conversation.members.length,
       lastMessage: listItem.lastMessage ? this.toMessageDto(listItem.lastMessage) : null,
       lastMessageAt: listItem.lastMessageAt,
       unreadCount: listItem.unreadCount,
@@ -382,6 +498,13 @@ export class ConversationsService {
       accountType: user.accountType,
       isOnline: presence.isOnline,
       lastSeenAt: presence.lastSeenAt,
+    };
+  }
+
+  private toConversationMemberDto(user: UserSummary, groupNickname: string | null): unknown {
+    return {
+      ...(this.toUserDto(user) as Record<string, unknown>),
+      groupNickname,
     };
   }
 

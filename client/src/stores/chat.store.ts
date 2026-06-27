@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import {
   createDirectConversation,
+  createGroupConversation,
   listConversations,
   listMessages,
+  updateGroupNickname as requestUpdateGroupNickname,
   type Conversation,
   type EncryptedMessage,
   type MessageType,
@@ -87,6 +89,11 @@ interface ChatState {
   loadOlderMessages: (conversationId: string, currentUserId: string) => Promise<boolean>;
   closeConversation: () => void;
   openDirectConversation: (friendUserId: string, currentUserId: string) => Promise<string | null>;
+  openGroupConversation: (
+    title: string,
+    memberUserIds: string[],
+    currentUserId: string,
+  ) => Promise<string | null>;
   connect: (accessToken: string, onSessionKicked: (payload: SessionKickedPayload) => void) => void;
   disconnect: () => void;
   sendTextMessage: (conversationId: string, plaintext: string, senderId: string) => Promise<void>;
@@ -108,6 +115,7 @@ interface ChatState {
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
   clearLocalConversation: (conversationId: string) => void;
   setSearchQuery: (query: string) => void;
+  updateGroupNickname: (conversationId: string, groupNickname: string | null) => Promise<boolean>;
   updatePresence: (payload: PresenceUpdatePayload) => void;
 }
 
@@ -442,6 +450,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return null;
     }
   },
+  openGroupConversation: async (title, memberUserIds, currentUserId) => {
+    set({ error: null });
+    try {
+      const conversation = await createGroupConversation(title, memberUserIds);
+      const conversationId = conversation.id;
+      let openedConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (openedConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+        )),
+        selectedConversationId: conversationId,
+        currentUserId,
+        messagesByConversation: {
+          ...state.messagesByConversation,
+          [conversationId]: state.messagesByConversation[conversationId] ?? [],
+        },
+        messagePaginationByConversation: {
+          ...state.messagePaginationByConversation,
+          [conversationId]: state.messagePaginationByConversation[conversationId] ?? {
+            hasMore: false,
+            nextCursor: null,
+            isLoadingOlder: false,
+          },
+        },
+      }));
+      void cacheConversationSummaries(openedConversations);
+      await get().selectConversation(conversationId, currentUserId);
+      return conversationId;
+    } catch {
+      set({ error: 'Failed to create group conversation' });
+      return null;
+    }
+  },
   connect: (accessToken, onSessionKicked) => {
     useNetworkStore.getState().setStatus('connecting');
     connectRealtime(getApiBaseUrl(), accessToken, {
@@ -721,7 +763,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    const senderId = getCurrentUserId(targetConversation);
+    const senderId = get().currentUserId ?? getCurrentUserId(targetConversation);
     if (!senderId) {
       set({ error: 'Forward failed' });
       return;
@@ -804,6 +846,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   setSearchQuery: (query) => {
     set({ searchQuery: query });
+  },
+  updateGroupNickname: async (conversationId, groupNickname) => {
+    set({ error: null });
+    try {
+      const conversation = await requestUpdateGroupNickname(conversationId, groupNickname);
+      let nextConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (nextConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+        )),
+      }));
+      void cacheConversationSummaries(nextConversations);
+      return true;
+    } catch {
+      set({ error: 'Failed to save group nickname' });
+      return false;
+    }
   },
   updatePresence: (payload) => {
     set((state) => ({
@@ -1151,7 +1211,36 @@ function cachedConversationToConversation(
   record: CachedConversationRecord,
   currentUserId: string,
 ): Conversation | null {
-  if (record.conversationType !== 'DIRECT' || !record.peerUserId || !currentUserId) {
+  if (!currentUserId) {
+    return null;
+  }
+
+  const currentUser = buildCachedConversationUser({
+    id: currentUserId,
+    displayName: currentUserId,
+    avatarUrl: null,
+  });
+  const createdAt = record.lastMessageAt ?? record.updatedAt;
+
+  if (record.conversationType === 'GROUP') {
+    return {
+      id: record.id,
+      type: 'GROUP',
+      title: record.title?.trim() || null,
+      peer: null,
+      members: [currentUser],
+      memberCount: 1,
+      lastMessage: null,
+      lastMessageAt: record.lastMessageAt,
+      unreadCount: 0,
+      lastMessagePlaintext: null,
+      lastMessageDecryptionFailed: false,
+      createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  if (record.conversationType !== 'DIRECT' || !record.peerUserId) {
     return null;
   }
 
@@ -1160,18 +1249,14 @@ function cachedConversationToConversation(
     displayName: record.title?.trim() || record.peerUserId,
     avatarUrl: record.avatarUrl,
   });
-  const currentUser = buildCachedConversationUser({
-    id: currentUserId,
-    displayName: currentUserId,
-    avatarUrl: null,
-  });
-  const createdAt = record.lastMessageAt ?? record.updatedAt;
 
   return {
     id: record.id,
     type: 'DIRECT',
+    title: null,
     peer,
     members: [currentUser, peer],
+    memberCount: 2,
     lastMessage: null,
     lastMessageAt: record.lastMessageAt,
     unreadCount: 0,
@@ -1216,8 +1301,11 @@ function toCachedConversationInput(conversation: Conversation): CachedConversati
     id: conversation.id,
     conversationType: conversation.type,
     peerUserId: conversation.peer?.id ?? null,
-    title: conversation.peer?.displayName ?? null,
-    avatarUrl: conversation.peer?.avatarUrl ?? null,
+    title:
+      conversation.type === 'GROUP'
+        ? conversation.title
+        : conversation.peer?.displayName ?? null,
+    avatarUrl: conversation.type === 'GROUP' ? null : conversation.peer?.avatarUrl ?? null,
     lastMessageId: conversation.lastMessage?.id ?? null,
     lastMessageAt: conversation.lastMessageAt ?? conversation.lastMessage?.createdAt ?? null,
     updatedAt: conversation.updatedAt,

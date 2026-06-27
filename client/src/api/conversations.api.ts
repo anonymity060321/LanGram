@@ -2,7 +2,7 @@ import { apiRequest } from './http';
 import type { FileMetadataResponse } from './files.api';
 import type { UserProfile } from './users.api';
 
-export type ConversationType = 'DIRECT';
+export type ConversationType = 'DIRECT' | 'GROUP';
 export type MessageType = 'TEXT' | 'IMAGE' | 'FILE';
 export type ServerMessageStatus = 'SENT' | 'DELIVERED' | 'READ' | 'RECALLED';
 
@@ -16,13 +16,17 @@ export type ConversationUser = Pick<
   | 'accountType'
   | 'isOnline'
   | 'lastSeenAt'
->;
+> & {
+  groupNickname?: string | null;
+};
 
 export interface Conversation {
   id: string;
   type: ConversationType;
+  title: string | null;
   peer: ConversationUser | null;
   members: ConversationUser[];
+  memberCount: number;
   lastMessage: EncryptedMessage | null;
   lastMessageAt: string | null;
   unreadCount: number;
@@ -63,6 +67,26 @@ export function createDirectConversation(friendUserId: string): Promise<Conversa
   return apiRequest('/conversations/direct', {
     method: 'POST',
     body: JSON.stringify({ friendUserId }),
+  });
+}
+
+export function createGroupConversation(
+  title: string,
+  memberUserIds: string[],
+): Promise<Conversation> {
+  return apiRequest('/conversations/groups', {
+    method: 'POST',
+    body: JSON.stringify({ title, memberUserIds }),
+  });
+}
+
+export function updateGroupNickname(
+  conversationId: string,
+  groupNickname: string | null,
+): Promise<Conversation> {
+  return apiRequest(`/conversations/${conversationId}/group-nickname`, {
+    method: 'PATCH',
+    body: JSON.stringify({ groupNickname }),
   });
 }
 

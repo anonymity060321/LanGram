@@ -31,6 +31,7 @@ import { useAuthStore } from '../../stores/auth.store';
 import { useChatStore, type ChatMessage } from '../../stores/chat.store';
 import { useNetworkStore, type NetworkStatus } from '../../stores/network.store';
 import { useSettingsStore, type SendShortcutPreference } from '../../stores/settings.store';
+import { getFileIconByName } from '../../utils/fileIcons';
 import {
   CONVERSATION_SEARCH_OPEN_EVENT,
   CONVERSATION_SEARCH_READY_EVENT,
@@ -134,6 +135,7 @@ export function MainLayout(): JSX.Element {
   const enableNotifications = settingsConfig?.enableNotifications ?? true;
   const sendShortcut = useSettingsStore((state) => state.config?.sendShortcut ?? 'enter');
   const updateConfig = useSettingsStore((state) => state.updateConfig);
+  const updateGroupNickname = useChatStore((state) => state.updateGroupNickname);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [hasLoadedFriends, setHasLoadedFriends] = useState(false);
   const [trustedFriendPeerId, setTrustedFriendPeerId] = useState<string | null>(null);
@@ -192,21 +194,29 @@ export function MainLayout(): JSX.Element {
   const isUsingCachedMessages = selectedConversationId
     ? isUsingCachedMessagesByConversation[selectedConversationId] ?? false
     : false;
-  const profileUser = selectedConversation?.peer ?? user ?? null;
+  const isSelectedConversationDirect = selectedConversation?.type === 'DIRECT';
+  const isSelectedConversationGroup = selectedConversation?.type === 'GROUP';
+  const selectedConversationTitle = selectedConversation
+    ? getConversationDisplayName(selectedConversation, t('chat.unknownPeer'))
+    : null;
+  const profileUser = isSelectedConversationDirect ? selectedConversation?.peer ?? null : user ?? null;
   const profilePresence = !isNetworkOnline
     ? t('presence.offline')
+    : isSelectedConversationGroup && selectedConversation
+    ? formatGroupMembers(selectedConversation.memberCount, t)
     : selectedConversation?.peer
     ? formatPresence(selectedConversation.peer.isOnline, selectedConversation.peer.lastSeenAt, t)
     : t('presence.online');
   const isFriendshipRequiredError = chatError === 'FRIENDSHIP_REQUIRED' || chatError === 'NOT_FRIENDS';
   const isSelectedPeerKnownNonFriend =
-    selectedConversation?.peer
+    isSelectedConversationDirect && selectedConversation?.peer
       ? isPeerKnownNonFriend(selectedConversation.peer.id, friends, hasLoadedFriends, trustedFriendPeerId)
       : false;
-  const selectedPeerFriendship = selectedConversation?.peer
+  const selectedPeerFriendship = isSelectedConversationDirect && selectedConversation?.peer
     ? friends.find((item) => item.friend.id === selectedConversation.peer?.id) ?? null
     : null;
-  const isSelectedPeerNonFriend = isFriendshipRequiredError || isSelectedPeerKnownNonFriend;
+  const isSelectedPeerNonFriend =
+    isSelectedConversationDirect && (isFriendshipRequiredError || isSelectedPeerKnownNonFriend);
   const isSelectedPeerFriend =
     !isSelectedPeerNonFriend &&
     (Boolean(selectedPeerFriendship) ||
@@ -215,7 +225,7 @@ export function MainLayout(): JSX.Element {
           trustedFriendPeerId === selectedConversation.peer.id,
       ));
   const chatTopNotice =
-    selectedConversation && isSelectedPeerNonFriend
+    selectedConversation && isSelectedConversationDirect && isSelectedPeerNonFriend
       ? t('chat.notFriendsCannotSend')
       : null;
   const visibleChatError = isFriendshipRequiredError ? null : chatError;
@@ -505,7 +515,11 @@ export function MainLayout(): JSX.Element {
   const visibleFriends = useMemo(
     () =>
       friends.filter(
-        (friend) => !conversations.some((conversation) => conversation.peer?.id === friend.friend.id),
+        (friend) =>
+          !conversations.some(
+            (conversation) =>
+              conversation.type === 'DIRECT' && conversation.peer?.id === friend.friend.id,
+          ),
       ),
     [conversations, friends],
   );
@@ -810,6 +824,12 @@ export function MainLayout(): JSX.Element {
       setUploadState({ isUploading: false, notice: null, error: t('network.unavailableSend') });
       return;
     }
+    if (file.size <= 0) {
+      setUploadState({ isUploading: false, notice: null, error: t('chat.emptyFileUpload') });
+      return;
+    }
+
+
 
     if (file.size > MAX_UPLOAD_SIZE_BYTES) {
       setUploadState({ isUploading: false, notice: null, error: t('chat.fileTooLarge') });
@@ -1282,7 +1302,10 @@ export function MainLayout(): JSX.Element {
       {activeView === 'contacts' ? (
         <FriendsWorkspace
           className="main-friends-shell"
-          onConversationOpened={() => setActiveView('messages')}
+          onConversationOpened={(conversationId) => {
+            setPendingConversationActivationId(conversationId);
+            setActiveView('messages');
+          }}
           onMessageFriend={handleMessageFriend}
           openAddPanelKey={openAddFriendPanelKey}
           addPanelNotice={t('chat.addFriendHint')}
@@ -1323,13 +1346,13 @@ export function MainLayout(): JSX.Element {
                   onContextMenu={(event) => handleConversationContextMenu(event, conversation)}
                 >
                   <UserAvatar
-                    userId={conversation.peer?.id}
-                    displayName={conversation.peer?.displayName}
-                    avatarUrl={conversation.peer?.avatarUrl}
+                    userId={conversation.type === 'DIRECT' ? conversation.peer?.id : conversation.id}
+                    displayName={getConversationDisplayName(conversation, t('chat.unknownPeer'))}
+                    avatarUrl={conversation.type === 'DIRECT' ? conversation.peer?.avatarUrl : null}
                   />
                   <span className="conversation-item-body">
                     <span className="conversation-item-header">
-                      <strong>{conversation.peer?.displayName ?? t('chat.unknownPeer')}</strong>
+                      <strong>{getConversationDisplayName(conversation, t('chat.unknownPeer'))}</strong>
                       {preview.time ? (
                         <time dateTime={preview.time}>{formatConversationTime(preview.time, t)}</time>
                       ) : null}
@@ -1353,11 +1376,11 @@ export function MainLayout(): JSX.Element {
       <section className="chat-panel">
         <header className="chat-header">
           <div>
-            <strong>
-              {selectedConversation?.peer?.displayName ?? user?.displayName ?? t('app.name')}
-            </strong>
+            <strong>{selectedConversationTitle ?? user?.displayName ?? t('app.name')}</strong>
             <span>
-              {selectedConversation?.peer
+              {isSelectedConversationGroup && selectedConversation
+                ? formatGroupMembers(selectedConversation.memberCount, t)
+                : selectedConversation?.peer
                 ? formatPresence(selectedConversation.peer.isOnline, selectedConversation.peer.lastSeenAt, t)
                 : t('presence.online')}
             </span>
@@ -1374,7 +1397,7 @@ export function MainLayout(): JSX.Element {
                       onClick={openConversationSearch}
                     >
                       <span>{t('chat.searchCurrentConversation')}</span>
-                      <span className="chat-actions-panel-arrow" aria-hidden="true">›</span>
+                      <span className="chat-actions-panel-arrow" aria-hidden="true">&gt;</span>
                     </button>
                   </div>
                   <div className="chat-actions-panel-section">
@@ -1400,16 +1423,18 @@ export function MainLayout(): JSX.Element {
                       <span>{t('chat.muteConversation')}</span>
                       <span className="chat-actions-panel-toggle" aria-hidden="true" />
                     </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="chat-actions-panel-item"
-                      disabled
-                      title={t('chat.comingSoon')}
-                    >
-                      <span>{t('chat.blockUser')}</span>
-                      <span className="chat-actions-panel-toggle" aria-hidden="true" />
-                    </button>
+                    {isSelectedConversationDirect ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-actions-panel-item"
+                        disabled
+                        title={t('chat.comingSoon')}
+                      >
+                        <span>{t('chat.blockUser')}</span>
+                        <span className="chat-actions-panel-toggle" aria-hidden="true" />
+                      </button>
+                    ) : null}
                   </div>
                   <div className="chat-actions-panel-section">
                     <button
@@ -1421,7 +1446,7 @@ export function MainLayout(): JSX.Element {
                     >
                       <span>{t('chat.clearLocalRecords')}</span>
                     </button>
-                    {selectedConversation?.peer && isSelectedPeerFriend ? (
+                    {isSelectedConversationDirect && selectedConversation?.peer && isSelectedPeerFriend ? (
                       <button
                         type="button"
                         role="menuitem"
@@ -1431,7 +1456,7 @@ export function MainLayout(): JSX.Element {
                         <span>{t('chat.deleteFriend')}</span>
                       </button>
                     ) : null}
-                    {selectedConversation?.peer && isSelectedPeerNonFriend ? (
+                    {isSelectedConversationDirect && selectedConversation?.peer && isSelectedPeerNonFriend ? (
                       <button
                         type="button"
                         role="menuitem"
@@ -1485,6 +1510,8 @@ export function MainLayout(): JSX.Element {
                 messages={messages}
                 currentUserProfile={user}
                 peerProfile={selectedConversation.peer}
+                memberProfiles={selectedConversation.members}
+                conversationType={selectedConversation.type}
                 isLoading={isLoadingMessages}
                 hasMoreMessages={selectedMessagePagination?.hasMore ?? false}
                 isLoadingOlderMessages={selectedMessagePagination?.isLoadingOlder ?? false}
@@ -1590,7 +1617,6 @@ export function MainLayout(): JSX.Element {
                   type="file"
                   onChange={(event) => void handleFileSelected(event, 'FILE')}
                   disabled={uploadState.isUploading}
-                  accept={FILE_UPLOAD_ACCEPT}
                 />
                 <input
                   ref={imageInputRef}
@@ -1638,7 +1664,7 @@ export function MainLayout(): JSX.Element {
                         setIsSendShortcutMenuOpen((isOpen) => !isOpen);
                       }}
                     >
-                      <span aria-hidden="true">{isSendShortcutMenuOpen ? '∨' : '∧'}</span>
+                      <span aria-hidden="true">{isSendShortcutMenuOpen ? '^' : 'v'}</span>
                     </button>
                   </div>
                   {isSendShortcutMenuOpen ? (
@@ -1650,7 +1676,7 @@ export function MainLayout(): JSX.Element {
                         className="send-shortcut-menu-item"
                         onClick={() => void handleSendShortcutChange('enter')}
                       >
-                        <span aria-hidden="true">{sendShortcut === 'enter' ? '✓' : ''}</span>
+                        <span aria-hidden="true">{sendShortcut === 'enter' ? '*' : ''}</span>
                         <span>{t('chat.sendWithEnter')}</span>
                       </button>
                       <button
@@ -1660,7 +1686,7 @@ export function MainLayout(): JSX.Element {
                         className="send-shortcut-menu-item"
                         onClick={() => void handleSendShortcutChange('ctrlEnter')}
                       >
-                        <span aria-hidden="true">{sendShortcut === 'ctrlEnter' ? '✓' : ''}</span>
+                        <span aria-hidden="true">{sendShortcut === 'ctrlEnter' ? '*' : ''}</span>
                         <span>{t('chat.sendWithCtrlEnter')}</span>
                       </button>
                     </div>
@@ -1680,14 +1706,36 @@ export function MainLayout(): JSX.Element {
 
       <aside className="profile-panel">
         <UserAvatar
-          userId={profileUser?.id}
-          displayName={profileUser?.displayName}
-          avatarUrl={profileUser?.avatarUrl}
+          userId={isSelectedConversationGroup ? selectedConversation?.id : profileUser?.id}
+          displayName={
+            isSelectedConversationGroup
+              ? selectedConversationTitle ?? t('chat.groupConversation')
+              : profileUser?.displayName
+          }
+          avatarUrl={isSelectedConversationGroup ? null : profileUser?.avatarUrl}
           size="lg"
         />
-        <strong>{profileUser?.displayName ?? t('app.name')}</strong>
+        <strong>
+          {isSelectedConversationGroup
+            ? selectedConversationTitle ?? t('chat.groupConversation')
+            : profileUser?.displayName ?? t('app.name')}
+        </strong>
         <span className="presence-text">{profilePresence}</span>
-        <span>{profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}</span>
+        <span>
+          {isSelectedConversationGroup
+            ? t('chat.groupChat')
+            : profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}
+        </span>
+        {isSelectedConversationGroup && selectedConversation ? (
+          <GroupMemberPanel
+            members={selectedConversation.members}
+            currentUserId={user?.id ?? null}
+            t={t}
+            onSaveGroupNickname={(groupNickname) =>
+              updateGroupNickname(selectedConversation.id, groupNickname)
+            }
+          />
+        ) : null}
       </aside>
         </>
       )}
@@ -1782,6 +1830,7 @@ function applyKnownPresence(
   }
 
   const conversationPeer = conversations
+    .filter((conversation) => conversation.type === 'DIRECT')
     .map((conversation) => conversation.peer)
     .find((peer) => peer?.id === friend.id);
 
@@ -1821,6 +1870,10 @@ function formatPresence(
   }
 
   return `${Math.floor(diffMinutes / 60)} ${t('presence.hoursAgo')}`;
+}
+
+function formatGroupMembers(count: number, t: ReturnType<typeof useI18n>['t']): string {
+  return t('chat.groupMembers').replace('{{count}}', String(count));
 }
 
 function formatConversationSummary(
@@ -2056,14 +2109,163 @@ function formatConversationTime(
 type MessageAvatarProfile = {
   id?: string | null;
   displayName?: string | null;
+  groupNickname?: string | null;
+  email?: string | null;
   avatarUrl?: string | null;
 };
+
+function getConversationDisplayName(conversation: Conversation, fallback: string): string {
+  if (conversation.type === 'GROUP') {
+    return conversation.title?.trim() || fallback;
+  }
+
+  return conversation.peer?.displayName ?? fallback;
+}
+
+function findMessageAvatarProfile(
+  senderId: string,
+  peerProfile: MessageAvatarProfile | null,
+  memberProfiles: MessageAvatarProfile[],
+): MessageAvatarProfile | null {
+  return memberProfiles.find((member) => member.id === senderId) ?? peerProfile;
+}
+
+function GroupMemberPanel({
+  members,
+  currentUserId,
+  t,
+  onSaveGroupNickname,
+}: {
+  members: Conversation['members'];
+  currentUserId: string | null;
+  t: ReturnType<typeof useI18n>['t'];
+  onSaveGroupNickname: (groupNickname: string | null) => Promise<boolean>;
+}): JSX.Element {
+  const currentMember = currentUserId
+    ? members.find((member) => member.id === currentUserId) ?? null
+    : null;
+  const [groupNicknameDraft, setGroupNicknameDraft] = useState(currentMember?.groupNickname ?? '');
+  const [groupNicknameNotice, setGroupNicknameNotice] = useState<string | null>(null);
+  const [groupNicknameError, setGroupNicknameError] = useState<string | null>(null);
+  const [isSavingGroupNickname, setIsSavingGroupNickname] = useState(false);
+
+  useEffect(() => {
+    setGroupNicknameDraft(currentMember?.groupNickname ?? '');
+    setGroupNicknameNotice(null);
+    setGroupNicknameError(null);
+  }, [currentMember?.groupNickname, currentMember?.id]);
+
+  async function handleSaveGroupNickname(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setGroupNicknameNotice(null);
+    setGroupNicknameError(null);
+    setIsSavingGroupNickname(true);
+    const normalizedNickname = groupNicknameDraft.trim();
+    const success = await onSaveGroupNickname(normalizedNickname || null);
+    setIsSavingGroupNickname(false);
+
+    if (!success) {
+      setGroupNicknameError(t('chat.groupNicknameSaveFailed'));
+      return;
+    }
+
+    setGroupNicknameDraft(normalizedNickname);
+    setGroupNicknameNotice(t('chat.groupNicknameSaved'));
+  }
+
+  async function handleClearGroupNickname(): Promise<void> {
+    setGroupNicknameDraft('');
+    setGroupNicknameNotice(null);
+    setGroupNicknameError(null);
+    setIsSavingGroupNickname(true);
+    const success = await onSaveGroupNickname(null);
+    setIsSavingGroupNickname(false);
+
+    if (!success) {
+      setGroupNicknameError(t('chat.groupNicknameSaveFailed'));
+      return;
+    }
+
+    setGroupNicknameNotice(t('chat.groupNicknameSaved'));
+  }
+
+  return (
+    <section className="profile-group-section" aria-label={t('chat.groupMemberList')}>
+      {currentMember ? (
+        <form className="profile-group-nickname-form" onSubmit={(event) => void handleSaveGroupNickname(event)}>
+          <label htmlFor="group-nickname-input">{t('chat.myGroupNickname')}</label>
+          <input
+            id="group-nickname-input"
+            value={groupNicknameDraft}
+            maxLength={32}
+            placeholder={t('chat.groupNicknamePlaceholder')}
+            onChange={(event) => {
+              setGroupNicknameDraft(event.target.value);
+              setGroupNicknameNotice(null);
+              setGroupNicknameError(null);
+            }}
+          />
+          <div className="profile-group-nickname-actions">
+            <button type="submit" disabled={isSavingGroupNickname}>
+              {t('chat.saveGroupNickname')}
+            </button>
+            <button type="button" disabled={isSavingGroupNickname} onClick={() => void handleClearGroupNickname()}>
+              {t('chat.clearGroupNickname')}
+            </button>
+          </div>
+          {groupNicknameNotice ? <small className="profile-group-nickname-notice">{groupNicknameNotice}</small> : null}
+          {groupNicknameError ? <small className="profile-group-nickname-error">{groupNicknameError}</small> : null}
+        </form>
+      ) : null}
+      <h2>{t('chat.groupMemberList')}</h2>
+      {members.length === 0 ? <p>{t('chat.noGroupMembers')}</p> : null}
+      {members.length > 0 ? (
+        <div className="profile-group-member-list">
+          {members.map((member) => (
+            <div className="profile-group-member-row" key={member.id}>
+              <UserAvatar
+                userId={member.id}
+                displayName={getMemberDisplayName(member)}
+                avatarUrl={member.avatarUrl}
+              />
+              <span className="profile-group-member-text">
+                <strong>{getMemberDisplayName(member)}</strong>
+                <small>{formatMemberSubtitle(member, t)}</small>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function getMemberDisplayName(member: Conversation['members'][number]): string {
+  return getMessageSenderDisplayName(member);
+}
+
+function getMessageSenderDisplayName(profile: MessageAvatarProfile | null): string {
+  return profile?.groupNickname?.trim() || profile?.displayName || profile?.email || profile?.id || '';
+}
+
+function formatMemberSubtitle(
+  member: Conversation['members'][number],
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (member.isOnline || member.lastSeenAt) {
+    return formatPresence(member.isOnline, member.lastSeenAt, t);
+  }
+
+  return member.email || member.accountType || member.id;
+}
 
 function MessageList({
   conversationId,
   messages,
   currentUserProfile,
   peerProfile,
+  memberProfiles,
+  conversationType,
   isLoading,
   hasMoreMessages,
   isLoadingOlderMessages,
@@ -2084,6 +2286,8 @@ function MessageList({
   messages: ChatMessage[];
   currentUserProfile: MessageAvatarProfile | null;
   peerProfile: MessageAvatarProfile | null;
+  memberProfiles: MessageAvatarProfile[];
+  conversationType: Conversation['type'];
   isLoading: boolean;
   hasMoreMessages: boolean;
   isLoadingOlderMessages: boolean;
@@ -2480,6 +2684,9 @@ function MessageList({
           const nextMessage = messages[index + 1] ?? null;
           const showTimeDivider = shouldShowMessageTimeDivider(previousMessage, message);
           const showMessageAvatar = shouldShowMessageAvatar(message, nextMessage);
+          const isGroupConversation = conversationType === 'GROUP';
+          const isSenderGroupStart =
+            !previousMessage || showTimeDivider || previousMessage.senderId !== message.senderId;
           const isSameDirectionGroup = Boolean(
             previousMessage && !showTimeDivider && isMessageInSameAvatarGroup(previousMessage, message),
           );
@@ -2487,6 +2694,12 @@ function MessageList({
           const visibleOwnStatus = getVisibleOwnMessageStatus(message);
           const showEditedMarker = Boolean(message.editedAt && message.status !== 'recalled');
           const showMessageMeta = Boolean(visibleOwnStatus || canRetryMessage || showEditedMarker);
+          const messageAvatarProfile = message.isOwn
+            ? currentUserProfile
+            : findMessageAvatarProfile(message.senderId, peerProfile, memberProfiles);
+          const senderDisplayName = getMessageSenderDisplayName(messageAvatarProfile);
+          const showSenderName =
+            isGroupConversation && !message.isOwn && isSenderGroupStart && Boolean(senderDisplayName);
 
           return (
             <Fragment key={message.id}>
@@ -2497,10 +2710,16 @@ function MessageList({
               ) : null}
               <article
                 className={`message-row ${message.isOwn ? 'is-own' : ''} ${
-                  isSameDirectionGroup ? 'is-compact' : ''
-                } ${showTimeDivider ? 'is-after-divider' : ''} ${
-                  searchMatchIds.has(message.id) ? 'is-search-match' : ''
-                } ${activeSearchMessageId === message.id ? 'is-current-search-match' : ''}`}
+                  isGroupConversation ? 'is-group-conversation' : ''
+                } ${isSameDirectionGroup ? 'is-compact' : ''} ${
+                  showTimeDivider ? 'is-after-divider' : ''
+                } ${
+                  isGroupConversation && isSenderGroupStart && !showTimeDivider && index > 0
+                    ? 'is-sender-group-start'
+                    : ''
+                } ${searchMatchIds.has(message.id) ? 'is-search-match' : ''} ${
+                  activeSearchMessageId === message.id ? 'is-current-search-match' : ''
+                }`}
                 ref={(element) => {
                   messageRefs.current[message.id] = element;
                 }}
@@ -2508,16 +2727,19 @@ function MessageList({
                 {!message.isOwn ? (
                   <MessageAvatarSlot
                     message={message}
-                    profile={peerProfile}
+                    profile={messageAvatarProfile}
                     showAvatar={showMessageAvatar}
                   />
                 ) : null}
                 <div
-                  className={`message-bubble ${message.status === 'recalled' ? 'is-recalled' : ''} ${
+                  className={`message-bubble ${
+                    message.messageType === 'FILE' && message.status !== 'recalled' ? 'is-file-message' : ''
+                  } ${message.status === 'recalled' ? 'is-recalled' : ''} ${
                     message.status === 'failed' ? 'is-failed' : ''
                   }`}
                   onContextMenu={(event) => handleContextMenu(event, message)}
                 >
+                  {showSenderName ? <span className="message-sender-name">{senderDisplayName}</span> : null}
                   {editingMessageId === message.id ? (
                     <form className="message-edit-form" onSubmit={(event) => void handleSaveEdit(event, message)}>
                       <input
@@ -2541,19 +2763,26 @@ function MessageList({
                         </button>
                       </div>
                     </form>
+                  ) : message.status === 'recalled' ? (
+                    <p>{getRecalledMessageLabel(message, t)}</p>
+                  ) : message.messageType === 'FILE' ? (
+                    <FileMessageCard
+                      message={message}
+                      searchQuery={searchQuery}
+                      isSearchMatch={searchMatchIds.has(message.id)}
+                      isCurrentSearchMatch={activeSearchMessageId === message.id}
+                    />
                   ) : (
                     <p>
-                      {message.status === 'recalled'
-                        ? getRecalledMessageLabel(message, t)
-                        : renderMessageBody(
-                            message,
-                            searchQuery,
-                            t,
-                            downloadStates,
-                            openImagePreview,
-                            searchMatchIds.has(message.id),
-                            activeSearchMessageId === message.id,
-                          )}
+                      {renderMessageBody(
+                        message,
+                        searchQuery,
+                        t,
+                        downloadStates,
+                        openImagePreview,
+                        searchMatchIds.has(message.id),
+                        activeSearchMessageId === message.id,
+                      )}
                     </p>
                   )}
                   {showMessageMeta ? (
@@ -2579,7 +2808,7 @@ function MessageList({
                 {message.isOwn ? (
                   <MessageAvatarSlot
                     message={message}
-                    profile={currentUserProfile}
+                    profile={messageAvatarProfile}
                     showAvatar={showMessageAvatar}
                   />
                 ) : null}
@@ -2896,7 +3125,7 @@ function MessageAvatarSlot({
     <span className="message-avatar-slot" onContextMenu={(event) => event.preventDefault()}>
       <UserAvatar
         userId={profile?.id ?? message.senderId}
-        displayName={profile?.displayName}
+        displayName={getMessageSenderDisplayName(profile)}
         avatarUrl={profile?.avatarUrl}
         size="sm"
       />
@@ -3080,39 +3309,45 @@ function renderMessageBody(
     );
   }
 
-  if (message.messageType === 'FILE' && message.file) {
-    const downloadStatus = downloadStates[message.file.id];
-    const fileBadge = formatFileBadge(message.file.originalName);
 
-    return (
-      <span
-        className={`file-message-card ${isSearchMatch ? 'is-search-match' : ''} ${
-          isCurrentSearchMatch ? 'is-current-search-match' : ''
-        }`}
-      >
-        <span className="file-message-details">
-          <strong>{renderHighlightedText(message.file.originalName, searchQuery)}</strong>
-          <small>{formatFileSize(Number(message.file.sizeBytes))}</small>
-          {downloadStatus ? (
-            <small className={downloadStatus === 'failed' ? 'file-download-error' : ''}>
-              {downloadStatus === 'downloading' ? t('chat.downloading') : t('chat.downloadFailed')}
-            </small>
-          ) : null}
-        </span>
-        {fileBadge.iconSrc ? (
-          <span className={`file-message-icon has-image file-kind-${fileBadge.kind}`}>
-            <img className="file-message-real-icon" src={fileBadge.iconSrc} alt={fileBadge.label} />
-          </span>
-        ) : (
-          <span className={`file-message-icon file-kind-${fileBadge.kind}`}>
-            <span className="file-message-icon-label">{fileBadge.label}</span>
-          </span>
-        )}
-      </span>
-    );
-  }
 
   return renderHighlightedText(message.plaintext, searchQuery);
+}
+
+function FileMessageCard({
+  message,
+  searchQuery,
+  isSearchMatch,
+  isCurrentSearchMatch,
+}: {
+  message: ChatMessage;
+  searchQuery: string;
+  isSearchMatch: boolean;
+  isCurrentSearchMatch: boolean;
+}): JSX.Element | null {
+  if (!message.file) {
+    return null;
+  }
+
+  const fileIcon = getFileIconByName(message.file.originalName, message.file.mimeType);
+
+  return (
+    <div
+      className={`file-message-card ${isSearchMatch ? 'is-search-match' : ''} ${
+        isCurrentSearchMatch ? 'is-current-search-match' : ''
+      }`}
+    >
+      <span className="file-message-content">
+        <span className="file-message-name">
+          {renderHighlightedText(message.file.originalName, searchQuery)}
+        </span>
+        <span className="file-message-size">{formatFileSize(Number(message.file.sizeBytes))}</span>
+      </span>
+      <span className="file-message-icon-slot" aria-hidden="true">
+        <img className="file-message-icon" src={fileIcon.src} alt="" />
+      </span>
+    </div>
+  );
 }
 
 function ImageMessagePreview({
@@ -3450,12 +3685,6 @@ type ImagePreviewWindowPayload = {
 type ImagePreviewReadyPayload = {
   label: string;
 };
-type FileBadgeKind = 'word' | 'sheet' | 'slide' | 'pdf' | 'text' | 'archive' | 'image' | 'generic';
-type FileBadge = {
-  label: string;
-  kind: FileBadgeKind;
-  iconSrc: string | null;
-};
 
 const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024;
 const MESSAGE_DRAFT_MAX_LENGTH = 5000;
@@ -3463,17 +3692,61 @@ const EMOJI_GROUPS: EmojiGroup[] = [
   {
     id: 'common',
     labelKey: 'chat.emojiGroupCommon',
-    items: ['😀', '😂', '😊', '😍', '🥰', '😎', '😭', '😅', '👍', '👏', '🙏', '❤️', '🔥', '🎉', '✨'],
+    items: [
+      '\uD83D\uDE0E',
+      '\uD83D\uDE02',
+      '\uD83D\uDE0A',
+      '\uD83D\uDE0D',
+      '\uD83E\uDD17',
+      '\uD83D\uDE2D',
+      '\uD83D\uDE05',
+      '\uD83D\uDC4D',
+      '\uD83D\uDC4F',
+      '\uD83D\uDE4F',
+      '\u2764\uFE0F',
+      '\uD83D\uDD25',
+      '\uD83C\uDF89',
+      '\u2728',
+    ],
   },
   {
     id: 'faces',
     labelKey: 'chat.emojiGroupFaces',
-    items: ['🙂', '😄', '😁', '😆', '😉', '😋', '😘', '🤔', '😐', '😴', '😢', '😡', '😱', '🤯', '🥳'],
+    items: [
+      '\uD83D\uDE43',
+      '\uD83D\uDE03',
+      '\uD83D\uDE07',
+      '\uD83D\uDE09',
+      '\uD83D\uDE1C',
+      '\uD83D\uDE1D',
+      '\uD83E\uDD28',
+      '\uD83D\uDE13',
+      '\uD83D\uDE29',
+      '\uD83D\uDE28',
+      '\uD83D\uDE3A',
+      '\uD83D\uDE33',
+      '\uD83D\uDE0C',
+    ],
   },
   {
     id: 'gestures',
     labelKey: 'chat.emojiGroupGestures',
-    items: ['👋', '👌', '✌️', '🤝', '🙌', '💪', '🤟', '👀', '💯', '✅', '❌', '⭐', '💡', '📌', '🚀'],
+    items: [
+      '\uD83D\uDC4B',
+      '\uD83D\uDC4C',
+      '\u270C\uFE0F',
+      '\uD83E\uDD1D',
+      '\uD83D\uDE4C',
+      '\uD83D\uDCAA',
+      '\uD83E\uDD1F',
+      '\uD83D\uDC40',
+      '\uD83D\uDCAF',
+      '\uD83D\uDCCC',
+      '\u2705',
+      '\u2B50',
+      '\uD83D\uDC95',
+      '\uD83D\uDE80',
+    ],
   },
 ];
 const MESSAGE_AVATAR_GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -3481,6 +3754,9 @@ const MESSAGE_TIME_DIVIDER_INTERVAL_MS = 5 * 60 * 1000;
 const IMAGE_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const FILE_UPLOAD_MIME_TYPES = new Set([
   'application/pdf',
+  'application/msword',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
   'application/zip',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -3488,8 +3764,31 @@ const FILE_UPLOAD_MIME_TYPES = new Set([
   'text/csv',
   'text/plain',
 ]);
+const FILE_UPLOAD_EXTENSIONS = new Set([
+  '.txt',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.csv',
+  '.zip',
+]);
+const DANGEROUS_FILE_EXTENSIONS = new Set([
+  '.exe',
+  '.bat',
+  '.cmd',
+  '.msi',
+  '.ps1',
+  '.sh',
+  '.dll',
+  '.scr',
+  '.js',
+  '.vbs',
+]);
 const IMAGE_UPLOAD_ACCEPT = Array.from(IMAGE_UPLOAD_MIME_TYPES).join(',');
-const FILE_UPLOAD_ACCEPT = Array.from(FILE_UPLOAD_MIME_TYPES).join(',');
 const NAV_ICON_SOURCES = {
   messages: '/vector_icon/messages-square.svg',
   contacts: '/vector_icon/users-round.svg',
@@ -3497,24 +3796,30 @@ const NAV_ICON_SOURCES = {
   settings: '/vector_icon/settings.svg',
   logout: '/vector_icon/log-out.svg',
 } as const;
-const FILE_ICON_SOURCES: Record<FileBadgeKind, string | null> = {
-  word: '/file_icon/microsoft_word_macos_bigsur_icon_189948.png',
-  sheet: '/file_icon/microsoft_excel_macos_bigsur_icon_189980.png',
-  slide: '/file_icon/microsoft_powerpoint_macos_bigsur_icon_189966.png',
-  pdf: null,
-  text: '/file_icon/txt_filetype_icon_177515.png',
-  archive: null,
-  image: null,
-  generic: null,
-};
 const IMAGE_PREVIEW_OPEN_EVENT = 'image-preview:open';
 const IMAGE_PREVIEW_READY_EVENT = 'image-preview:ready';
 
+function getFileExtension(fileName: string): string {
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex <= 0 || lastDotIndex === fileName.length - 1) {
+    return '';
+  }
+
+  return fileName.slice(lastDotIndex).toLowerCase();
+}
+
 function isSupportedUpload(file: File, requestedKind: FileKind): boolean {
-  const mimeType = file.type.toLowerCase();
-  return requestedKind === 'IMAGE'
-    ? IMAGE_UPLOAD_MIME_TYPES.has(mimeType)
-    : FILE_UPLOAD_MIME_TYPES.has(mimeType);
+  const mimeType = file.type.trim().toLowerCase();
+  if (requestedKind === 'IMAGE') {
+    return IMAGE_UPLOAD_MIME_TYPES.has(mimeType);
+  }
+
+  const extension = getFileExtension(file.name);
+  if (DANGEROUS_FILE_EXTENSIONS.has(extension)) {
+    return false;
+  }
+
+  return FILE_UPLOAD_MIME_TYPES.has(mimeType) || FILE_UPLOAD_EXTENSIONS.has(extension);
 }
 
 function formatUploadNotice(metadata: FileMetadataResponse): string {
@@ -3544,30 +3849,6 @@ function formatFileSize(sizeBytes: number): string {
   return `${sizeBytes} B`;
 }
 
-function formatFileBadge(originalName: string): FileBadge {
-  const extension = originalName.split('.').pop()?.trim().toLocaleLowerCase();
-  if (!extension || extension === originalName) {
-    return { label: 'FILE', kind: 'generic', iconSrc: FILE_ICON_SOURCES.generic };
-  }
-
-  const fileBadgeByExtension: Record<string, FileBadge> = {
-    doc: { label: 'DOC', kind: 'word', iconSrc: FILE_ICON_SOURCES.word },
-    docx: { label: 'DOCX', kind: 'word', iconSrc: FILE_ICON_SOURCES.word },
-    xls: { label: 'XLS', kind: 'sheet', iconSrc: FILE_ICON_SOURCES.sheet },
-    xlsx: { label: 'XLSX', kind: 'sheet', iconSrc: FILE_ICON_SOURCES.sheet },
-    ppt: { label: 'PPT', kind: 'slide', iconSrc: FILE_ICON_SOURCES.slide },
-    pptx: { label: 'PPTX', kind: 'slide', iconSrc: FILE_ICON_SOURCES.slide },
-    pdf: { label: 'PDF', kind: 'pdf', iconSrc: null },
-    txt: { label: 'TXT', kind: 'text', iconSrc: FILE_ICON_SOURCES.text },
-    zip: { label: 'ZIP', kind: 'archive', iconSrc: null },
-    png: { label: 'PNG', kind: 'image', iconSrc: null },
-    jpg: { label: 'JPG', kind: 'image', iconSrc: null },
-    jpeg: { label: 'JPG', kind: 'image', iconSrc: null },
-    webp: { label: 'WEBP', kind: 'image', iconSrc: null },
-  };
-
-  return fileBadgeByExtension[extension] ?? { label: 'FILE', kind: 'generic', iconSrc: FILE_ICON_SOURCES.generic };
-}
 
 async function copyTextToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
@@ -3747,20 +4028,27 @@ function buildConversationSearchPayload(
   currentUserId: string | null,
   currentUserName: string,
 ): ConversationSearchPayload {
-  const peerName = conversation.peer?.displayName ?? 'LanGram';
-  const peerAvatarUrl = conversation.peer?.avatarUrl ?? null;
+  const conversationTitle = getConversationDisplayName(conversation, 'LanGram');
+  const peerName = conversation.peer?.displayName ?? conversationTitle;
+  const peerAvatarUrl = conversation.type === 'DIRECT' ? conversation.peer?.avatarUrl ?? null : null;
+  const membersById = new Map(conversation.members.map((member) => [member.id, member]));
 
   return {
     conversationId: conversation.id,
-    title: peerName,
+    title: conversationTitle,
     messages: (messages.length > 0 ? messages : buildConversationSearchFallbackMessages(conversation))
       .filter((message) => message.status !== 'recalled')
       .map((message) => {
         const isCurrentUser = Boolean(currentUserId && message.senderId === currentUserId);
+        const senderProfile = membersById.get(message.senderId);
         return {
           id: message.id,
-          senderName: isCurrentUser ? currentUserName : peerName,
-          avatarUrl: isCurrentUser ? null : peerAvatarUrl,
+          senderName: isCurrentUser
+            ? currentUserName
+            : senderProfile?.displayName ?? peerName,
+          avatarUrl: isCurrentUser
+            ? null
+            : senderProfile?.avatarUrl ?? peerAvatarUrl,
           plaintext: message.plaintext,
           messageType: message.messageType,
           fileName: message.file?.originalName ?? null,
@@ -3816,7 +4104,7 @@ function buildForwardTargets(
     ...conversations.map((conversation) => ({
       id: `conversation:${conversation.id}`,
       type: 'conversation' as const,
-      label: conversation.peer?.displayName ?? unknownPeerLabel,
+      label: getConversationDisplayName(conversation, unknownPeerLabel),
       conversationId: conversation.id,
       friendUserId: '',
       isCurrentChat: conversation.id === selectedConversationId,
