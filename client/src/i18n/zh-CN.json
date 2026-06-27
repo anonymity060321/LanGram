@@ -357,7 +357,7 @@
   "chat.groupConversation": "群聊会话",
   "chat.groupMemberList": "群成员",
   "chat.noGroupMembers": "暂无成员信息",
-  "chat.myGroupNickname": "我的群昵称",
+  "chat.myGroupNickname": "我的本群昵称",
   "chat.groupNicknamePlaceholder": "未设置时使用账号昵称",
   "chat.saveGroupNickname": "保存群昵称",
   "chat.clearGroupNickname": "清除",
@@ -373,5 +373,16 @@
   "friends.groupsTab": "群聊",
   "friends.noGroups": "暂无群聊",
   "friends.groupList": "群聊列表",
-  "friends.openGroupChat": "进入群聊"
+  "friends.openGroupChat": "进入群聊",
+  "chat.groupNicknameInputPlaceholder": "填写我的本群昵称",
+  "chat.groupRemark": "群聊备注",
+  "chat.groupRemarkPlaceholder": "填写备注",
+  "chat.groupSettingsAutosaved": "已自动保存",
+  "chat.groupSettingsAutosaveFailed": "自动保存失败",
+  "chat.editGroupNickname": "修改群昵称",
+  "chat.leaveGroup": "退出群聊",
+  "chat.leaveGroupConfirmTitle": "退出群聊",
+  "chat.leaveGroupConfirmMessage": "确定要退出该群聊吗？退出后将无法继续接收该群消息。",
+  "chat.leaveGroupFailed": "退出群聊失败",
+  "chat.groupMemberLeft": "已退出群聊"
 }

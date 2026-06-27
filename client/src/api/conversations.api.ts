@@ -17,7 +17,10 @@ export type ConversationUser = Pick<
   | 'isOnline'
   | 'lastSeenAt'
 > & {
+  userId?: string;
   groupNickname?: string | null;
+  groupRemark?: string | null;
+  leftAt?: string | null;
 };
 
 export interface Conversation {
@@ -90,6 +93,23 @@ export function updateGroupNickname(
   });
 }
 
+export function updateGroupRemark(
+  conversationId: string,
+  groupRemark: string | null,
+): Promise<Conversation> {
+  return apiRequest(`/conversations/${conversationId}/group-remark`, {
+    method: 'PATCH',
+    body: JSON.stringify({ groupRemark }),
+  });
+}
+
+export function leaveGroupConversation(
+  conversationId: string,
+): Promise<{ conversationId: string; leftAt: string }> {
+  return apiRequest(`/conversations/${conversationId}/leave`, {
+    method: 'POST',
+  });
+}
 export function listMessages(
   conversationId: string,
   options: { before?: string; beforeMessageId?: string; limit?: number } = {},
@@ -116,3 +136,8 @@ export function markConversationRead(
     body: JSON.stringify({ messageId }),
   });
 }
+
+
+
+
+

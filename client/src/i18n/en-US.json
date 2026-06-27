@@ -358,11 +358,22 @@
   "chat.groupMemberList": "Members",
   "chat.noGroupMembers": "No member information",
   "chat.myGroupNickname": "My group nickname",
+  "chat.groupNicknameInputPlaceholder": "Enter my group nickname",
+  "chat.groupRemark": "Group remark",
+  "chat.groupRemarkPlaceholder": "Enter remark",
+  "chat.groupSettingsAutosaved": "Saved automatically",
+  "chat.groupSettingsAutosaveFailed": "Failed to auto-save",
   "chat.groupNicknamePlaceholder": "Use account name when empty",
   "chat.saveGroupNickname": "Save nickname",
   "chat.clearGroupNickname": "Clear",
   "chat.groupNicknameSaved": "Group nickname saved",
   "chat.groupNicknameSaveFailed": "Failed to save group nickname",
+  "chat.editGroupNickname": "Edit group nickname",
+  "chat.leaveGroup": "Leave group",
+  "chat.leaveGroupConfirmTitle": "Leave group",
+  "chat.leaveGroupConfirmMessage": "Are you sure you want to leave this group? You will no longer receive messages from it.",
+  "chat.leaveGroupFailed": "Failed to leave group",
+  "chat.groupMemberLeft": "Left group",
   "theme.system": "System",
   "theme.light": "Light",
   "theme.dark": "Dark",
@@ -375,3 +386,4 @@
   "friends.groupList": "Groups",
   "friends.openGroupChat": "Open group"
 }
+

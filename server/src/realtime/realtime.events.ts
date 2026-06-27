@@ -8,6 +8,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
+  CONVERSATION_MEMBER_UPDATED: 'conversation:member-updated',
   FRIEND_REQUEST_CHANGED: 'friend:request:changed',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
@@ -64,8 +65,27 @@ export interface FriendRequestChangedPayload {
   reason: 'friend_request_changed';
 }
 
+export interface ConversationMemberUpdatedPayload {
+  conversationId: string;
+  reason: 'group_member_updated' | 'group_member_left';
+  member: {
+    id: string;
+    userId?: string;
+    email: string | null;
+    displayName: string | null;
+    statusMessage?: string | null;
+    avatarUrl?: string | null;
+    accountType?: string;
+    isOnline?: boolean;
+    lastSeenAt?: string | null;
+    groupNickname?: string | null;
+    leftAt?: string | Date | null;
+  };
+}
+
 export interface PresenceUpdatePayload {
   userId: string;
   isOnline: boolean;
   lastSeenAt: string | null;
 }
+

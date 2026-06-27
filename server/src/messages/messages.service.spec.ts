@@ -856,4 +856,25 @@ describe('MessagesService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
+  it('rejects group sends from members who already left the group', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue(
+      conversationForSendingFixture(ConversationType.GROUP, [
+        { userId: 'user-b' },
+        { userId: 'user-c' },
+      ]),
+    );
+    const service = createService(prisma);
+
+    await expect(service.sendTextMessage(sendInput())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.conversation.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          members: expect.objectContaining({ where: { leftAt: null } }),
+        }),
+      }),
+    );
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
 });
+

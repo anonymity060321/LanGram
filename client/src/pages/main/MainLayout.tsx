@@ -54,6 +54,7 @@ import { FriendDeleteConfirmDialog, FriendsWorkspace } from './FriendsPage';
 
 const EMPTY_SEARCH_MATCH_IDS = new Set<string>();
 const EMPTY_CONVERSATION_IDS: string[] = [];
+const GROUP_SETTINGS_AUTOSAVE_DELAY_MS = 800;
 
 function useDismissOnOutsideOrEscape<T extends HTMLElement>(
   isOpen: boolean,
@@ -136,6 +137,8 @@ export function MainLayout(): JSX.Element {
   const sendShortcut = useSettingsStore((state) => state.config?.sendShortcut ?? 'enter');
   const updateConfig = useSettingsStore((state) => state.updateConfig);
   const updateGroupNickname = useChatStore((state) => state.updateGroupNickname);
+  const updateGroupRemark = useChatStore((state) => state.updateGroupRemark);
+  const leaveGroup = useChatStore((state) => state.leaveGroup);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [hasLoadedFriends, setHasLoadedFriends] = useState(false);
   const [trustedFriendPeerId, setTrustedFriendPeerId] = useState<string | null>(null);
@@ -151,6 +154,13 @@ export function MainLayout(): JSX.Element {
   const [activeView, setActiveView] = useState<MainView>('messages');
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [isChatActionsOpen, setIsChatActionsOpen] = useState(false);
+  const [groupNicknameDraft, setGroupNicknameDraft] = useState('');
+  const [groupRemarkDraft, setGroupRemarkDraft] = useState('');
+  const [groupNicknameNotice, setGroupNicknameNotice] = useState<string | null>(null);
+  const [groupNicknameError, setGroupNicknameError] = useState<string | null>(null);
+  const [isSavingGroupNickname, setIsSavingGroupNickname] = useState(false);
+  const [isSavingGroupRemark, setIsSavingGroupRemark] = useState(false);
+  const [isLeavingGroup, setIsLeavingGroup] = useState(false);
   const [isSendShortcutMenuOpen, setIsSendShortcutMenuOpen] = useState(false);
   const [isEmojiPanelOpen, setIsEmojiPanelOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
@@ -184,6 +194,10 @@ export function MainLayout(): JSX.Element {
   const previousNetworkStatusForSyncRef = useRef<NetworkStatus>(networkStatus);
   const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
   const pendingActivationInFlightRef = useRef<string | null>(null);
+  const groupNicknameSaveTimerRef = useRef<number | null>(null);
+  const groupRemarkSaveTimerRef = useRef<number | null>(null);
+  const lastSavedGroupNicknameRef = useRef('');
+  const lastSavedGroupRemarkRef = useRef('');
 
   useDismissOnOutsideOrEscape(isAppMenuOpen, appMenuRef, setIsAppMenuOpen);
   useDismissOnOutsideOrEscape(isChatActionsOpen, chatActionsRef, setIsChatActionsOpen);
@@ -197,9 +211,16 @@ export function MainLayout(): JSX.Element {
   const isSelectedConversationDirect = selectedConversation?.type === 'DIRECT';
   const isSelectedConversationGroup = selectedConversation?.type === 'GROUP';
   const selectedConversationTitle = selectedConversation
-    ? getConversationDisplayName(selectedConversation, t('chat.unknownPeer'))
+    ? getConversationDisplayName(selectedConversation, t('chat.unknownPeer'), user?.id ?? null)
     : null;
+  const selectedConversationProfileTitle =
+    selectedConversation?.type === 'GROUP'
+      ? selectedConversation.title?.trim() || t('chat.groupConversation')
+      : selectedConversationTitle;
   const profileUser = isSelectedConversationDirect ? selectedConversation?.peer ?? null : user ?? null;
+  const currentGroupMember = isSelectedConversationGroup && user?.id
+    ? selectedConversation?.members.find((member) => member.id === user.id && !member.leftAt) ?? null
+    : null;
   const profilePresence = !isNetworkOnline
     ? t('presence.offline')
     : isSelectedConversationGroup && selectedConversation
@@ -285,6 +306,88 @@ export function MainLayout(): JSX.Element {
     );
   }, []);
 
+
+  const cancelGroupNicknameAutosaveTimer = useCallback((): void => {
+    if (groupNicknameSaveTimerRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(groupNicknameSaveTimerRef.current);
+    groupNicknameSaveTimerRef.current = null;
+  }, []);
+
+  const cancelGroupRemarkAutosaveTimer = useCallback((): void => {
+    if (groupRemarkSaveTimerRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(groupRemarkSaveTimerRef.current);
+    groupRemarkSaveTimerRef.current = null;
+  }, []);
+
+  const cancelGroupSettingsAutosaveTimers = useCallback((): void => {
+    cancelGroupNicknameAutosaveTimer();
+    cancelGroupRemarkAutosaveTimer();
+  }, [cancelGroupNicknameAutosaveTimer, cancelGroupRemarkAutosaveTimer]);
+
+  const flushGroupNicknameSave = useCallback(async (): Promise<void> => {
+    cancelGroupNicknameAutosaveTimer();
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return;
+    }
+
+    const normalizedNickname = groupNicknameDraft.trim();
+    if (normalizedNickname === lastSavedGroupNicknameRef.current) {
+      return;
+    }
+
+    setGroupNicknameNotice(null);
+    setGroupNicknameError(null);
+    setIsSavingGroupNickname(true);
+    const success = await updateGroupNickname(selectedConversation.id, normalizedNickname || null);
+    setIsSavingGroupNickname(false);
+
+    if (!success) {
+      setGroupNicknameError(t('chat.groupSettingsAutosaveFailed'));
+      return;
+    }
+
+    lastSavedGroupNicknameRef.current = normalizedNickname;
+    setGroupNicknameDraft(normalizedNickname);
+    setGroupNicknameNotice(t('chat.groupSettingsAutosaved'));
+  }, [cancelGroupNicknameAutosaveTimer, groupNicknameDraft, selectedConversation, t, updateGroupNickname]);
+
+  const flushGroupRemarkSave = useCallback(async (): Promise<void> => {
+    cancelGroupRemarkAutosaveTimer();
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return;
+    }
+
+    const normalizedRemark = groupRemarkDraft.trim();
+    if (normalizedRemark === lastSavedGroupRemarkRef.current) {
+      return;
+    }
+
+    setGroupNicknameNotice(null);
+    setGroupNicknameError(null);
+    setIsSavingGroupRemark(true);
+    const success = await updateGroupRemark(selectedConversation.id, normalizedRemark || null);
+    setIsSavingGroupRemark(false);
+
+    if (!success) {
+      setGroupNicknameError(t('chat.groupSettingsAutosaveFailed'));
+      return;
+    }
+
+    lastSavedGroupRemarkRef.current = normalizedRemark;
+    setGroupRemarkDraft(normalizedRemark);
+    setGroupNicknameNotice(t('chat.groupSettingsAutosaved'));
+  }, [cancelGroupRemarkAutosaveTimer, groupRemarkDraft, selectedConversation, t, updateGroupRemark]);
+
+  const flushGroupSettingsSave = useCallback(async (): Promise<void> => {
+    await Promise.all([flushGroupNicknameSave(), flushGroupRemarkSave()]);
+  }, [flushGroupNicknameSave, flushGroupRemarkSave]);
+
   useEffect(() => {
     if (user) {
       void loadConversations(user.id);
@@ -329,6 +432,71 @@ export function MainLayout(): JSX.Element {
     return () => disconnect();
   }, [accessToken, connect, disconnect, notifySessionReplaced]);
 
+  useEffect(() => {
+    const savedNickname = currentGroupMember?.groupNickname?.trim() ?? '';
+    const savedRemark = currentGroupMember?.groupRemark?.trim() ?? '';
+    lastSavedGroupNicknameRef.current = savedNickname;
+    lastSavedGroupRemarkRef.current = savedRemark;
+    setGroupNicknameDraft(savedNickname);
+    setGroupRemarkDraft(savedRemark);
+    setGroupNicknameNotice(null);
+    setGroupNicknameError(null);
+    cancelGroupSettingsAutosaveTimers();
+  }, [
+    cancelGroupSettingsAutosaveTimers,
+    currentGroupMember?.groupNickname,
+    currentGroupMember?.groupRemark,
+    currentGroupMember?.id,
+    selectedConversationId,
+  ]);
+
+  useEffect(() => {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return undefined;
+    }
+
+    const normalizedNickname = groupNicknameDraft.trim();
+    if (normalizedNickname === lastSavedGroupNicknameRef.current) {
+      return undefined;
+    }
+
+    cancelGroupNicknameAutosaveTimer();
+    groupNicknameSaveTimerRef.current = window.setTimeout(() => {
+      void flushGroupNicknameSave();
+    }, GROUP_SETTINGS_AUTOSAVE_DELAY_MS);
+
+    return () => cancelGroupNicknameAutosaveTimer();
+  }, [
+    cancelGroupNicknameAutosaveTimer,
+    flushGroupNicknameSave,
+    groupNicknameDraft,
+    selectedConversation,
+  ]);
+
+  useEffect(() => {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return undefined;
+    }
+
+    const normalizedRemark = groupRemarkDraft.trim();
+    if (normalizedRemark === lastSavedGroupRemarkRef.current) {
+      return undefined;
+    }
+
+    cancelGroupRemarkAutosaveTimer();
+    groupRemarkSaveTimerRef.current = window.setTimeout(() => {
+      void flushGroupRemarkSave();
+    }, GROUP_SETTINGS_AUTOSAVE_DELAY_MS);
+
+    return () => cancelGroupRemarkAutosaveTimer();
+  }, [
+    cancelGroupRemarkAutosaveTimer,
+    flushGroupRemarkSave,
+    groupRemarkDraft,
+    selectedConversation,
+  ]);
+
+  useEffect(() => () => cancelGroupSettingsAutosaveTimers(), [cancelGroupSettingsAutosaveTimers]);
   useEffect(() => {
     if (!messageLimitNotice) {
       return undefined;
@@ -524,8 +692,14 @@ export function MainLayout(): JSX.Element {
     [conversations, friends],
   );
   const forwardTargets = useMemo(
-    () => buildForwardTargets(conversations, visibleFriends, t('chat.unknownPeer'), selectedConversationId),
-    [conversations, selectedConversationId, t, visibleFriends],
+    () => buildForwardTargets(
+      conversations,
+      visibleFriends,
+      t('chat.unknownPeer'),
+      selectedConversationId,
+      user?.id ?? null,
+    ),
+    [conversations, selectedConversationId, t, user?.id, visibleFriends],
   );
 
   const unhideConversation = useCallback((conversationId: string): void => {
@@ -1213,6 +1387,41 @@ export function MainLayout(): JSX.Element {
     }
   }
 
+
+  async function handleLeaveGroupFromMenu(): Promise<void> {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${t('chat.leaveGroupConfirmTitle')}\n\n${t('chat.leaveGroupConfirmMessage')}`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsLeavingGroup(true);
+    setGroupNicknameError(null);
+    const conversationId = selectedConversation.id;
+    const success = await leaveGroup(conversationId);
+    setIsLeavingGroup(false);
+
+    if (!success) {
+      setGroupNicknameError(t('chat.leaveGroupFailed'));
+      return;
+    }
+
+    setIsChatActionsOpen(false);
+    void updateConfig({
+      pinnedConversationIds: pinnedConversationIds.filter((id) => id !== conversationId),
+      mutedConversationIds: mutedConversationIds.filter((id) => id !== conversationId),
+    });
+    setReadConversationOverrides((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+  }
   async function handleLoadOlderMessages(): Promise<boolean> {
     if (!user || !selectedConversationId) {
       return false;
@@ -1347,12 +1556,12 @@ export function MainLayout(): JSX.Element {
                 >
                   <UserAvatar
                     userId={conversation.type === 'DIRECT' ? conversation.peer?.id : conversation.id}
-                    displayName={getConversationDisplayName(conversation, t('chat.unknownPeer'))}
+                    displayName={getConversationDisplayName(conversation, t('chat.unknownPeer'), user?.id ?? null)}
                     avatarUrl={conversation.type === 'DIRECT' ? conversation.peer?.avatarUrl : null}
                   />
                   <span className="conversation-item-body">
                     <span className="conversation-item-header">
-                      <strong>{getConversationDisplayName(conversation, t('chat.unknownPeer'))}</strong>
+                      <strong>{getConversationDisplayName(conversation, t('chat.unknownPeer'), user?.id ?? null)}</strong>
                       {preview.time ? (
                         <time dateTime={preview.time}>{formatConversationTime(preview.time, t)}</time>
                       ) : null}
@@ -1436,6 +1645,67 @@ export function MainLayout(): JSX.Element {
                       </button>
                     ) : null}
                   </div>
+                  {isSelectedConversationGroup ? (
+                    <div className="chat-actions-panel-section">
+                      <form
+                        className="group-settings-form"
+                        aria-busy={isSavingGroupNickname || isSavingGroupRemark}
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void flushGroupSettingsSave();
+                        }}
+                      >
+                        <label className="group-settings-field" htmlFor="chat-group-nickname-input">
+                          <span className="group-settings-label">{t('chat.myGroupNickname')}</span>
+                          <input
+                            id="chat-group-nickname-input"
+                            className="group-settings-input"
+                            value={groupNicknameDraft}
+                            maxLength={32}
+                            placeholder={t('chat.groupNicknameInputPlaceholder')}
+                            disabled={isLeavingGroup}
+                            onBlur={() => void flushGroupNicknameSave()}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void flushGroupNicknameSave();
+                              }
+                            }}
+                            onChange={(event) => {
+                              setGroupNicknameDraft(event.target.value);
+                              setGroupNicknameNotice(null);
+                              setGroupNicknameError(null);
+                            }}
+                          />
+                        </label>
+                        <label className="group-settings-field" htmlFor="chat-group-remark-input">
+                          <span className="group-settings-label">{t('chat.groupRemark')}</span>
+                          <input
+                            id="chat-group-remark-input"
+                            className="group-settings-input"
+                            value={groupRemarkDraft}
+                            maxLength={64}
+                            placeholder={t('chat.groupRemarkPlaceholder')}
+                            disabled={isLeavingGroup}
+                            onBlur={() => void flushGroupRemarkSave()}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void flushGroupRemarkSave();
+                              }
+                            }}
+                            onChange={(event) => {
+                              setGroupRemarkDraft(event.target.value);
+                              setGroupNicknameNotice(null);
+                              setGroupNicknameError(null);
+                            }}
+                          />
+                        </label>
+                        {groupNicknameNotice ? <small className="group-settings-notice">{groupNicknameNotice}</small> : null}
+                        {groupNicknameError ? <small className="group-settings-error">{groupNicknameError}</small> : null}
+                      </form>
+                    </div>
+                  ) : null}
                   <div className="chat-actions-panel-section">
                     <button
                       type="button"
@@ -1464,6 +1734,17 @@ export function MainLayout(): JSX.Element {
                         onClick={handleAddFriendFromMenu}
                       >
                         <span>{t('chat.addFriend')}</span>
+                      </button>
+                    ) : null}
+                    {isSelectedConversationGroup ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-actions-panel-item is-danger"
+                        disabled={isLeavingGroup}
+                        onClick={() => void handleLeaveGroupFromMenu()}
+                      >
+                        <span>{t('chat.leaveGroup')}</span>
                       </button>
                     ) : null}
                   </div>
@@ -1709,7 +1990,7 @@ export function MainLayout(): JSX.Element {
           userId={isSelectedConversationGroup ? selectedConversation?.id : profileUser?.id}
           displayName={
             isSelectedConversationGroup
-              ? selectedConversationTitle ?? t('chat.groupConversation')
+              ? selectedConversationProfileTitle ?? t('chat.groupConversation')
               : profileUser?.displayName
           }
           avatarUrl={isSelectedConversationGroup ? null : profileUser?.avatarUrl}
@@ -1717,7 +1998,7 @@ export function MainLayout(): JSX.Element {
         />
         <strong>
           {isSelectedConversationGroup
-            ? selectedConversationTitle ?? t('chat.groupConversation')
+            ? selectedConversationProfileTitle ?? t('chat.groupConversation')
             : profileUser?.displayName ?? t('app.name')}
         </strong>
         <span className="presence-text">{profilePresence}</span>
@@ -1729,11 +2010,7 @@ export function MainLayout(): JSX.Element {
         {isSelectedConversationGroup && selectedConversation ? (
           <GroupMemberPanel
             members={selectedConversation.members}
-            currentUserId={user?.id ?? null}
             t={t}
-            onSaveGroupNickname={(groupNickname) =>
-              updateGroupNickname(selectedConversation.id, groupNickname)
-            }
           />
         ) : null}
       </aside>
@@ -2114,9 +2391,16 @@ type MessageAvatarProfile = {
   avatarUrl?: string | null;
 };
 
-function getConversationDisplayName(conversation: Conversation, fallback: string): string {
+function getConversationDisplayName(
+  conversation: Conversation,
+  fallback: string,
+  currentUserId: string | null = null,
+): string {
   if (conversation.type === 'GROUP') {
-    return conversation.title?.trim() || fallback;
+    const currentMemberRemark = currentUserId
+      ? conversation.members.find((member) => member.id === currentUserId)?.groupRemark?.trim()
+      : '';
+    return currentMemberRemark || conversation.title?.trim() || fallback;
   }
 
   return conversation.peer?.displayName ?? fallback;
@@ -2132,96 +2416,20 @@ function findMessageAvatarProfile(
 
 function GroupMemberPanel({
   members,
-  currentUserId,
   t,
-  onSaveGroupNickname,
 }: {
   members: Conversation['members'];
-  currentUserId: string | null;
   t: ReturnType<typeof useI18n>['t'];
-  onSaveGroupNickname: (groupNickname: string | null) => Promise<boolean>;
 }): JSX.Element {
-  const currentMember = currentUserId
-    ? members.find((member) => member.id === currentUserId) ?? null
-    : null;
-  const [groupNicknameDraft, setGroupNicknameDraft] = useState(currentMember?.groupNickname ?? '');
-  const [groupNicknameNotice, setGroupNicknameNotice] = useState<string | null>(null);
-  const [groupNicknameError, setGroupNicknameError] = useState<string | null>(null);
-  const [isSavingGroupNickname, setIsSavingGroupNickname] = useState(false);
-
-  useEffect(() => {
-    setGroupNicknameDraft(currentMember?.groupNickname ?? '');
-    setGroupNicknameNotice(null);
-    setGroupNicknameError(null);
-  }, [currentMember?.groupNickname, currentMember?.id]);
-
-  async function handleSaveGroupNickname(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setGroupNicknameNotice(null);
-    setGroupNicknameError(null);
-    setIsSavingGroupNickname(true);
-    const normalizedNickname = groupNicknameDraft.trim();
-    const success = await onSaveGroupNickname(normalizedNickname || null);
-    setIsSavingGroupNickname(false);
-
-    if (!success) {
-      setGroupNicknameError(t('chat.groupNicknameSaveFailed'));
-      return;
-    }
-
-    setGroupNicknameDraft(normalizedNickname);
-    setGroupNicknameNotice(t('chat.groupNicknameSaved'));
-  }
-
-  async function handleClearGroupNickname(): Promise<void> {
-    setGroupNicknameDraft('');
-    setGroupNicknameNotice(null);
-    setGroupNicknameError(null);
-    setIsSavingGroupNickname(true);
-    const success = await onSaveGroupNickname(null);
-    setIsSavingGroupNickname(false);
-
-    if (!success) {
-      setGroupNicknameError(t('chat.groupNicknameSaveFailed'));
-      return;
-    }
-
-    setGroupNicknameNotice(t('chat.groupNicknameSaved'));
-  }
+  const activeMembers = members.filter((member) => !member.leftAt);
 
   return (
     <section className="profile-group-section" aria-label={t('chat.groupMemberList')}>
-      {currentMember ? (
-        <form className="profile-group-nickname-form" onSubmit={(event) => void handleSaveGroupNickname(event)}>
-          <label htmlFor="group-nickname-input">{t('chat.myGroupNickname')}</label>
-          <input
-            id="group-nickname-input"
-            value={groupNicknameDraft}
-            maxLength={32}
-            placeholder={t('chat.groupNicknamePlaceholder')}
-            onChange={(event) => {
-              setGroupNicknameDraft(event.target.value);
-              setGroupNicknameNotice(null);
-              setGroupNicknameError(null);
-            }}
-          />
-          <div className="profile-group-nickname-actions">
-            <button type="submit" disabled={isSavingGroupNickname}>
-              {t('chat.saveGroupNickname')}
-            </button>
-            <button type="button" disabled={isSavingGroupNickname} onClick={() => void handleClearGroupNickname()}>
-              {t('chat.clearGroupNickname')}
-            </button>
-          </div>
-          {groupNicknameNotice ? <small className="profile-group-nickname-notice">{groupNicknameNotice}</small> : null}
-          {groupNicknameError ? <small className="profile-group-nickname-error">{groupNicknameError}</small> : null}
-        </form>
-      ) : null}
       <h2>{t('chat.groupMemberList')}</h2>
-      {members.length === 0 ? <p>{t('chat.noGroupMembers')}</p> : null}
-      {members.length > 0 ? (
+      {activeMembers.length === 0 ? <p>{t('chat.noGroupMembers')}</p> : null}
+      {activeMembers.length > 0 ? (
         <div className="profile-group-member-list">
-          {members.map((member) => (
+          {activeMembers.map((member) => (
             <div className="profile-group-member-row" key={member.id}>
               <UserAvatar
                 userId={member.id}
@@ -4028,7 +4236,7 @@ function buildConversationSearchPayload(
   currentUserId: string | null,
   currentUserName: string,
 ): ConversationSearchPayload {
-  const conversationTitle = getConversationDisplayName(conversation, 'LanGram');
+  const conversationTitle = getConversationDisplayName(conversation, 'LanGram', currentUserId);
   const peerName = conversation.peer?.displayName ?? conversationTitle;
   const peerAvatarUrl = conversation.type === 'DIRECT' ? conversation.peer?.avatarUrl ?? null : null;
   const membersById = new Map(conversation.members.map((member) => [member.id, member]));
@@ -4099,12 +4307,13 @@ function buildForwardTargets(
   friendsWithoutConversation: FriendItem[],
   unknownPeerLabel: string,
   selectedConversationId: string | null,
+  currentUserId: string | null,
 ): ForwardTarget[] {
   return [
     ...conversations.map((conversation) => ({
       id: `conversation:${conversation.id}`,
       type: 'conversation' as const,
-      label: getConversationDisplayName(conversation, unknownPeerLabel),
+      label: getConversationDisplayName(conversation, unknownPeerLabel, currentUserId),
       conversationId: conversation.id,
       friendUserId: '',
       isCurrentChat: conversation.id === selectedConversationId,
@@ -4152,3 +4361,25 @@ function renderHighlightedText(text: string, query: string): Array<string | JSX.
 
   return fragments;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

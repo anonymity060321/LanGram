@@ -755,65 +755,6 @@ textarea,
   font-size: 0.9rem;
 }
 
-.profile-group-nickname-form {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.profile-group-nickname-form label {
-  color: var(--color-text);
-  font-size: 0.88rem;
-  font-weight: 700;
-}
-
-.profile-group-nickname-form input {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--color-border-muted);
-  border-radius: 8px;
-  background: var(--color-bg-panel-muted);
-  color: var(--color-text);
-  padding: 8px 10px;
-  font: inherit;
-}
-
-.profile-group-nickname-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.profile-group-nickname-actions button {
-  min-height: 32px;
-  border: 1px solid var(--color-border-muted);
-  border-radius: 8px;
-  background: var(--color-bg-panel-muted);
-  color: var(--color-text);
-  padding: 0 10px;
-  font-size: 0.84rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.profile-group-nickname-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.profile-group-nickname-notice,
-.profile-group-nickname-error {
-  font-size: 0.8rem;
-}
-
-.profile-group-nickname-notice {
-  color: #047857;
-}
-
-.profile-group-nickname-error {
-  color: #b42318;
-}
-
 .profile-group-member-list {
   display: grid;
   max-height: 360px;
@@ -7634,8 +7575,63 @@ select:focus {
 .chat-actions-panel-item.is-danger:focus-visible {
   background: var(--color-danger-soft);
 }
+.group-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  padding: 12px;
+}
 
-.chat-actions-panel-item:disabled {
+.group-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.group-settings-label {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--color-text-muted);
+}
+
+.group-settings-input {
+  width: 100%;
+  height: 38px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  padding: 0 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.group-settings-input::placeholder {
+  color: color-mix(in srgb, var(--color-text-muted) 72%, transparent);
+}
+
+.group-settings-input:focus {
+  border-color: var(--color-border-strong);
+  outline: none;
+}
+
+
+.group-settings-notice,
+.group-settings-error {
+  font-size: 12px;
+}
+
+.group-settings-notice {
+  color: var(--color-success);
+}
+
+.group-settings-error {
+  color: var(--color-danger);
+}.chat-actions-panel-item:disabled {
   cursor: not-allowed;
   color: var(--color-text-subtle);
   opacity: 0.72;
@@ -8341,3 +8337,8 @@ select:focus {
   --color-own-message: #223b5f;
   --color-peer-message: #1b2634;
 }
+
+
+
+
+

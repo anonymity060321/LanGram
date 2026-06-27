@@ -189,8 +189,8 @@ export function FriendsWorkspace({
     [friendSearchQuery, friends],
   );
   const filteredGroupConversations = useMemo(
-    () => filterGroupConversations(conversations, friendSearchQuery),
-    [conversations, friendSearchQuery],
+    () => filterGroupConversations(conversations, friendSearchQuery, user?.id ?? null),
+    [conversations, friendSearchQuery, user?.id],
   );
   const selectedFriend = useMemo(
     () => friends.find((item) => item.id === selectedFriendshipId) ?? null,
@@ -528,6 +528,7 @@ export function FriendsWorkspace({
         ) : (
           <GroupConversationListSection
             conversations={filteredGroupConversations}
+            currentUserId={user?.id ?? null}
             t={t}
             onOpenGroup={handleOpenGroupChat}
           />
@@ -643,10 +644,12 @@ function FriendListSection({
 
 function GroupConversationListSection({
   conversations,
+  currentUserId,
   t,
   onOpenGroup,
 }: {
   conversations: Conversation[];
+  currentUserId: string | null;
   t: ReturnType<typeof useI18n>['t'];
   onOpenGroup: (conversation: Conversation) => Promise<void>;
 }): JSX.Element {
@@ -661,7 +664,7 @@ function GroupConversationListSection({
             key={conversation.id}
             onClick={() => void onOpenGroup(conversation)}
           >
-            <GroupConversationSummary conversation={conversation} t={t} />
+            <GroupConversationSummary conversation={conversation} currentUserId={currentUserId} t={t} />
           </button>
         ))}
       </div>
@@ -671,21 +674,23 @@ function GroupConversationListSection({
 
 function GroupConversationSummary({
   conversation,
+  currentUserId,
   t,
 }: {
   conversation: Conversation;
+  currentUserId: string | null;
   t: ReturnType<typeof useI18n>['t'];
 }): JSX.Element {
   return (
     <div className="friend-user-summary group-conversation-summary">
       <UserAvatar
         userId={conversation.id}
-        displayName={getGroupConversationTitle(conversation, t)}
+        displayName={getGroupConversationTitle(conversation, t, currentUserId)}
         avatarUrl={null}
         size="sm"
       />
       <span className="friend-summary-text">
-        <strong className="friend-summary-name">{getGroupConversationTitle(conversation, t)}</strong>
+        <strong className="friend-summary-name">{getGroupConversationTitle(conversation, t, currentUserId)}</strong>
         <span className="friend-presence-line">{formatGroupConversationSubtitle(conversation, t)}</span>
       </span>
     </div>
@@ -1072,7 +1077,11 @@ function FriendSummary({
   );
 }
 
-function filterGroupConversations(conversations: Conversation[], query: string): Conversation[] {
+function filterGroupConversations(
+  conversations: Conversation[],
+  query: string,
+  currentUserId: string | null,
+): Conversation[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const groups = conversations.filter((conversation) => conversation.type === 'GROUP');
   if (!normalizedQuery) {
@@ -1080,15 +1089,19 @@ function filterGroupConversations(conversations: Conversation[], query: string):
   }
 
   return groups.filter((conversation) =>
-    getGroupConversationTitle(conversation, null).toLocaleLowerCase().includes(normalizedQuery),
+    getGroupConversationTitle(conversation, null, currentUserId).toLocaleLowerCase().includes(normalizedQuery),
   );
 }
 
 function getGroupConversationTitle(
   conversation: Conversation,
   t: ReturnType<typeof useI18n>['t'] | null,
+  currentUserId: string | null = null,
 ): string {
-  return conversation.title?.trim() || t?.('chat.groupConversation') || conversation.id;
+  const currentMemberRemark = currentUserId
+    ? conversation.members.find((member) => member.id === currentUserId)?.groupRemark?.trim()
+    : '';
+  return currentMemberRemark || conversation.title?.trim() || t?.('chat.groupConversation') || conversation.id;
 }
 
 function formatGroupConversationSubtitle(
@@ -1168,3 +1181,5 @@ function formatPresence(
 
   return `${Math.floor(diffMinutes / 60)} ${t('presence.hoursAgo')}`;
 }
+
+

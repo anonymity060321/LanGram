@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import type { MessageType, ServerMessageStatus } from '../api/conversations.api';
+import type { ConversationUser, MessageType, ServerMessageStatus } from '../api/conversations.api';
 import type { FileMetadataResponse } from '../api/files.api';
 
 export const REALTIME_EVENTS = {
@@ -12,6 +12,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
+  CONVERSATION_MEMBER_UPDATED: 'conversation:member-updated',
   FRIEND_REQUEST_CHANGED: 'friend:request:changed',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
@@ -103,6 +104,12 @@ export interface FriendRequestChangedPayload {
   reason: 'friend_request_changed';
 }
 
+export interface ConversationMemberUpdatedPayload {
+  conversationId: string;
+  reason: 'group_member_updated' | 'group_member_left';
+  member: ConversationUser;
+}
+
 export type RealtimeConnectionStatus =
   | 'online'
   | 'connecting'
@@ -118,6 +125,7 @@ interface RealtimeHandlers {
   onMessageEdited: (payload: MessageEditedPayload) => void;
   onPresenceUpdate: (payload: PresenceUpdatePayload) => void;
   onFriendRequestChanged?: (payload: FriendRequestChangedPayload) => void;
+  onConversationMemberUpdated?: (payload: ConversationMemberUpdatedPayload) => void;
   onSessionKicked: (payload: SessionKickedPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
   onConnectionStatusChange?: (status: RealtimeConnectionStatus) => void;
@@ -155,6 +163,9 @@ export function connectRealtime(
   socket.on(REALTIME_EVENTS.PRESENCE_UPDATE, handlers.onPresenceUpdate);
   if (handlers.onFriendRequestChanged) {
     socket.on(REALTIME_EVENTS.FRIEND_REQUEST_CHANGED, handlers.onFriendRequestChanged);
+  }
+  if (handlers.onConversationMemberUpdated) {
+    socket.on(REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED, handlers.onConversationMemberUpdated);
   }
   socket.on(REALTIME_EVENTS.SESSION_KICKED, handlers.onSessionKicked);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
@@ -206,3 +217,4 @@ function resolveSocketUrl(apiBaseUrl: string): string {
 
   return url.toString().replace(/\/+$/, '');
 }
+

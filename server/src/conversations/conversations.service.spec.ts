@@ -603,4 +603,226 @@ describe('ConversationsService', () => {
       ]),
     );
   });
+  it('allows an active group member to leave and returns remaining active members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(groupConversationFixture());
+    prisma.conversationMember.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.leaveGroup('user-a', 'group-conversation-id');
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          conversationId_userId: {
+            conversationId: 'group-conversation-id',
+            userId: 'user-a',
+          },
+        },
+        data: { leftAt: expect.any(Date) },
+      }),
+    );
+    expect(result).toMatchObject({
+      conversationId: 'group-conversation-id',
+      member: expect.objectContaining({ id: 'user-a', userId: 'user-a', leftAt: expect.any(Date) }),
+      remainingMemberIds: ['user-b', 'user-c'],
+    });
+  });
+
+  it('rejects leaving direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.leaveGroup('user-a', 'conversation-id')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects leaving group conversations for non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.leaveGroup('user-x', 'group-conversation-id')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group nickname updates after the member has left', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(
+      service.updateGroupNickname('user-a', 'group-conversation-id', 'Left User'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('queries only conversations where the current user is still active', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findMany.mockResolvedValue([]);
+    const service = createService(prisma);
+
+    await service.listConversations('user-a');
+
+    expect(prisma.conversation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { members: { some: { userId: 'user-a', leftAt: null } } },
+      }),
+    );
+  });
+  it('updates the current group member private remark and returns only that member remark', async () => {
+    const prisma = createMockPrisma();
+    const updatedConversation = {
+      ...(groupConversationFixture() as Record<string, unknown>),
+      members: [
+        {
+          groupNickname: null,
+          groupRemark: 'Ops Squad',
+          user: {
+            id: 'user-a',
+            email: 'user-a@example.test',
+            displayName: 'User A',
+            accountType: 'EMAIL',
+          },
+        },
+        {
+          groupNickname: null,
+          groupRemark: 'User B private remark',
+          user: {
+            id: 'user-b',
+            email: 'user-b@example.test',
+            displayName: 'User B',
+            accountType: 'EMAIL',
+          },
+        },
+      ],
+    };
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce(updatedConversation);
+    prisma.conversationMember.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupRemark('user-a', 'group-conversation-id', ' Ops Squad ') as {
+      members: Array<{ id: string; groupRemark: string | null }>;
+    };
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          conversationId_userId: {
+            conversationId: 'group-conversation-id',
+            userId: 'user-a',
+          },
+        },
+        data: { groupRemark: 'Ops Squad' },
+      }),
+    );
+    expect(result.members.find((member) => member.id === 'user-a')).toMatchObject({
+      groupRemark: 'Ops Squad',
+    });
+    expect(result.members.find((member) => member.id === 'user-b')).toMatchObject({
+      groupRemark: null,
+    });
+  });
+
+  it('clears the current group member private remark for blank input', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce(groupConversationFixture());
+    prisma.conversationMember.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    await service.updateGroupRemark('user-a', 'group-conversation-id', '   ');
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { groupRemark: null } }),
+    );
+  });
+
+  it('rejects group remark updates for non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(
+      service.updateGroupRemark('user-x', 'group-conversation-id', 'Hidden'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group remark updates after the member has left', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(
+      service.updateGroupRemark('user-a', 'group-conversation-id', 'Left User'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group remark updates for direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(
+      service.updateGroupRemark('user-a', 'conversation-id', 'Direct Remark'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('lists only the current user private group remark', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findMany.mockResolvedValue([
+      {
+        ...(groupConversationFixture() as Record<string, unknown>),
+        members: [
+          {
+            groupNickname: null,
+            groupRemark: 'My Room',
+            user: {
+              id: 'user-a',
+              email: 'user-a@example.test',
+              displayName: 'User A',
+              accountType: 'EMAIL',
+            },
+          },
+          {
+            groupNickname: null,
+            groupRemark: 'Other Private Room',
+            user: {
+              id: 'user-b',
+              email: 'user-b@example.test',
+              displayName: 'User B',
+              accountType: 'EMAIL',
+            },
+          },
+        ],
+      },
+    ]);
+    prisma.message.findFirst.mockResolvedValue(null);
+    prisma.messageDelivery.count.mockResolvedValue(0);
+    const service = createService(prisma);
+
+    const result = await service.listConversations('user-a') as {
+      conversations: Array<{ members: Array<{ id: string; groupRemark: string | null }> }>;
+    };
+
+    expect(result.conversations[0].members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'user-a', groupRemark: 'My Room' }),
+        expect.objectContaining({ id: 'user-b', groupRemark: null }),
+      ]),
+    );
+  });
 });
+
+

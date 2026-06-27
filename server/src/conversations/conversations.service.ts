@@ -31,7 +31,29 @@ type ConversationWithMembers = {
   title: string | null;
   createdAt: Date;
   updatedAt: Date;
-  members: Array<{ groupNickname: string | null; user: UserSummary }>;
+  members: Array<{ groupNickname: string | null; groupRemark: string | null; leftAt: Date | null; user: UserSummary }>;
+};
+
+export type GroupMemberRealtimeDto = {
+  id: string;
+  userId: string;
+  email: string | null;
+  displayName: string | null;
+  statusMessage?: string | null;
+  avatarUrl?: string | null;
+  accountType?: string;
+  isOnline?: boolean;
+  lastSeenAt?: Date | string | null;
+  groupNickname?: string | null;
+  groupRemark?: string | null;
+  leftAt?: Date | string | null;
+};
+
+export type LeaveGroupResult = {
+  conversationId: string;
+  leftAt: Date;
+  member: GroupMemberRealtimeDto;
+  remainingMemberIds: string[];
 };
 
 type ConversationListItem = ConversationWithMembers & {
@@ -271,6 +293,101 @@ export class ConversationsService {
     return this.toConversationDto(updatedConversation as unknown as ConversationWithMembers, userId);
   }
 
+  async updateGroupRemark(
+    userId: string,
+    conversationId: string,
+    groupRemark: string | null | undefined,
+  ): Promise<unknown> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    if (conversation.type !== ConversationType.GROUP) {
+      throw new BadRequestException('Group remark can only be set for group conversations');
+    }
+
+    const normalizedRemark = groupRemark?.trim() || null;
+    await this.prisma.conversationMember.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: { groupRemark: normalizedRemark },
+    });
+
+    const updatedConversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!updatedConversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    return this.toConversationDto(updatedConversation as unknown as ConversationWithMembers, userId);
+  }
+  async leaveGroup(userId: string, conversationId: string): Promise<LeaveGroupResult> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    if (conversation.type !== ConversationType.GROUP) {
+      throw new BadRequestException('Only group conversations can be left');
+    }
+
+    const typedConversation = conversation as unknown as ConversationWithMembers;
+    const leavingMember = typedConversation.members.find((member) => member.user.id === userId);
+    if (!leavingMember) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    const leftAt = new Date();
+    await this.prisma.conversationMember.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId,
+        },
+      },
+      data: { leftAt },
+    });
+
+    return {
+      conversationId,
+      leftAt,
+      member: this.toConversationMemberDto(
+        leavingMember.user,
+        leavingMember.groupNickname,
+        leavingMember.groupRemark,
+        leftAt,
+      ) as GroupMemberRealtimeDto,
+      remainingMemberIds: typedConversation.members
+        .map((member) => member.user.id)
+        .filter((memberUserId) => memberUserId !== userId),
+    };
+  }
+
   async listMessages(
     userId: string,
     conversationId: string,
@@ -395,6 +512,8 @@ export class ConversationsService {
         where: { leftAt: null },
         select: {
           groupNickname: true,
+          groupRemark: true,
+          leftAt: true,
           user: { select: this.userSelect() },
         },
         orderBy: { joinedAt: 'asc' },
@@ -475,7 +594,12 @@ export class ConversationsService {
       title: conversation.title,
       peer: peer ? this.toUserDto(peer) : null,
       members: conversation.members.map((member) =>
-        this.toConversationMemberDto(member.user, member.groupNickname),
+        this.toConversationMemberDto(
+          member.user,
+          member.groupNickname,
+          member.user.id === currentUserId ? member.groupRemark : null,
+          member.leftAt,
+        ),
       ),
       memberCount: conversation.members.length,
       lastMessage: listItem.lastMessage ? this.toMessageDto(listItem.lastMessage) : null,
@@ -501,10 +625,18 @@ export class ConversationsService {
     };
   }
 
-  private toConversationMemberDto(user: UserSummary, groupNickname: string | null): unknown {
+  private toConversationMemberDto(
+    user: UserSummary,
+    groupNickname: string | null,
+    groupRemark: string | null,
+    leftAt: Date | null = null,
+  ): unknown {
     return {
       ...(this.toUserDto(user) as Record<string, unknown>),
+      userId: user.id,
       groupNickname,
+      groupRemark,
+      leftAt,
     };
   }
 
@@ -556,3 +688,12 @@ export class ConversationsService {
     return userId < friendUserId ? [userId, friendUserId] : [friendUserId, userId];
   }
 }
+
+
+
+
+
+
+
+
+

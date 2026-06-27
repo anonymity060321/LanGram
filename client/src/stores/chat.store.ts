@@ -4,7 +4,9 @@ import {
   createGroupConversation,
   listConversations,
   listMessages,
+  leaveGroupConversation as requestLeaveGroupConversation,
   updateGroupNickname as requestUpdateGroupNickname,
+  updateGroupRemark as requestUpdateGroupRemark,
   type Conversation,
   type EncryptedMessage,
   type MessageType,
@@ -33,6 +35,7 @@ import {
   sendRealtimeMessage,
   sendRealtimeRead,
   sendRealtimeRecall,
+  type ConversationMemberUpdatedPayload,
   type MessageDeliveredPayload,
   type MessageEditedPayload,
   type MessageNewPayload,
@@ -116,6 +119,8 @@ interface ChatState {
   clearLocalConversation: (conversationId: string) => void;
   setSearchQuery: (query: string) => void;
   updateGroupNickname: (conversationId: string, groupNickname: string | null) => Promise<boolean>;
+  updateGroupRemark: (conversationId: string, groupRemark: string | null) => Promise<boolean>;
+  leaveGroup: (conversationId: string) => Promise<boolean>;
   updatePresence: (payload: PresenceUpdatePayload) => void;
 }
 
@@ -508,6 +513,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onFriendRequestChanged: () => {
         window.dispatchEvent(new Event('langram:friend-request-changed'));
       },
+      onConversationMemberUpdated: (payload) => {
+        handleConversationMemberUpdated(payload, set);
+      },
       onSessionKicked,
       onError: (payload) => {
         handleRealtimeError(payload, set);
@@ -862,6 +870,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return true;
     } catch {
       set({ error: 'Failed to save group nickname' });
+      return false;
+    }
+  },
+  updateGroupRemark: async (conversationId, groupRemark) => {
+    set({ error: null });
+    try {
+      const conversation = await requestUpdateGroupRemark(conversationId, groupRemark);
+      let nextConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (nextConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+        )),
+      }));
+      void cacheConversationSummaries(nextConversations);
+      return true;
+    } catch {
+      set({ error: 'Failed to save group remark' });
+      return false;
+    }
+  },
+  leaveGroup: async (conversationId) => {
+    set({ error: null });
+    try {
+      await requestLeaveGroupConversation(conversationId);
+      let nextConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (nextConversations = state.conversations.filter(
+          (conversation) => conversation.id !== conversationId,
+        )),
+        selectedConversationId:
+          state.selectedConversationId === conversationId ? null : state.selectedConversationId,
+        isLoadingMessages:
+          state.selectedConversationId === conversationId ? false : state.isLoadingMessages,
+        searchQuery: state.selectedConversationId === conversationId ? '' : state.searchQuery,
+      }));
+      void cacheConversationSummaries(nextConversations);
+      return true;
+    } catch {
+      set({ error: 'Failed to leave group' });
       return false;
     }
   },
@@ -1940,6 +1988,53 @@ function upsertOpenedConversation(
   });
 }
 
+function handleConversationMemberUpdated(
+  payload: ConversationMemberUpdatedPayload,
+  set: ChatSet,
+): void {
+  let nextConversations: Conversation[] = [];
+  set((state) => ({
+    conversations: (nextConversations = state.conversations.map((conversation) => {
+      if (conversation.id !== payload.conversationId || conversation.type !== 'GROUP') {
+        return conversation;
+      }
+
+      return patchConversationMember(conversation, payload.member, payload.reason);
+    })),
+  }));
+  void cacheConversationSummaries(nextConversations);
+}
+
+function patchConversationMember(
+  conversation: Conversation,
+  member: Conversation['members'][number],
+  reason: ConversationMemberUpdatedPayload['reason'],
+): Conversation {
+  const memberId = member.id ?? member.userId;
+  let didUpdate = false;
+  const members = conversation.members.map((item) => {
+    if (item.id !== memberId) {
+      return item;
+    }
+
+    didUpdate = true;
+    return { ...item, ...member };
+  });
+
+  if (!didUpdate && reason !== 'group_member_left') {
+    return conversation;
+  }
+
+  const nextMembers = didUpdate ? members : [...members, member];
+  const activeMemberCount = nextMembers.filter((item) => !item.leftAt).length;
+
+  return {
+    ...conversation,
+    members: nextMembers,
+    memberCount: activeMemberCount,
+  };
+}
+
 function updateConversationPresence(
   conversation: Conversation,
   payload: PresenceUpdatePayload,
@@ -2048,3 +2143,11 @@ function markOwnMessagesReadThrough(
     }),
   };
 }
+
+
+
+
+
+
+
+
