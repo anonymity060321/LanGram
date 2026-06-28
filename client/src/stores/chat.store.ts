@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import {
+  addGroupMembers as requestAddGroupMembers,
   createDirectConversation,
   createGroupConversation,
   listConversations,
@@ -120,6 +121,7 @@ interface ChatState {
   setSearchQuery: (query: string) => void;
   updateGroupNickname: (conversationId: string, groupNickname: string | null) => Promise<boolean>;
   updateGroupRemark: (conversationId: string, groupRemark: string | null) => Promise<boolean>;
+  addGroupMembers: (conversationId: string, userIds: string[]) => Promise<void>;
   leaveGroup: (conversationId: string) => Promise<boolean>;
   updatePresence: (payload: PresenceUpdatePayload) => void;
 }
@@ -854,6 +856,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   setSearchQuery: (query) => {
     set({ searchQuery: query });
+  },
+  addGroupMembers: async (conversationId, userIds) => {
+    set({ error: null });
+    try {
+      const conversation = await requestAddGroupMembers(conversationId, userIds);
+      let nextConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (nextConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+        )),
+      }));
+      void cacheConversationSummaries(nextConversations);
+    } catch {
+      set({ error: 'Failed to add group members' });
+      throw new Error('Failed to add group members');
+    }
   },
   updateGroupNickname: async (conversationId, groupNickname) => {
     set({ error: null });
@@ -1958,19 +1977,26 @@ function upsertConversation(
   conversations: Conversation[],
   conversation: Conversation,
 ): Conversation[] {
-  const index = conversations.findIndex((item) => item.id === conversation.id);
+  const normalizedConversation = normalizeConversationMembers(conversation);
+  const index = conversations.findIndex((item) => item.id === normalizedConversation.id);
   if (index === -1) {
-    return [conversation, ...conversations];
+    return [normalizedConversation, ...conversations];
   }
 
   const next = [...conversations];
-  next[index] = conversation;
+  next[index] = normalizedConversation;
   return next;
 }
+
+type UpsertOpenedConversationOptions = {
+  currentUserId?: string | null;
+  preserveCurrentUserGroupRemark?: boolean;
+};
 
 function upsertOpenedConversation(
   conversations: Conversation[],
   conversation: Conversation,
+  options: UpsertOpenedConversationOptions = {},
 ): Conversation[] {
   const existing = conversations.find((item) => item.id === conversation.id);
   if (!existing) {
@@ -1980,6 +2006,7 @@ function upsertOpenedConversation(
   return upsertConversation(conversations, {
     ...existing,
     ...conversation,
+    members: mergeConversationMembers(existing, conversation, options),
     lastMessage: conversation.lastMessage ?? existing.lastMessage,
     lastMessageAt: conversation.lastMessageAt ?? existing.lastMessageAt,
     lastMessagePlaintext: conversation.lastMessagePlaintext ?? existing.lastMessagePlaintext,
@@ -1988,20 +2015,86 @@ function upsertOpenedConversation(
   });
 }
 
+function normalizeConversationMembers(conversation: Conversation): Conversation {
+  const membersById = new Map<string, Conversation['members'][number]>();
+  for (const member of conversation.members) {
+    const memberId = member.id ?? member.userId;
+    if (!memberId) {
+      continue;
+    }
+
+    membersById.set(memberId, { ...member, id: memberId });
+  }
+  const members = Array.from(membersById.values());
+
+  return {
+    ...conversation,
+    members,
+    memberCount: conversation.type === 'GROUP'
+      ? members.filter((member) => !member.leftAt).length
+      : conversation.memberCount,
+  };
+}
+
+function mergeConversationMembers(
+  existing: Conversation,
+  incoming: Conversation,
+  options: UpsertOpenedConversationOptions,
+): Conversation['members'] {
+  const existingMembersById = new Map(
+    existing.members.map((member) => [member.id ?? member.userId, member]),
+  );
+
+  return incoming.members.map((member) => {
+    const memberId = member.id ?? member.userId;
+    const existingMember = memberId ? existingMembersById.get(memberId) : undefined;
+    if (
+      options.preserveCurrentUserGroupRemark &&
+      options.currentUserId &&
+      memberId === options.currentUserId &&
+      member.groupRemark == null &&
+      existingMember?.groupRemark
+    ) {
+      return { ...member, groupRemark: existingMember.groupRemark };
+    }
+
+    return member;
+  });
+}
 function handleConversationMemberUpdated(
   payload: ConversationMemberUpdatedPayload,
   set: ChatSet,
 ): void {
   let nextConversations: Conversation[] = [];
-  set((state) => ({
-    conversations: (nextConversations = state.conversations.map((conversation) => {
+  set((state) => {
+    if (payload.reason === 'group_member_added') {
+      const currentUserId = state.currentUserId;
+      const isCurrentUserMember = Boolean(
+        currentUserId && payload.conversation.members.some((member) => member.id === currentUserId && !member.leftAt),
+      );
+
+      if (!isCurrentUserMember) {
+        nextConversations = state.conversations;
+        return {};
+      }
+
+      nextConversations = upsertOpenedConversation(state.conversations, payload.conversation, {
+        currentUserId,
+        preserveCurrentUserGroupRemark: true,
+      });
+      return { conversations: nextConversations };
+    }
+
+    nextConversations = state.conversations.map((conversation) => {
       if (conversation.id !== payload.conversationId || conversation.type !== 'GROUP') {
         return conversation;
       }
 
       return patchConversationMember(conversation, payload.member, payload.reason);
-    })),
-  }));
+    });
+
+    return { conversations: nextConversations };
+  });
   void cacheConversationSummaries(nextConversations);
 }
 

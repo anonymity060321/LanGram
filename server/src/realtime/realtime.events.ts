@@ -65,23 +65,29 @@ export interface FriendRequestChangedPayload {
   reason: 'friend_request_changed';
 }
 
-export interface ConversationMemberUpdatedPayload {
-  conversationId: string;
-  reason: 'group_member_updated' | 'group_member_left';
-  member: {
-    id: string;
-    userId?: string;
-    email: string | null;
-    displayName: string | null;
-    statusMessage?: string | null;
-    avatarUrl?: string | null;
-    accountType?: string;
-    isOnline?: boolean;
-    lastSeenAt?: string | null;
-    groupNickname?: string | null;
-    leftAt?: string | Date | null;
-  };
-}
+export type ConversationMemberUpdatedPayload =
+  | {
+      conversationId: string;
+      reason: 'group_member_updated' | 'group_member_left';
+      member: {
+        id: string;
+        userId?: string;
+        email: string | null;
+        displayName: string | null;
+        statusMessage?: string | null;
+        avatarUrl?: string | null;
+        accountType?: string;
+        isOnline?: boolean;
+        lastSeenAt?: string | null;
+        groupNickname?: string | null;
+        leftAt?: string | Date | null;
+      };
+    }
+  | {
+      conversationId: string;
+      reason: 'group_member_added';
+      conversation: unknown;
+    };
 
 export interface PresenceUpdatePayload {
   userId: string;

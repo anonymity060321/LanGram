@@ -56,6 +56,12 @@ export type LeaveGroupResult = {
   remainingMemberIds: string[];
 };
 
+export type AddGroupMembersResult = {
+  conversationId: string;
+  conversation: unknown;
+  recipientConversations: Array<{ userId: string; conversation: unknown }>;
+};
+
 type ConversationListItem = ConversationWithMembers & {
   lastMessage: MessageRecord | null;
   lastMessageAt: Date | null;
@@ -246,6 +252,127 @@ export class ConversationsService {
     return this.toConversationDto(conversation as unknown as ConversationWithMembers, userId);
   }
 
+  async addGroupMembers(
+    userId: string,
+    conversationId: string,
+    memberUserIds: string[],
+  ): Promise<AddGroupMembersResult> {
+    const uniqueMemberIds = Array.from(
+      new Set(memberUserIds.map((memberUserId) => memberUserId.trim()).filter(Boolean)),
+    );
+
+    if (uniqueMemberIds.length < 1) {
+      throw new BadRequestException('At least one group member is required');
+    }
+
+    if (uniqueMemberIds.includes(userId)) {
+      throw new BadRequestException('Cannot add yourself to a group');
+    }
+
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        id: true,
+        type: true,
+        members: {
+          select: {
+            userId: true,
+            leftAt: true,
+          },
+        },
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (conversation.type !== ConversationType.GROUP) {
+      throw new BadRequestException('Only group conversations can add members');
+    }
+
+    const activeMemberIds = new Set(
+      conversation.members
+        .filter((member) => member.leftAt === null)
+        .map((member) => member.userId),
+    );
+    if (!activeMemberIds.has(userId)) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    if (uniqueMemberIds.some((memberUserId) => activeMemberIds.has(memberUserId))) {
+      throw new BadRequestException('One or more users are already active group members');
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: uniqueMemberIds },
+        status: UserStatus.ACTIVE,
+      },
+      select: { id: true },
+    });
+    const foundUserIds = new Set(users.map((user) => user.id));
+    if (uniqueMemberIds.some((memberUserId) => !foundUserIds.has(memberUserId))) {
+      throw new BadRequestException('One or more group members do not exist');
+    }
+
+    await Promise.all(
+      uniqueMemberIds.map((memberUserId) => this.assertFriendship(userId, memberUserId)),
+    );
+
+    const existingMemberIds = new Set(conversation.members.map((member) => member.userId));
+    const rejoiningMemberIds = uniqueMemberIds.filter((memberUserId) =>
+      existingMemberIds.has(memberUserId),
+    );
+    const newMemberIds = uniqueMemberIds.filter((memberUserId) => !existingMemberIds.has(memberUserId));
+    const joinedAt = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await Promise.all([
+        ...rejoiningMemberIds.map((memberUserId) =>
+          tx.conversationMember.update({
+            where: {
+              conversationId_userId: {
+                conversationId,
+                userId: memberUserId,
+              },
+            },
+            data: {
+              leftAt: null,
+              joinedAt,
+            },
+          }),
+        ),
+        ...newMemberIds.map((memberUserId) =>
+          tx.conversationMember.create({
+            data: {
+              conversationId,
+              userId: memberUserId,
+              role: ConversationMemberRole.MEMBER,
+              joinedAt,
+            },
+          }),
+        ),
+        tx.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: joinedAt },
+        }),
+      ]);
+    });
+
+    const updatedConversation = await this.findAccessibleConversation(conversationId, userId);
+    const activeRecipientIds = Array.from(new Set([...activeMemberIds, ...uniqueMemberIds]));
+    const recipientConversations = activeRecipientIds.map((recipientId) => ({
+      userId: recipientId,
+      conversation: this.toConversationDto(updatedConversation, recipientId),
+    }));
+
+    return {
+      conversationId,
+      conversation: this.toConversationDto(updatedConversation, userId),
+      recipientConversations,
+    };
+  }
   async updateGroupNickname(
     userId: string,
     conversationId: string,
@@ -484,6 +611,24 @@ export class ConversationsService {
     }
   }
 
+  private async findAccessibleConversation(
+    conversationId: string,
+    userId: string,
+  ): Promise<ConversationWithMembers> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    return conversation as unknown as ConversationWithMembers;
+  }
   private async findMessageInConversation(
     conversationId: string,
     messageId: string,

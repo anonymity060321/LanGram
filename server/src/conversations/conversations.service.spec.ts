@@ -24,11 +24,13 @@ interface MockPrisma {
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     create: MockFunction<(args: unknown) => Promise<unknown>>;
+    update: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   conversationMember: {
     findFirst: MockFunction<(args: unknown) => Promise<unknown>>;
     findUnique: MockFunction<(args: unknown) => Promise<unknown>>;
     update: MockFunction<(args: unknown) => Promise<unknown>>;
+    create: MockFunction<(args: unknown) => Promise<unknown>>;
   };
   message: {
     findMany: MockFunction<(args: unknown) => Promise<unknown[]>>;
@@ -53,11 +55,13 @@ function createMockPrisma(): MockPrisma {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     conversationMember: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      create: jest.fn(),
     },
     message: {
       findMany: jest.fn(),
@@ -72,6 +76,10 @@ function createMockPrisma(): MockPrisma {
   prisma.$transaction = jest.fn(async (args: unknown): Promise<unknown> => {
     if (Array.isArray(args)) {
       return Promise.all(args);
+    }
+
+    if (typeof args === 'function') {
+      return (args as (tx: MockPrisma) => Promise<unknown>)(prisma);
     }
 
     return undefined;
@@ -822,6 +830,229 @@ describe('ConversationsService', () => {
         expect.objectContaining({ id: 'user-b', groupRemark: null }),
       ]),
     );
+  });
+  it('allows an active group member to add a friend to a group', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      members: [
+        { userId: 'user-a', leftAt: null },
+        { userId: 'user-b', leftAt: null },
+      ],
+    });
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-c' }]);
+    prisma.friendship.findUnique.mockResolvedValue({ id: 'friendship-id' });
+    prisma.conversationMember.create.mockResolvedValue({});
+    prisma.conversation.update.mockResolvedValue({});
+    prisma.conversation.findFirst.mockResolvedValue(groupConversationFixture());
+    const service = createService(prisma);
+
+    const result = await service.addGroupMembers('user-a', 'group-conversation-id', ['user-c']) as {
+      conversation: { memberCount: number; members: Array<{ id: string }> };
+      recipientConversations: Array<{ userId: string }>;
+    };
+
+    expect(prisma.conversationMember.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          conversationId: 'group-conversation-id',
+          userId: 'user-c',
+          role: ConversationMemberRole.MEMBER,
+        }),
+      }),
+    );
+    expect(result.conversation.memberCount).toBe(3);
+    expect(result.conversation.members).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'user-c' })]));
+    expect(result.recipientConversations.map((item) => item.userId).sort()).toEqual([
+      'user-a',
+      'user-b',
+      'user-c',
+    ]);
+  });
+
+  it('rejects adding members to direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'conversation-id',
+      type: ConversationType.DIRECT,
+      members: [
+        { userId: 'user-a', leftAt: null },
+        { userId: 'user-b', leftAt: null },
+      ],
+    });
+    const service = createService(prisma);
+
+    await expect(service.addGroupMembers('user-a', 'conversation-id', ['user-c'])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversationMember.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding members when the operator is not a group member', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      members: [
+        { userId: 'user-a', leftAt: null },
+        { userId: 'user-b', leftAt: null },
+      ],
+    });
+    const service = createService(prisma);
+
+    await expect(service.addGroupMembers('user-x', 'group-conversation-id', ['user-c'])).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversationMember.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding members after the operator has left the group', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      members: [
+        { userId: 'user-a', leftAt: new Date('2026-06-27T08:00:00.000Z') },
+        { userId: 'user-b', leftAt: null },
+      ],
+    });
+    const service = createService(prisma);
+
+    await expect(service.addGroupMembers('user-a', 'group-conversation-id', ['user-c'])).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversationMember.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding a non-friend to a group', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      members: [{ userId: 'user-a', leftAt: null }],
+    });
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-c' }]);
+    prisma.friendship.findUnique.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.addGroupMembers('user-a', 'group-conversation-id', ['user-c'])).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversationMember.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding yourself to a group', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(service.addGroupMembers('user-a', 'group-conversation-id', ['user-a'])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding an active existing group member', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      members: [
+        { userId: 'user-a', leftAt: null },
+        { userId: 'user-b', leftAt: null },
+      ],
+    });
+    const service = createService(prisma);
+
+    await expect(service.addGroupMembers('user-a', 'group-conversation-id', ['user-b'])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversationMember.create).not.toHaveBeenCalled();
+  });
+
+  it('can re-add a member whose leftAt is not null', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+      members: [
+        { userId: 'user-a', leftAt: null },
+        { userId: 'user-c', leftAt: new Date('2026-06-27T08:00:00.000Z') },
+      ],
+    });
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-c' }]);
+    prisma.friendship.findUnique.mockResolvedValue({ id: 'friendship-id' });
+    prisma.conversationMember.update.mockResolvedValue({});
+    prisma.conversation.update.mockResolvedValue({});
+    prisma.conversation.findFirst.mockResolvedValue({
+      ...(groupConversationFixture() as Record<string, unknown>),
+      members: [
+        {
+          groupNickname: null,
+          groupRemark: null,
+          leftAt: null,
+          user: {
+            id: 'user-a',
+            email: 'user-a@example.test',
+            displayName: 'User A',
+            accountType: 'EMAIL',
+          },
+        },
+        {
+          groupNickname: null,
+          groupRemark: null,
+          leftAt: null,
+          user: {
+            id: 'user-c',
+            email: 'user-c@example.test',
+            displayName: 'User C',
+            accountType: 'EMAIL',
+          },
+        },
+      ],
+    });
+    const service = createService(prisma);
+
+    const result = await service.addGroupMembers('user-a', 'group-conversation-id', ['user-c']) as {
+      conversation: { members: Array<{ id: string; leftAt: string | null }> };
+    };
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          conversationId_userId: {
+            conversationId: 'group-conversation-id',
+            userId: 'user-c',
+          },
+        },
+        data: { leftAt: null, joinedAt: expect.any(Date) },
+      }),
+    );
+    expect(result.conversation.members.find((member) => member.id === 'user-c')).toMatchObject({
+      leftAt: null,
+    });
+  });
+
+  it('lists conversations for a newly added member after membership exists', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findMany.mockResolvedValue([groupConversationFixture()]);
+    prisma.message.findFirst.mockResolvedValue(null);
+    prisma.messageDelivery.count.mockResolvedValue(0);
+    const service = createService(prisma);
+
+    const result = await service.listConversations('user-c') as {
+      conversations: Array<{ id: string; type: ConversationType }>;
+    };
+
+    expect(prisma.conversation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { members: { some: { userId: 'user-c', leftAt: null } } },
+      }),
+    );
+    expect(result.conversations[0]).toMatchObject({
+      id: 'group-conversation-id',
+      type: ConversationType.GROUP,
+    });
   });
 });
 

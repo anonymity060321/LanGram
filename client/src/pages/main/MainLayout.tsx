@@ -139,6 +139,7 @@ export function MainLayout(): JSX.Element {
   const updateGroupNickname = useChatStore((state) => state.updateGroupNickname);
   const updateGroupRemark = useChatStore((state) => state.updateGroupRemark);
   const leaveGroup = useChatStore((state) => state.leaveGroup);
+  const addGroupMembers = useChatStore((state) => state.addGroupMembers);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [hasLoadedFriends, setHasLoadedFriends] = useState(false);
   const [trustedFriendPeerId, setTrustedFriendPeerId] = useState<string | null>(null);
@@ -161,6 +162,12 @@ export function MainLayout(): JSX.Element {
   const [isSavingGroupNickname, setIsSavingGroupNickname] = useState(false);
   const [isSavingGroupRemark, setIsSavingGroupRemark] = useState(false);
   const [isLeavingGroup, setIsLeavingGroup] = useState(false);
+  const [isAddingGroupMembers, setIsAddingGroupMembers] = useState(false);
+  const [isGroupInviteDialogOpen, setIsGroupInviteDialogOpen] = useState(false);
+  const [selectedGroupMemberAddIds, setSelectedGroupMemberAddIds] = useState<string[]>([]);
+  const [addGroupMembersError, setAddGroupMembersError] = useState<string | null>(null);
+  const [addGroupMembersNotice, setAddGroupMembersNotice] = useState<string | null>(null);
+  const [groupInviteSearchQuery, setGroupInviteSearchQuery] = useState('');
   const [isSendShortcutMenuOpen, setIsSendShortcutMenuOpen] = useState(false);
   const [isEmojiPanelOpen, setIsEmojiPanelOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
@@ -657,6 +664,14 @@ export function MainLayout(): JSX.Element {
   }, [selectedConversationId]);
 
   useEffect(() => {
+    setIsGroupInviteDialogOpen(false);
+    setSelectedGroupMemberAddIds([]);
+    setGroupInviteSearchQuery('');
+    setAddGroupMembersError(null);
+    setAddGroupMembersNotice(null);
+  }, [selectedConversationId]);
+
+  useEffect(() => {
     function notifyVisibilityChange(): void {
       setPageAttentionKey((current) => current + 1);
     }
@@ -691,6 +706,32 @@ export function MainLayout(): JSX.Element {
       ),
     [conversations, friends],
   );
+  const groupInviteActiveMemberIds = useMemo(() => {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return new Set<string>();
+    }
+
+    return new Set(
+      selectedConversation.members
+        .filter((member) => !member.leftAt)
+        .map((member) => member.id),
+    );
+  }, [selectedConversation]);
+  const groupInviteFriends = useMemo(() => {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP' || !user?.id) {
+      return [];
+    }
+
+    return friends.filter((friendship) => friendship.friend.id !== user.id);
+  }, [friends, selectedConversation, user?.id]);
+  const availableGroupMemberFriends = useMemo(
+    () => groupInviteFriends.filter((friendship) => !groupInviteActiveMemberIds.has(friendship.friend.id)),
+    [groupInviteActiveMemberIds, groupInviteFriends],
+  );
+  useEffect(() => {
+    const availableIds = new Set(availableGroupMemberFriends.map((friendship) => friendship.friend.id));
+    setSelectedGroupMemberAddIds((current) => current.filter((userId) => availableIds.has(userId)));
+  }, [availableGroupMemberFriends]);
   const forwardTargets = useMemo(
     () => buildForwardTargets(
       conversations,
@@ -1422,6 +1463,55 @@ export function MainLayout(): JSX.Element {
       return next;
     });
   }
+  function togglePendingGroupMember(friendUserId: string): void {
+    if (groupInviteActiveMemberIds.has(friendUserId)) {
+      return;
+    }
+
+    setSelectedGroupMemberAddIds((current) =>
+      current.includes(friendUserId)
+        ? current.filter((memberUserId) => memberUserId !== friendUserId)
+        : [...current, friendUserId],
+    );
+    setAddGroupMembersError(null);
+    setAddGroupMembersNotice(null);
+  }
+
+  function cancelAddGroupMembers(): void {
+    if (isAddingGroupMembers) {
+      return;
+    }
+
+    setIsGroupInviteDialogOpen(false);
+    setSelectedGroupMemberAddIds([]);
+    setGroupInviteSearchQuery('');
+    setAddGroupMembersError(null);
+  }
+
+  async function submitAddGroupMembers(): Promise<void> {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP') {
+      return;
+    }
+
+    if (selectedGroupMemberAddIds.length === 0) {
+      return;
+    }
+
+    setIsAddingGroupMembers(true);
+    setAddGroupMembersError(null);
+    setAddGroupMembersNotice(null);
+    try {
+      await addGroupMembers(selectedConversation.id, selectedGroupMemberAddIds);
+      setIsGroupInviteDialogOpen(false);
+      setSelectedGroupMemberAddIds([]);
+      setGroupInviteSearchQuery('');
+      setAddGroupMembersNotice(t('chat.groupMemberInvited'));
+    } catch {
+      setAddGroupMembersError(t('chat.inviteMembersFailed'));
+    } finally {
+      setIsAddingGroupMembers(false);
+    }
+  }
   async function handleLoadOlderMessages(): Promise<boolean> {
     if (!user || !selectedConversationId) {
       return false;
@@ -2010,10 +2100,32 @@ export function MainLayout(): JSX.Element {
         {isSelectedConversationGroup && selectedConversation ? (
           <GroupMemberPanel
             members={selectedConversation.members}
+            notice={addGroupMembersNotice}
             t={t}
+            onInvite={() => {
+              setIsGroupInviteDialogOpen(true);
+              setAddGroupMembersError(null);
+              setAddGroupMembersNotice(null);
+              setGroupInviteSearchQuery('');
+            }}
           />
         ) : null}
       </aside>
+      {isSelectedConversationGroup && selectedConversation && isGroupInviteDialogOpen ? (
+        <GroupInviteDialog
+          friends={groupInviteFriends}
+          activeMemberIds={groupInviteActiveMemberIds}
+          selectedIds={selectedGroupMemberAddIds}
+          searchQuery={groupInviteSearchQuery}
+          isSubmitting={isAddingGroupMembers}
+          error={addGroupMembersError}
+          t={t}
+          onToggleFriend={togglePendingGroupMember}
+          onSearchQueryChange={setGroupInviteSearchQuery}
+          onCancel={cancelAddGroupMembers}
+          onSubmit={() => void submitAddGroupMembers()}
+        />
+      ) : null}
         </>
       )}
       {activeView === 'messages' && conversationContextMenu
@@ -2416,16 +2528,30 @@ function findMessageAvatarProfile(
 
 function GroupMemberPanel({
   members,
+  notice,
   t,
+  onInvite,
 }: {
   members: Conversation['members'];
+  notice: string | null;
   t: ReturnType<typeof useI18n>['t'];
+  onInvite: () => void;
 }): JSX.Element {
   const activeMembers = members.filter((member) => !member.leftAt);
 
   return (
     <section className="profile-group-section" aria-label={t('chat.groupMemberList')}>
-      <h2>{t('chat.groupMemberList')}</h2>
+      <header className="profile-group-section-header">
+        <h2>{t('chat.groupMemberList')}</h2>
+        <button
+          type="button"
+          className="profile-group-add-button"
+          onClick={onInvite}
+        >
+          {t('chat.inviteGroupMembers')}
+        </button>
+      </header>
+      {notice ? <p className="profile-group-add-notice">{notice}</p> : null}
       {activeMembers.length === 0 ? <p>{t('chat.noGroupMembers')}</p> : null}
       {activeMembers.length > 0 ? (
         <div className="profile-group-member-list">
@@ -2448,7 +2574,197 @@ function GroupMemberPanel({
   );
 }
 
-function getMemberDisplayName(member: Conversation['members'][number]): string {
+function GroupInviteDialog({
+  friends,
+  activeMemberIds,
+  selectedIds,
+  searchQuery,
+  isSubmitting,
+  error,
+  t,
+  onToggleFriend,
+  onSearchQueryChange,
+  onCancel,
+  onSubmit,
+}: {
+  friends: FriendItem[];
+  activeMemberIds: Set<string>;
+  selectedIds: string[];
+  searchQuery: string;
+  isSubmitting: boolean;
+  error: string | null;
+  t: ReturnType<typeof useI18n>['t'];
+  onToggleFriend: (friendUserId: string) => void;
+  onSearchQueryChange: (query: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const visibleFriends = normalizedSearchQuery
+    ? friends.filter((friendship) => {
+      const friend = friendship.friend;
+      const label = `${friend.displayName ?? ''} ${friend.email ?? ''} ${friend.id}`.toLowerCase();
+      return label.includes(normalizedSearchQuery);
+    })
+    : friends;
+  const selectedFriends = selectedIds
+    .map((friendUserId) => friends.find((friendship) => friendship.friend.id === friendUserId))
+    .filter((friendship): friendship is FriendItem => Boolean(friendship));
+
+  return (
+    <div
+      className="group-invite-dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <section
+        className="group-invite-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="group-invite-dialog-title"
+      >
+
+        <div className="group-invite-dialog-body">
+          <aside className="group-invite-dialog-left">
+            <label className="group-invite-search" htmlFor="group-invite-search-input">
+              <input
+                id="group-invite-search-input"
+                className="group-invite-search-input"
+                type="search"
+                value={searchQuery}
+                placeholder={t('chat.groupInviteSearchPlaceholder')}
+                disabled={isSubmitting}
+                onChange={(event) => onSearchQueryChange(event.target.value)}
+              />
+            </label>
+
+            <div className="group-invite-friend-section">
+              <div className="group-invite-section-header">
+                <span>{t('chat.myFriends')}</span>
+              </div>
+              <div className="group-invite-friend-list">
+                {visibleFriends.length === 0 ? (
+                  <p className="group-invite-empty">{t('chat.noAvailableFriendsToInvite')}</p>
+                ) : null}
+                {visibleFriends.map((friendship) => {
+                  const friend = friendship.friend;
+                  const label = friend.displayName || friend.email || friend.id;
+                  const isActiveMember = activeMemberIds.has(friend.id);
+                  const isSelected = selectedIds.includes(friend.id);
+                  const isChecked = isActiveMember || isSelected;
+                  return (
+                    <label
+                      className={`group-invite-friend-row${isActiveMember ? ' is-disabled' : ''}`}
+                      key={friendship.id}
+                      title={isActiveMember ? t('chat.alreadyInGroup') : label}
+                    >
+                      <span
+                        className={`group-invite-check${isChecked ? ' is-checked' : ''}${isActiveMember ? ' is-disabled' : ''}`}
+                        aria-hidden="true"
+                      />
+                      <input
+                        className="group-invite-checkbox"
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={isSubmitting || isActiveMember}
+                        onChange={() => onToggleFriend(friend.id)}
+                        aria-label={label}
+                      />
+                      <UserAvatar
+                        userId={friend.id}
+                        displayName={label}
+                        avatarUrl={friend.avatarUrl}
+                        size="sm"
+                      />
+                      <span className="group-invite-friend-text">
+                        <strong>{label}</strong>
+                        <small>{isActiveMember ? t('chat.alreadyInGroup') : formatPresence(friend.isOnline, friend.lastSeenAt, t)}</small>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          <section className="group-invite-dialog-right" aria-labelledby="group-invite-dialog-title">
+            <header className="group-invite-selected-header">
+              <h2 id="group-invite-dialog-title" className="group-invite-dialog-title">
+                {t('chat.inviteGroupMembersTitle')}
+              </h2>
+              <span>{t('chat.selectedInviteFriends')}</span>
+            </header>
+            <div className="group-invite-selected-list">
+              {selectedFriends.length === 0 ? (
+                <p className="group-invite-selected-empty">{t('chat.noSelectedInviteFriends')}</p>
+              ) : null}
+              {selectedFriends.map((friendship) => {
+                const friend = friendship.friend;
+                const label = friend.displayName || friend.email || friend.id;
+                return (
+                  <div className="group-invite-selected-row" key={friendship.id}>
+                    <UserAvatar
+                      userId={friend.id}
+                      displayName={label}
+                      avatarUrl={friend.avatarUrl}
+                      size="sm"
+                    />
+                    <span>{label}</span>
+                    <button
+                      type="button"
+                      className="group-invite-remove-button"
+                      aria-label={`${t('chat.removeInviteFriend')} ${label}`}
+                      disabled={isSubmitting}
+                      onClick={() => onToggleFriend(friend.id)}
+                    >
+                      {t('chat.removeInviteFriend')}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+
+        {error ? <p className="group-invite-dialog-error">{error}</p> : null}
+
+        <footer className="group-invite-dialog-footer">
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            disabled={isSubmitting}
+            onClick={onCancel}
+          >
+            {t('chat.cancelInviteMembers')}
+          </button>
+          <button
+            type="button"
+            className="primary-button compact-button"
+            disabled={isSubmitting || selectedIds.length === 0}
+            onClick={onSubmit}
+          >
+            {t('chat.inviteMembers')}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}function getMemberDisplayName(member: Conversation['members'][number]): string {
   return getMessageSenderDisplayName(member);
 }
 

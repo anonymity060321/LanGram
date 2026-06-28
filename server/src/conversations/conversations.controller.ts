@@ -4,7 +4,8 @@ import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 import { AuthenticatedUser } from '../common/current-user';
 import { REALTIME_EVENTS } from '../realtime/realtime.events';
 import { RealtimeSessionService } from '../realtime/realtime-session.service';
-import { ConversationsService, type GroupMemberRealtimeDto, type LeaveGroupResult } from './conversations.service';
+import { ConversationsService, type AddGroupMembersResult, type GroupMemberRealtimeDto, type LeaveGroupResult } from './conversations.service';
+import { AddGroupMembersDto } from './dto/add-group-members.dto';
 import { CreateDirectConversationDto } from './dto/create-direct-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
@@ -67,6 +68,33 @@ export class ConversationsController {
     );
   }
 
+  @Post(':id/members')
+  async addGroupMembers(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') conversationId: string,
+    @Body() dto: AddGroupMembersDto,
+  ): Promise<unknown> {
+    const result = await this.conversationsService.addGroupMembers(
+      request.user.id,
+      conversationId,
+      dto.userIds,
+    );
+    this.broadcastGroupMembersAdded(result);
+    return result.conversation;
+  }
+
+  private broadcastGroupMembersAdded(result: AddGroupMembersResult): void {
+    for (const item of result.recipientConversations) {
+      this.realtimeSessionService.getSocket(item.userId)?.emit(
+        REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED,
+        {
+          conversationId: result.conversationId,
+          reason: 'group_member_added' as const,
+          conversation: item.conversation,
+        },
+      );
+    }
+  }
   @Patch(':id/group-nickname')
   async updateGroupNickname(
     @Req() request: AuthenticatedRequest,

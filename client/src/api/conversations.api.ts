@@ -83,6 +83,15 @@ export function createGroupConversation(
   });
 }
 
+export function addGroupMembers(
+  conversationId: string,
+  userIds: string[],
+): Promise<Conversation> {
+  return apiRequest(`/conversations/${conversationId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ userIds }),
+  });
+}
 export function updateGroupNickname(
   conversationId: string,
   groupNickname: string | null,

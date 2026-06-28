@@ -384,6 +384,24 @@
   "friends.groupsTab": "Groups",
   "friends.noGroups": "No groups yet",
   "friends.groupList": "Groups",
-  "friends.openGroupChat": "Open group"
+  "friends.openGroupChat": "Open group",
+  "chat.addGroupMembers": "Invite",
+  "chat.noAvailableFriendsToAdd": "No friends available to invite",
+  "chat.addMembers": "Invite",
+  "chat.cancelAddMembers": "Cancel",
+  "chat.addMembersFailed": "Failed to invite members",
+  "chat.groupMemberAdded": "Members invited",
+  "chat.inviteGroupMembers": "Invite",
+  "chat.inviteGroupMembersTitle": "Invite to group",
+  "chat.noAvailableFriendsToInvite": "No friends available to invite",
+  "chat.inviteMembers": "Invite",
+  "chat.cancelInviteMembers": "Cancel",
+  "chat.inviteMembersFailed": "Failed to invite members",
+  "chat.groupMemberInvited": "Members invited",
+  "chat.groupInviteSearchPlaceholder": "Search",
+  "chat.myFriends": "My friends",
+  "chat.selectedInviteFriends": "Selected",
+  "chat.noSelectedInviteFriends": "Select friends to invite",
+  "chat.alreadyInGroup": "Already in group",
+  "chat.removeInviteFriend": "Remove"
 }
-

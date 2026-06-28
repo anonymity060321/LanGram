@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import type { ConversationUser, MessageType, ServerMessageStatus } from '../api/conversations.api';
+import type { Conversation, ConversationUser, MessageType, ServerMessageStatus } from '../api/conversations.api';
 import type { FileMetadataResponse } from '../api/files.api';
 
 export const REALTIME_EVENTS = {
@@ -104,11 +104,17 @@ export interface FriendRequestChangedPayload {
   reason: 'friend_request_changed';
 }
 
-export interface ConversationMemberUpdatedPayload {
-  conversationId: string;
-  reason: 'group_member_updated' | 'group_member_left';
-  member: ConversationUser;
-}
+export type ConversationMemberUpdatedPayload =
+  | {
+      conversationId: string;
+      reason: 'group_member_updated' | 'group_member_left';
+      member: ConversationUser;
+    }
+  | {
+      conversationId: string;
+      reason: 'group_member_added';
+      conversation: Conversation;
+    };
 
 export type RealtimeConnectionStatus =
   | 'online'

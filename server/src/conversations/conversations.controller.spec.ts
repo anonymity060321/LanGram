@@ -199,6 +199,93 @@ describe('ConversationsController', () => {
     );
     expect(realtimeSessionService.getSocket).not.toHaveBeenCalled();
   });
+  it('emits added group conversation updates only to active members and newly added members', async () => {
+    const operatorConversation = {
+      id: 'group-conversation-id',
+      type: 'GROUP',
+      title: 'Project Room',
+      peer: null,
+      members: [
+        { id: 'user-a', displayName: 'User A', email: null, groupRemark: 'Private A', leftAt: null },
+        { id: 'user-b', displayName: 'User B', email: null, groupRemark: null, leftAt: null },
+        { id: 'user-c', displayName: 'User C', email: null, groupRemark: null, leftAt: null },
+      ],
+      memberCount: 3,
+    };
+    const userBConversation = {
+      ...operatorConversation,
+      members: operatorConversation.members.map((member) => ({
+        ...member,
+        groupRemark: member.id === 'user-b' ? 'Private B' : null,
+      })),
+    };
+    const userCConversation = {
+      ...operatorConversation,
+      members: operatorConversation.members.map((member) => ({
+        ...member,
+        groupRemark: null,
+      })),
+    };
+    const conversationsService = {
+      addGroupMembers: jest.fn().mockResolvedValue({
+        conversationId: 'group-conversation-id',
+        conversation: operatorConversation,
+        recipientConversations: [
+          { userId: 'user-a', conversation: operatorConversation },
+          { userId: 'user-b', conversation: userBConversation },
+          { userId: 'user-c', conversation: userCConversation },
+        ],
+      }),
+    } as unknown as ConversationsService;
+    const userASocket = { emit: jest.fn() };
+    const userBSocket = { emit: jest.fn() };
+    const userCSocket = { emit: jest.fn() };
+    const nonMemberSocket = { emit: jest.fn() };
+    const realtimeSessionService = {
+      getSocket: jest.fn((userId: string) => {
+        if (userId === 'user-a') return userASocket;
+        if (userId === 'user-b') return userBSocket;
+        if (userId === 'user-c') return userCSocket;
+        if (userId === 'user-x') return nonMemberSocket;
+        return null;
+      }),
+    } as unknown as RealtimeSessionService;
+    const controller = new ConversationsController(conversationsService, realtimeSessionService);
+
+    const result = await controller.addGroupMembers(
+      { user: { id: 'user-a' } } as never,
+      'group-conversation-id',
+      { userIds: ['user-c'] },
+    );
+
+    expect(result).toBe(operatorConversation);
+    expect(conversationsService.addGroupMembers).toHaveBeenCalledWith('user-a', 'group-conversation-id', ['user-c']);
+    expect(userASocket.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED,
+      expect.objectContaining({
+        conversationId: 'group-conversation-id',
+        reason: 'group_member_added',
+        conversation: operatorConversation,
+      }),
+    );
+    expect(userBSocket.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED,
+      expect.objectContaining({ reason: 'group_member_added', conversation: userBConversation }),
+    );
+    expect(userCSocket.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED,
+      expect.objectContaining({ reason: 'group_member_added', conversation: userCConversation }),
+    );
+    expect(nonMemberSocket.emit).not.toHaveBeenCalled();
+    expect(userBSocket.emit.mock.calls[0][1].conversation.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'user-a', groupRemark: null }),
+        expect.objectContaining({ id: 'user-b', groupRemark: 'Private B' }),
+      ]),
+    );
+    expect(JSON.stringify(userCSocket.emit.mock.calls[0][1])).not.toContain('token');
+    expect(JSON.stringify(userCSocket.emit.mock.calls[0][1])).not.toContain('ciphertext');
+  });
 });
 
 
