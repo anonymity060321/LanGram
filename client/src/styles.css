@@ -1081,6 +1081,7 @@ textarea,
 }
 
 .profile-group-member-row {
+  width: 100%;
   min-width: 0;
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
@@ -1090,6 +1091,14 @@ textarea,
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   background: var(--color-bg-panel-muted);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-group-member-row:hover,
+.profile-group-member-row.is-selected {
+  background: var(--color-interactive-hover);
 }
 
 .profile-group-member-text {
@@ -1114,7 +1123,111 @@ textarea,
   color: var(--color-text-muted);
   font-size: 0.82rem;
 }
+.group-member-profile {
+  display: grid;
+  gap: 16px;
+}
 
+.group-member-profile-header {
+  display: grid;
+  gap: 10px;
+}
+
+.group-member-profile-header h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.group-member-profile-back {
+  width: fit-content;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  color: var(--color-primary);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.group-member-profile-back:hover {
+  background: var(--color-interactive-hover);
+  color: var(--color-primary-hover);
+}
+
+.group-member-profile-identity {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 10px;
+  background: var(--color-bg-panel-muted);
+  padding: 18px 12px;
+}
+
+.group-member-profile-name {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-member-profile-meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.group-member-profile-section {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.group-member-profile-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.group-member-profile-row + .group-member-profile-row {
+  border-top: 1px solid var(--color-border-muted);
+}
+
+.group-member-profile-row dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.group-member-profile-row dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-member-profile-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.group-member-profile-actions p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.group-member-profile-primary,
+.group-member-profile-secondary {
+  width: 100%;
+}
 .sidebar-header,
 .chat-header,
 .settings-header {

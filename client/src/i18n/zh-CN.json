@@ -403,5 +403,12 @@
   "chat.selectedInviteFriends": "已选择",
   "chat.noSelectedInviteFriends": "请选择要邀请的好友",
   "chat.alreadyInGroup": "已在群聊中",
-  "chat.removeInviteFriend": "移除"
+  "chat.removeInviteFriend": "移除",
+  "chat.groupMemberProfile": "成员资料",
+  "chat.backToGroupMembers": "返回",
+  "chat.groupMemberRole": "群成员",
+  "chat.messageMember": "发消息",
+  "chat.thisIsYou": "这是你自己",
+  "chat.addMemberAsFriend": "添加好友",
+  "chat.memberActionUnavailable": "暂未开放"
 }

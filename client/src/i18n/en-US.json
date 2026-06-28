@@ -403,5 +403,12 @@
   "chat.selectedInviteFriends": "Selected",
   "chat.noSelectedInviteFriends": "Select friends to invite",
   "chat.alreadyInGroup": "Already in group",
-  "chat.removeInviteFriend": "Remove"
+  "chat.removeInviteFriend": "Remove",
+  "chat.groupMemberProfile": "Member profile",
+  "chat.backToGroupMembers": "Back",
+  "chat.groupMemberRole": "Group member",
+  "chat.messageMember": "Message",
+  "chat.thisIsYou": "This is you",
+  "chat.addMemberAsFriend": "Add friend",
+  "chat.memberActionUnavailable": "Not available yet"
 }

@@ -56,6 +56,7 @@ const EMPTY_SEARCH_MATCH_IDS = new Set<string>();
 const EMPTY_CONVERSATION_IDS: string[] = [];
 const GROUP_SETTINGS_AUTOSAVE_DELAY_MS = 800;
 
+
 function useDismissOnOutsideOrEscape<T extends HTMLElement>(
   isOpen: boolean,
   layerRef: RefObject<T | null>,
@@ -168,6 +169,7 @@ export function MainLayout(): JSX.Element {
   const [addGroupMembersError, setAddGroupMembersError] = useState<string | null>(null);
   const [addGroupMembersNotice, setAddGroupMembersNotice] = useState<string | null>(null);
   const [groupInviteSearchQuery, setGroupInviteSearchQuery] = useState('');
+  const [selectedGroupMemberProfileUserId, setSelectedGroupMemberProfileUserId] = useState<string | null>(null);
   const [isSendShortcutMenuOpen, setIsSendShortcutMenuOpen] = useState(false);
   const [isEmojiPanelOpen, setIsEmojiPanelOpen] = useState(false);
   const [downloadStates, setDownloadStates] = useState<Record<string, FileDownloadStatus>>({});
@@ -202,7 +204,7 @@ export function MainLayout(): JSX.Element {
   const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
   const pendingActivationInFlightRef = useRef<string | null>(null);
   const groupNicknameSaveTimerRef = useRef<number | null>(null);
-  const groupRemarkSaveTimerRef = useRef<number | null>(null);
+  const groupRemarkSaveTimerRef = useRef<number | null>(null);
   const lastSavedGroupNicknameRef = useRef('');
   const lastSavedGroupRemarkRef = useRef('');
 
@@ -727,7 +729,18 @@ export function MainLayout(): JSX.Element {
   const availableGroupMemberFriends = useMemo(
     () => groupInviteFriends.filter((friendship) => !groupInviteActiveMemberIds.has(friendship.friend.id)),
     [groupInviteActiveMemberIds, groupInviteFriends],
-  );
+  );  const selectedGroupMemberProfile = useMemo(() => {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP' || !selectedGroupMemberProfileUserId) {
+      return null;
+    }
+
+    return selectedConversation.members.find(
+      (member) => member.id === selectedGroupMemberProfileUserId && !member.leftAt,
+    ) ?? null;
+  }, [selectedConversation, selectedGroupMemberProfileUserId]);
+  const selectedGroupMemberFriendship = selectedGroupMemberProfile
+    ? friends.find((friendship) => friendship.friend.id === selectedGroupMemberProfile.id) ?? null
+    : null;
   useEffect(() => {
     const availableIds = new Set(availableGroupMemberFriends.map((friendship) => friendship.friend.id));
     setSelectedGroupMemberAddIds((current) => current.filter((userId) => availableIds.has(userId)));
@@ -931,6 +944,12 @@ export function MainLayout(): JSX.Element {
     setPendingConversationActivationId(conversationId);
     setActiveView('messages');
     return true;
+  }
+  async function handleMessageGroupMember(friendship: FriendItem): Promise<void> {
+    const opened = await handleMessageFriend(friendship);
+    if (opened) {
+      setSelectedGroupMemberProfileUserId(null);
+    }
   }
 
   async function handleSend(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -2098,17 +2117,30 @@ export function MainLayout(): JSX.Element {
             : profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}
         </span>
         {isSelectedConversationGroup && selectedConversation ? (
-          <GroupMemberPanel
-            members={selectedConversation.members}
-            notice={addGroupMembersNotice}
-            t={t}
-            onInvite={() => {
-              setIsGroupInviteDialogOpen(true);
-              setAddGroupMembersError(null);
-              setAddGroupMembersNotice(null);
-              setGroupInviteSearchQuery('');
-            }}
-          />
+          selectedGroupMemberProfile ? (
+            <GroupMemberProfileCard
+              member={selectedGroupMemberProfile}
+              friendship={selectedGroupMemberFriendship}
+              isSelf={selectedGroupMemberProfile.id === user?.id}
+              t={t}
+              onBack={() => setSelectedGroupMemberProfileUserId(null)}
+              onMessage={handleMessageGroupMember}
+            />
+          ) : (
+            <GroupMemberPanel
+              members={selectedConversation.members}
+              notice={addGroupMembersNotice}
+              selectedMemberId={selectedGroupMemberProfileUserId}
+              t={t}
+              onInvite={() => {
+                setIsGroupInviteDialogOpen(true);
+                setAddGroupMembersError(null);
+                setAddGroupMembersNotice(null);
+                setGroupInviteSearchQuery('');
+              }}
+              onSelectMember={setSelectedGroupMemberProfileUserId}
+            />
+          )
         ) : null}
       </aside>
       {isSelectedConversationGroup && selectedConversation && isGroupInviteDialogOpen ? (
@@ -2501,6 +2533,10 @@ type MessageAvatarProfile = {
   groupNickname?: string | null;
   email?: string | null;
   avatarUrl?: string | null;
+  accountType?: string | null;
+  statusMessage?: string | null;
+  isOnline?: boolean;
+  lastSeenAt?: string | null;
 };
 
 function getConversationDisplayName(
@@ -2529,13 +2565,17 @@ function findMessageAvatarProfile(
 function GroupMemberPanel({
   members,
   notice,
+  selectedMemberId,
   t,
   onInvite,
+  onSelectMember,
 }: {
   members: Conversation['members'];
   notice: string | null;
+  selectedMemberId: string | null;
   t: ReturnType<typeof useI18n>['t'];
   onInvite: () => void;
+  onSelectMember: (memberId: string) => void;
 }): JSX.Element {
   const activeMembers = members.filter((member) => !member.leftAt);
 
@@ -2556,7 +2596,12 @@ function GroupMemberPanel({
       {activeMembers.length > 0 ? (
         <div className="profile-group-member-list">
           {activeMembers.map((member) => (
-            <div className="profile-group-member-row" key={member.id}>
+            <button
+              type="button"
+              className={`profile-group-member-row${selectedMemberId === member.id ? ' is-selected' : ''}`}
+              key={member.id}
+              onClick={() => onSelectMember(member.id)}
+            >
               <UserAvatar
                 userId={member.id}
                 displayName={getMemberDisplayName(member)}
@@ -2566,7 +2611,7 @@ function GroupMemberPanel({
                 <strong>{getMemberDisplayName(member)}</strong>
                 <small>{formatMemberSubtitle(member, t)}</small>
               </span>
-            </div>
+            </button>
           ))}
         </div>
       ) : null}
@@ -2574,6 +2619,85 @@ function GroupMemberPanel({
   );
 }
 
+function GroupMemberProfileCard({
+  member,
+  friendship,
+  isSelf,
+  t,
+  onBack,
+  onMessage,
+}: {
+  member: Conversation['members'][number];
+  friendship: FriendItem | null;
+  isSelf: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onBack: () => void;
+  onMessage: (friendship: FriendItem) => void;
+}): JSX.Element {
+  const displayName = getMemberDisplayName(member);
+  const canMessage = Boolean(friendship && !isSelf);
+
+  return (
+    <section className="group-member-profile" aria-label={t('chat.groupMemberProfile')}>
+      <header className="group-member-profile-header">
+        <button type="button" className="group-member-profile-back" onClick={onBack}>
+          {t('chat.backToGroupMembers')}
+        </button>
+        <h2>{t('chat.groupMemberProfile')}</h2>
+      </header>
+
+      <div className="group-member-profile-identity">
+        <UserAvatar
+          userId={member.id}
+          displayName={displayName}
+          avatarUrl={member.avatarUrl}
+          size="lg"
+        />
+        <strong className="group-member-profile-name">{displayName}</strong>
+        <span className="group-member-profile-meta">
+          {formatPresence(member.isOnline, member.lastSeenAt, t)}
+        </span>
+      </div>
+
+      <dl className="group-member-profile-section">
+        <div className="group-member-profile-row">
+          <dt>{t('friends.profileEmail')}</dt>
+          <dd>{member.email ?? t('friends.profileEmpty')}</dd>
+        </div>
+        <div className="group-member-profile-row">
+          <dt>{t('friends.profileStatus')}</dt>
+          <dd>{member.statusMessage || member.accountType || t('friends.profileEmpty')}</dd>
+        </div>
+        <div className="group-member-profile-row">
+          <dt>{t('chat.groupMemberRole')}</dt>
+          <dd>{t('chat.groupMemberRole')}</dd>
+        </div>
+      </dl>
+
+      <div className="group-member-profile-actions">
+        {isSelf ? <p>{t('chat.thisIsYou')}</p> : null}
+        {canMessage && friendship ? (
+          <button
+            type="button"
+            className="primary-button group-member-profile-primary"
+            onClick={() => onMessage(friendship)}
+          >
+            {t('chat.messageMember')}
+          </button>
+        ) : null}
+        {!isSelf && !friendship ? (
+          <button
+            type="button"
+            className="secondary-button group-member-profile-secondary"
+            disabled
+          >
+            {t('chat.memberActionUnavailable')}
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
 function GroupInviteDialog({
   friends,
   activeMemberIds,
@@ -2764,7 +2888,9 @@ function GroupInviteDialog({
       </section>
     </div>
   );
-}function getMemberDisplayName(member: Conversation['members'][number]): string {
+}
+
+function getMemberDisplayName(member: Conversation['members'][number]): string {
   return getMessageSenderDisplayName(member);
 }
 
