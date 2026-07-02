@@ -9,6 +9,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
   CONVERSATION_MEMBER_UPDATED: 'conversation:member-updated',
+  CONVERSATION_UPDATED: 'conversation:updated',
   FRIEND_REQUEST_CHANGED: 'friend:request:changed',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
@@ -65,10 +66,16 @@ export interface FriendRequestChangedPayload {
   reason: 'friend_request_changed';
 }
 
+export type ConversationUpdatedPayload = {
+  conversationId: string;
+  reason: 'group_updated';
+  conversation: unknown;
+};
+
 export type ConversationMemberUpdatedPayload =
   | {
       conversationId: string;
-      reason: 'group_member_updated' | 'group_member_left';
+      reason: 'group_member_updated' | 'group_member_left' | 'group_member_removed';
       member: {
         id: string;
         userId?: string;
@@ -80,8 +87,10 @@ export type ConversationMemberUpdatedPayload =
         isOnline?: boolean;
         lastSeenAt?: string | null;
         groupNickname?: string | null;
+        role?: string;
         leftAt?: string | Date | null;
       };
+      removedUserId?: string;
     }
   | {
       conversationId: string;
@@ -94,4 +103,3 @@ export interface PresenceUpdatePayload {
   isOnline: boolean;
   lastSeenAt: string | null;
 }
-

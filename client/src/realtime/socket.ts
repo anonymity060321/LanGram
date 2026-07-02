@@ -13,6 +13,7 @@ export const REALTIME_EVENTS = {
   MESSAGE_EDITED: 'message:edited',
   PRESENCE_UPDATE: 'presence:update',
   CONVERSATION_MEMBER_UPDATED: 'conversation:member-updated',
+  CONVERSATION_UPDATED: 'conversation:updated',
   FRIEND_REQUEST_CHANGED: 'friend:request:changed',
   SESSION_KICKED: 'session:kicked',
   ERROR: 'error',
@@ -104,11 +105,18 @@ export interface FriendRequestChangedPayload {
   reason: 'friend_request_changed';
 }
 
+export interface ConversationUpdatedPayload {
+  conversationId: string;
+  reason: 'group_updated';
+  conversation: Conversation;
+}
+
 export type ConversationMemberUpdatedPayload =
   | {
       conversationId: string;
-      reason: 'group_member_updated' | 'group_member_left';
+      reason: 'group_member_updated' | 'group_member_left' | 'group_member_removed';
       member: ConversationUser;
+      removedUserId?: string;
     }
   | {
       conversationId: string;
@@ -132,6 +140,7 @@ interface RealtimeHandlers {
   onPresenceUpdate: (payload: PresenceUpdatePayload) => void;
   onFriendRequestChanged?: (payload: FriendRequestChangedPayload) => void;
   onConversationMemberUpdated?: (payload: ConversationMemberUpdatedPayload) => void;
+  onConversationUpdated?: (payload: ConversationUpdatedPayload) => void;
   onSessionKicked: (payload: SessionKickedPayload) => void;
   onError: (payload: RealtimeErrorPayload) => void;
   onConnectionStatusChange?: (status: RealtimeConnectionStatus) => void;
@@ -172,6 +181,9 @@ export function connectRealtime(
   }
   if (handlers.onConversationMemberUpdated) {
     socket.on(REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED, handlers.onConversationMemberUpdated);
+  }
+  if (handlers.onConversationUpdated) {
+    socket.on(REALTIME_EVENTS.CONVERSATION_UPDATED, handlers.onConversationUpdated);
   }
   socket.on(REALTIME_EVENTS.SESSION_KICKED, handlers.onSessionKicked);
   socket.on(REALTIME_EVENTS.ERROR, handlers.onError);
@@ -223,4 +235,3 @@ function resolveSocketUrl(apiBaseUrl: string): string {
 
   return url.toString().replace(/\/+$/, '');
 }
-

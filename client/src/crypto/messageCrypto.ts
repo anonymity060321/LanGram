@@ -1,6 +1,11 @@
 import type { Conversation } from '../api/conversations.api';
 
 export const MESSAGE_ENCRYPTION_VERSION = 'mvp-v1';
+export const GROUP_MESSAGE_ENCRYPTION_VERSION = 'mvp-group-v2';
+
+type MessageEncryptionVersion =
+  | typeof MESSAGE_ENCRYPTION_VERSION
+  | typeof GROUP_MESSAGE_ENCRYPTION_VERSION;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -8,14 +13,15 @@ const decoder = new TextDecoder();
 export interface EncryptedMessagePayload {
   ciphertext: string;
   nonce: string;
-  encryptionVersion: typeof MESSAGE_ENCRYPTION_VERSION;
+  encryptionVersion: MessageEncryptionVersion;
 }
 
 export async function encryptMessage(
   plaintext: string,
   conversation: Conversation,
 ): Promise<EncryptedMessagePayload> {
-  const key = await deriveConversationKey(conversation);
+  const encryptionVersion = getOutgoingEncryptionVersion(conversation);
+  const key = await deriveConversationKey(conversation, encryptionVersion);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: nonce },
@@ -26,7 +32,7 @@ export async function encryptMessage(
   return {
     ciphertext: bytesToBase64(new Uint8Array(encrypted)),
     nonce: bytesToBase64(nonce),
-    encryptionVersion: MESSAGE_ENCRYPTION_VERSION,
+    encryptionVersion,
   };
 }
 
@@ -34,8 +40,9 @@ export async function decryptMessage(
   ciphertext: string,
   nonce: string,
   conversation: Conversation,
+  encryptionVersion = MESSAGE_ENCRYPTION_VERSION,
 ): Promise<string> {
-  const key = await deriveConversationKey(conversation);
+  const key = await deriveConversationKey(conversation, encryptionVersion);
   const nonceBytes = base64ToBytes(nonce);
   const ciphertextBytes = base64ToBytes(ciphertext);
   const decrypted = await crypto.subtle.decrypt(
@@ -47,10 +54,32 @@ export async function decryptMessage(
   return decoder.decode(decrypted);
 }
 
-async function deriveConversationKey(conversation: Conversation): Promise<CryptoKey> {
+export function isSupportedMessageEncryptionVersion(
+  encryptionVersion: string | null | undefined,
+): boolean {
+  return (
+    encryptionVersion === MESSAGE_ENCRYPTION_VERSION ||
+    encryptionVersion === GROUP_MESSAGE_ENCRYPTION_VERSION
+  );
+}
+
+function getOutgoingEncryptionVersion(conversation: Conversation): MessageEncryptionVersion {
+  return conversation.type === 'GROUP'
+    ? GROUP_MESSAGE_ENCRYPTION_VERSION
+    : MESSAGE_ENCRYPTION_VERSION;
+}
+
+async function deriveConversationKey(
+  conversation: Conversation,
+  encryptionVersion: string,
+): Promise<CryptoKey> {
+  if (!isSupportedMessageEncryptionVersion(encryptionVersion)) {
+    throw new Error('Unsupported message encryption version');
+  }
+
   const material = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(conversationKeyMaterial(conversation)),
+    encoder.encode(conversationKeyMaterial(conversation, encryptionVersion)),
     'PBKDF2',
     false,
     ['deriveKey'],
@@ -59,7 +88,7 @@ async function deriveConversationKey(conversation: Conversation): Promise<Crypto
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: encoder.encode(`langram:${MESSAGE_ENCRYPTION_VERSION}:${conversation.id}`),
+      salt: encoder.encode(`langram:${encryptionVersion}:${conversation.id}`),
       iterations: 120000,
       hash: 'SHA-256',
     },
@@ -70,7 +99,11 @@ async function deriveConversationKey(conversation: Conversation): Promise<Crypto
   );
 }
 
-function conversationKeyMaterial(conversation: Conversation): string {
+function conversationKeyMaterial(conversation: Conversation, encryptionVersion: string): string {
+  if (encryptionVersion === GROUP_MESSAGE_ENCRYPTION_VERSION && conversation.type === 'GROUP') {
+    return `langram:mvp:group:${conversation.id}`;
+  }
+
   const memberIds = conversation.members.map((member) => member.id).sort().join(':');
 
   // MVP message content encryption, not full E2EE.

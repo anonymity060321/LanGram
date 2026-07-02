@@ -55,6 +55,8 @@ import { FriendDeleteConfirmDialog, FriendsWorkspace } from './FriendsPage';
 const EMPTY_SEARCH_MATCH_IDS = new Set<string>();
 const EMPTY_CONVERSATION_IDS: string[] = [];
 const GROUP_SETTINGS_AUTOSAVE_DELAY_MS = 800;
+const GROUP_INTRO_MAX_LENGTH = 500;
+type GroupManagementView = 'overview' | 'members' | 'admins';
 
 
 function useDismissOnOutsideOrEscape<T extends HTMLElement>(
@@ -137,10 +139,12 @@ export function MainLayout(): JSX.Element {
   const enableNotifications = settingsConfig?.enableNotifications ?? true;
   const sendShortcut = useSettingsStore((state) => state.config?.sendShortcut ?? 'enter');
   const updateConfig = useSettingsStore((state) => state.updateConfig);
+  const updateGroupConversation = useChatStore((state) => state.updateGroupConversation);
   const updateGroupNickname = useChatStore((state) => state.updateGroupNickname);
   const updateGroupRemark = useChatStore((state) => state.updateGroupRemark);
   const leaveGroup = useChatStore((state) => state.leaveGroup);
   const addGroupMembers = useChatStore((state) => state.addGroupMembers);
+  const removeGroupMember = useChatStore((state) => state.removeGroupMember);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [hasLoadedFriends, setHasLoadedFriends] = useState(false);
   const [trustedFriendPeerId, setTrustedFriendPeerId] = useState<string | null>(null);
@@ -163,11 +167,25 @@ export function MainLayout(): JSX.Element {
   const [isSavingGroupNickname, setIsSavingGroupNickname] = useState(false);
   const [isSavingGroupRemark, setIsSavingGroupRemark] = useState(false);
   const [isLeavingGroup, setIsLeavingGroup] = useState(false);
+  const [pendingLeaveGroupConversationId, setPendingLeaveGroupConversationId] = useState<string | null>(null);
+  const [leaveGroupError, setLeaveGroupError] = useState<string | null>(null);
   const [isAddingGroupMembers, setIsAddingGroupMembers] = useState(false);
   const [isGroupInviteDialogOpen, setIsGroupInviteDialogOpen] = useState(false);
   const [selectedGroupMemberAddIds, setSelectedGroupMemberAddIds] = useState<string[]>([]);
   const [addGroupMembersError, setAddGroupMembersError] = useState<string | null>(null);
   const [addGroupMembersNotice, setAddGroupMembersNotice] = useState<string | null>(null);
+  const [removeGroupMemberError, setRemoveGroupMemberError] = useState<string | null>(null);
+  const [isRemovingGroupMember, setIsRemovingGroupMember] = useState(false);
+  const [pendingRemoveGroupMemberId, setPendingRemoveGroupMemberId] = useState<string | null>(null);
+  const [isGroupManagementOpen, setIsGroupManagementOpen] = useState(false);
+  const [groupManagementView, setGroupManagementView] = useState<GroupManagementView>('overview');
+  const [groupManagementName, setGroupManagementName] = useState('');
+  const [groupManagementIntro, setGroupManagementIntro] = useState('');
+  const [isDiscardGroupChangesConfirmOpen, setIsDiscardGroupChangesConfirmOpen] = useState(false);
+  const [groupManagementError, setGroupManagementError] = useState<string | null>(null);
+  const [groupManagementNotice, setGroupManagementNotice] = useState<string | null>(null);
+  const [isSavingGroupManagement, setIsSavingGroupManagement] = useState(false);
+  const [groupManagementSearchQuery, setGroupManagementSearchQuery] = useState('');
   const [groupInviteSearchQuery, setGroupInviteSearchQuery] = useState('');
   const [selectedGroupMemberProfileUserId, setSelectedGroupMemberProfileUserId] = useState<string | null>(null);
   const [isSendShortcutMenuOpen, setIsSendShortcutMenuOpen] = useState(false);
@@ -204,7 +222,8 @@ export function MainLayout(): JSX.Element {
   const lastSyncedNetworkChangedAtRef = useRef<string | null>(null);
   const pendingActivationInFlightRef = useRef<string | null>(null);
   const groupNicknameSaveTimerRef = useRef<number | null>(null);
-  const groupRemarkSaveTimerRef = useRef<number | null>(null);
+  const groupRemarkSaveTimerRef = useRef<number | null>(null);
+
   const lastSavedGroupNicknameRef = useRef('');
   const lastSavedGroupRemarkRef = useRef('');
 
@@ -230,6 +249,7 @@ export function MainLayout(): JSX.Element {
   const currentGroupMember = isSelectedConversationGroup && user?.id
     ? selectedConversation?.members.find((member) => member.id === user.id && !member.leftAt) ?? null
     : null;
+  const isCurrentUserGroupOwner = currentGroupMember?.role === 'OWNER';
   const profilePresence = !isNetworkOnline
     ? t('presence.offline')
     : isSelectedConversationGroup && selectedConversation
@@ -671,6 +691,15 @@ export function MainLayout(): JSX.Element {
     setGroupInviteSearchQuery('');
     setAddGroupMembersError(null);
     setAddGroupMembersNotice(null);
+    setIsGroupManagementOpen(false);
+    setGroupManagementView('overview');
+    setGroupManagementIntro('');
+    setIsDiscardGroupChangesConfirmOpen(false);
+    setGroupManagementError(null);
+    setGroupManagementSearchQuery('');
+    setPendingRemoveGroupMemberId(null);
+    setRemoveGroupMemberError(null);
+    setGroupManagementNotice(null);
   }, [selectedConversationId]);
 
   useEffect(() => {
@@ -950,6 +979,50 @@ export function MainLayout(): JSX.Element {
     if (opened) {
       setSelectedGroupMemberProfileUserId(null);
     }
+  }
+
+  function requestAddGroupMembers(): void {
+    setIsGroupInviteDialogOpen(true);
+    setAddGroupMembersError(null);
+    setAddGroupMembersNotice(null);
+    setGroupInviteSearchQuery('');
+  }
+
+  function requestRemoveGroupMemberConfirmation(memberUserId: string): void {
+    setPendingRemoveGroupMemberId(memberUserId);
+    setRemoveGroupMemberError(null);
+  }
+
+  function cancelRemoveGroupMemberConfirmation(): void {
+    if (isRemovingGroupMember) {
+      return;
+    }
+
+    setPendingRemoveGroupMemberId(null);
+    setRemoveGroupMemberError(null);
+  }
+
+  async function confirmRemoveGroupMember(): Promise<void> {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP' || !pendingRemoveGroupMemberId) {
+      return;
+    }
+
+    const memberUserId = pendingRemoveGroupMemberId;
+    setIsRemovingGroupMember(true);
+    setRemoveGroupMemberError(null);
+    const success = await removeGroupMember(selectedConversation.id, memberUserId);
+    setIsRemovingGroupMember(false);
+
+    if (!success) {
+      setRemoveGroupMemberError(t('chat.removeGroupMemberFailed'));
+      return;
+    }
+
+    setPendingRemoveGroupMemberId(null);
+    if (selectedGroupMemberProfileUserId === memberUserId) {
+      setSelectedGroupMemberProfileUserId(null);
+    }
+    setAddGroupMembersNotice(t('chat.groupMemberRemoved'));
   }
 
   async function handleSend(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -1335,6 +1408,110 @@ export function MainLayout(): JSX.Element {
     void updateConfig({ mutedConversationIds: nextMutedIds });
   }
 
+  function currentGroupManagementName(): string {
+    return selectedConversation?.title?.trim() || t('chat.groupConversation');
+  }
+
+  function currentGroupManagementIntro(): string {
+    return selectedConversation?.intro?.trim() ?? '';
+  }
+
+  function hasUnsavedGroupManagementChanges(): boolean {
+    return groupManagementName.trim() !== currentGroupManagementName()
+      || groupManagementIntro.trim() !== currentGroupManagementIntro();
+  }
+
+  function resetGroupManagementState(): void {
+    setIsGroupManagementOpen(false);
+    setGroupManagementView('overview');
+    setGroupManagementError(null);
+    setGroupManagementSearchQuery('');
+    setPendingRemoveGroupMemberId(null);
+    setRemoveGroupMemberError(null);
+    setGroupManagementNotice(null);
+    setGroupManagementIntro('');
+    setIsDiscardGroupChangesConfirmOpen(false);
+  }
+
+  function openGroupManagement(): void {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP' || !isCurrentUserGroupOwner) {
+      return;
+    }
+
+    setRemoveGroupMemberError(null);
+    setGroupManagementError(null);
+    setGroupManagementSearchQuery('');
+    setPendingRemoveGroupMemberId(null);
+    setGroupManagementNotice(null);
+    setGroupManagementName(selectedConversation.title?.trim() || t('chat.groupConversation'));
+    setGroupManagementIntro(selectedConversation.intro ?? '');
+    setGroupManagementView('overview');
+    setIsDiscardGroupChangesConfirmOpen(false);
+    setIsGroupManagementOpen(true);
+  }
+
+  function requestCloseGroupManagement(): void {
+    if (isSavingGroupManagement) {
+      return;
+    }
+
+    if (hasUnsavedGroupManagementChanges()) {
+      setIsDiscardGroupChangesConfirmOpen(true);
+      return;
+    }
+
+    resetGroupManagementState();
+  }
+
+  function continueEditingGroupManagement(): void {
+    setIsDiscardGroupChangesConfirmOpen(false);
+  }
+
+  function discardGroupManagementChanges(): void {
+    resetGroupManagementState();
+  }
+
+  async function saveGroupManagement(): Promise<void> {
+    if (!selectedConversation || selectedConversation.type !== 'GROUP' || !isCurrentUserGroupOwner || isSavingGroupManagement) {
+      return;
+    }
+
+    const normalizedName = groupManagementName.trim();
+    const normalizedIntro = groupManagementIntro.trim();
+    if (!normalizedName) {
+      setGroupManagementNotice(null);
+      setGroupManagementError(t('chat.groupNameRequired'));
+      return;
+    }
+
+    if (normalizedIntro.length > GROUP_INTRO_MAX_LENGTH) {
+      setGroupManagementNotice(null);
+      setGroupManagementError(t('chat.groupIntroTooLong'));
+      return;
+    }
+
+    if (!hasUnsavedGroupManagementChanges()) {
+      return;
+    }
+
+    setIsSavingGroupManagement(true);
+    setGroupManagementError(null);
+    setGroupManagementNotice(null);
+    const success = await updateGroupConversation(selectedConversation.id, {
+      name: normalizedName,
+      intro: normalizedIntro.length > 0 ? normalizedIntro : null,
+    });
+    setIsSavingGroupManagement(false);
+
+    if (!success) {
+      setGroupManagementError(t('chat.groupInfoSaveFailed'));
+      return;
+    }
+
+    setGroupManagementName(normalizedName);
+    setGroupManagementIntro(normalizedIntro);
+    setGroupManagementNotice(t('chat.groupNameSaved'));
+  }
   function handleConversationContextMenu(event: MouseEvent, conversation: Conversation): void {
     event.preventDefault();
     setConversationContextMenu({
@@ -1448,30 +1625,43 @@ export function MainLayout(): JSX.Element {
   }
 
 
-  async function handleLeaveGroupFromMenu(): Promise<void> {
+  function requestLeaveGroupConfirmation(): void {
     if (!selectedConversation || selectedConversation.type !== 'GROUP') {
       return;
     }
 
-    const confirmed = window.confirm(
-      `${t('chat.leaveGroupConfirmTitle')}\n\n${t('chat.leaveGroupConfirmMessage')}`,
-    );
-    if (!confirmed) {
+    setIsChatActionsOpen(false);
+    setLeaveGroupError(null);
+    setPendingLeaveGroupConversationId(selectedConversation.id);
+  }
+
+  function cancelLeaveGroupConfirmation(): void {
+    if (isLeavingGroup) {
+      return;
+    }
+
+    setPendingLeaveGroupConversationId(null);
+    setLeaveGroupError(null);
+  }
+
+  async function confirmLeaveGroup(): Promise<void> {
+    if (!pendingLeaveGroupConversationId) {
       return;
     }
 
     setIsLeavingGroup(true);
+    setLeaveGroupError(null);
     setGroupNicknameError(null);
-    const conversationId = selectedConversation.id;
+    const conversationId = pendingLeaveGroupConversationId;
     const success = await leaveGroup(conversationId);
     setIsLeavingGroup(false);
 
     if (!success) {
-      setGroupNicknameError(t('chat.leaveGroupFailed'));
+      setLeaveGroupError(t('chat.leaveGroupFailed'));
       return;
     }
 
-    setIsChatActionsOpen(false);
+    setPendingLeaveGroupConversationId(null);
     void updateConfig({
       pinnedConversationIds: pinnedConversationIds.filter((id) => id !== conversationId),
       mutedConversationIds: mutedConversationIds.filter((id) => id !== conversationId),
@@ -1851,7 +2041,7 @@ export function MainLayout(): JSX.Element {
                         role="menuitem"
                         className="chat-actions-panel-item is-danger"
                         disabled={isLeavingGroup}
-                        onClick={() => void handleLeaveGroupFromMenu()}
+                        onClick={requestLeaveGroupConfirmation}
                       >
                         <span>{t('chat.leaveGroup')}</span>
                       </button>
@@ -2066,7 +2256,7 @@ export function MainLayout(): JSX.Element {
                         className="send-shortcut-menu-item"
                         onClick={() => void handleSendShortcutChange('enter')}
                       >
-                        <span aria-hidden="true">{sendShortcut === 'enter' ? '*' : ''}</span>
+                        <span aria-hidden="true">{sendShortcut === 'enter' ? '✔' : ''}</span>
                         <span>{t('chat.sendWithEnter')}</span>
                       </button>
                       <button
@@ -2076,7 +2266,7 @@ export function MainLayout(): JSX.Element {
                         className="send-shortcut-menu-item"
                         onClick={() => void handleSendShortcutChange('ctrlEnter')}
                       >
-                        <span aria-hidden="true">{sendShortcut === 'ctrlEnter' ? '*' : ''}</span>
+                        <span aria-hidden="true">{sendShortcut === 'ctrlEnter' ? '✔' : ''}</span>
                         <span>{t('chat.sendWithCtrlEnter')}</span>
                       </button>
                     </div>
@@ -2117,13 +2307,27 @@ export function MainLayout(): JSX.Element {
             : profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}
         </span>
         {isSelectedConversationGroup && selectedConversation ? (
+          <GroupProfileActions
+            isOwner={isCurrentUserGroupOwner}
+            isMuted={isSelectedConversationMuted}
+            isLeaving={isLeavingGroup}
+            t={t}
+            onToggleMute={toggleMutedConversation}
+            onManage={openGroupManagement}
+            onLeave={requestLeaveGroupConfirmation}
+          />
+        ) : null}
+        {isSelectedConversationGroup && selectedConversation ? (
           selectedGroupMemberProfile ? (
             <GroupMemberProfileCard
               member={selectedGroupMemberProfile}
               friendship={selectedGroupMemberFriendship}
               isSelf={selectedGroupMemberProfile.id === user?.id}
               t={t}
-              onBack={() => setSelectedGroupMemberProfileUserId(null)}
+              onBack={() => {
+                setSelectedGroupMemberProfileUserId(null);
+                setRemoveGroupMemberError(null);
+              }}
               onMessage={handleMessageGroupMember}
             />
           ) : (
@@ -2132,17 +2336,14 @@ export function MainLayout(): JSX.Element {
               notice={addGroupMembersNotice}
               selectedMemberId={selectedGroupMemberProfileUserId}
               t={t}
-              onInvite={() => {
-                setIsGroupInviteDialogOpen(true);
-                setAddGroupMembersError(null);
-                setAddGroupMembersNotice(null);
-                setGroupInviteSearchQuery('');
-              }}
+              onInvite={requestAddGroupMembers}
               onSelectMember={setSelectedGroupMemberProfileUserId}
             />
           )
         ) : null}
       </aside>
+        </>
+      )}
       {isSelectedConversationGroup && selectedConversation && isGroupInviteDialogOpen ? (
         <GroupInviteDialog
           friends={groupInviteFriends}
@@ -2158,8 +2359,36 @@ export function MainLayout(): JSX.Element {
           onSubmit={() => void submitAddGroupMembers()}
         />
       ) : null}
-        </>
-      )}
+      {isSelectedConversationGroup && selectedConversation && isGroupManagementOpen
+        ? createPortal(
+            <GroupManagementDialog
+              conversation={selectedConversation}
+              currentUserId={user?.id ?? null}
+              view={groupManagementView}
+              isOwner={isCurrentUserGroupOwner}
+              isRemoving={isRemovingGroupMember}
+              memberError={removeGroupMemberError}
+              memberSearchQuery={groupManagementSearchQuery}
+              name={groupManagementName}
+              intro={groupManagementIntro}
+              hasUnsavedChanges={hasUnsavedGroupManagementChanges()}
+              isIntroTooLong={groupManagementIntro.trim().length > GROUP_INTRO_MAX_LENGTH}
+              nameError={groupManagementError}
+              notice={groupManagementNotice}
+              isSaving={isSavingGroupManagement}
+              t={t}
+              onViewChange={setGroupManagementView}
+              onNameChange={setGroupManagementName}
+              onIntroChange={setGroupManagementIntro}
+              onMemberSearchQueryChange={setGroupManagementSearchQuery}
+              onInviteMembers={requestAddGroupMembers}
+              onCancel={requestCloseGroupManagement}
+              onSave={() => void saveGroupManagement()}
+              onRemoveMember={requestRemoveGroupMemberConfirmation}
+            />,
+            document.body,
+          )
+        : null}
       {activeView === 'messages' && conversationContextMenu
         ? createPortal(
             <ConversationContextMenu
@@ -2186,6 +2415,40 @@ export function MainLayout(): JSX.Element {
             document.body,
           )
         : null}
+      {isDiscardGroupChangesConfirmOpen ? (
+        <DiscardGroupChangesConfirmDialog
+          title={t('chat.discardGroupChangesTitle')}
+          message={t('chat.discardGroupChangesMessage')}
+          cancelLabel={t('chat.continueEditing')}
+          confirmLabel={t('chat.discardChanges')}
+          onCancel={continueEditingGroupManagement}
+          onConfirm={discardGroupManagementChanges}
+        />
+      ) : null}
+      {pendingLeaveGroupConversationId ? (
+        <LeaveGroupConfirmDialog
+          title={t('chat.leaveGroupConfirmTitle')}
+          message={t('chat.leaveGroupConfirmMessage')}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={t('chat.leaveGroup')}
+          error={leaveGroupError}
+          isBusy={isLeavingGroup}
+          onCancel={cancelLeaveGroupConfirmation}
+          onConfirm={() => void confirmLeaveGroup()}
+        />
+      ) : null}
+      {pendingRemoveGroupMemberId ? (
+        <LeaveGroupConfirmDialog
+          title={t('chat.removeGroupMemberConfirmTitle')}
+          message={t('chat.removeGroupMemberConfirmMessage')}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={t('chat.removeMember')}
+          error={removeGroupMemberError}
+          isBusy={isRemovingGroupMember}
+          onCancel={cancelRemoveGroupMemberConfirmation}
+          onConfirm={() => void confirmRemoveGroupMember()}
+        />
+      ) : null}
       {pendingDeleteFriend ? (
         <FriendDeleteConfirmDialog
           title={t('friends.deleteFriendConfirmTitle')}
@@ -2201,6 +2464,115 @@ export function MainLayout(): JSX.Element {
   );
 }
 
+function DiscardGroupChangesConfirmDialog({
+  title,
+  message,
+  cancelLabel,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="group-management-unsaved-confirm-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <section className="group-management-unsaved-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="discard-group-changes-title">
+        <strong id="discard-group-changes-title" className="group-management-unsaved-confirm-title">{title}</strong>
+        <p className="group-management-unsaved-confirm-message">{message}</p>
+        <footer className="group-management-unsaved-confirm-actions">
+          <button type="button" className="group-management-unsaved-confirm-secondary" onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          <button type="button" className="group-management-unsaved-confirm-danger" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+function LeaveGroupConfirmDialog({
+  title,
+  message,
+  cancelLabel,
+  confirmLabel,
+  error,
+  isBusy,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  error: string | null;
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="confirm-dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-group-confirm-title">
+        <header>
+          <strong id="leave-group-confirm-title">{title}</strong>
+        </header>
+        <p>{message}</p>
+        {error ? <p className="confirm-dialog-error">{error}</p> : null}
+        <footer className="confirm-dialog-actions">
+          <button type="button" className="secondary-button compact-button" disabled={isBusy} onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          <button type="button" className="danger-button compact-button" disabled={isBusy} onClick={onConfirm}>
+            {isBusy ? `${confirmLabel}...` : confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
 function NetworkStatusBanner({
   status,
   showReconnected,
@@ -2619,6 +2991,432 @@ function GroupMemberPanel({
   );
 }
 
+
+function GroupProfileActions({
+  isOwner,
+  isMuted,
+  isLeaving,
+  t,
+  onToggleMute,
+  onManage,
+  onLeave,
+}: {
+  isOwner: boolean;
+  isMuted: boolean;
+  isLeaving: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onToggleMute: () => void;
+  onManage: () => void;
+  onLeave: () => void;
+}): JSX.Element {
+  return (
+    <div className={'group-profile-actions ' + (isOwner ? 'is-three-actions' : 'is-two-actions')} aria-label={t('chat.groupActions')}>
+      <button
+        type="button"
+        className={'group-profile-action-button' + (isMuted ? ' is-active' : '')}
+        aria-pressed={isMuted}
+        onClick={onToggleMute}
+      >
+        <img
+          className="group-profile-action-icon"
+          src={isMuted ? '/vector_icon/bell-off.svg' : '/vector_icon/bell.svg'}
+          alt=""
+          aria-hidden="true"
+        />
+        <span className="group-profile-action-label">
+          {isMuted ? t('chat.groupActionUnmute') : t('chat.groupActionMute')}
+        </span>
+      </button>
+      {isOwner ? (
+        <button type="button" className="group-profile-action-button" onClick={onManage}>
+          <img className="group-profile-action-icon" src="/vector_icon/settings.svg" alt="" aria-hidden="true" />
+          <span className="group-profile-action-label">{t('chat.groupActionManage')}</span>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="group-profile-action-button is-danger"
+        disabled={isLeaving}
+        onClick={onLeave}
+      >
+        <img className="group-profile-action-icon" src="/vector_icon/log-out.svg" alt="" aria-hidden="true" />
+        <span className="group-profile-action-label">{t('chat.groupActionLeave')}</span>
+      </button>
+    </div>
+  );
+}
+
+function GroupManagementDialog({
+  conversation,
+  currentUserId,
+  view,
+  isOwner,
+  isRemoving,
+  memberError,
+  memberSearchQuery,
+  name,
+  intro,
+  hasUnsavedChanges,
+  isIntroTooLong,
+  nameError,
+  notice,
+  isSaving,
+  t,
+  onViewChange,
+  onNameChange,
+  onIntroChange,
+  onMemberSearchQueryChange,
+  onInviteMembers,
+  onCancel,
+  onSave,
+  onRemoveMember,
+}: {
+  conversation: Conversation;
+  currentUserId: string | null;
+  view: GroupManagementView;
+  isOwner: boolean;
+  isRemoving: boolean;
+  memberError: string | null;
+  memberSearchQuery: string;
+  name: string;
+  intro: string;
+  hasUnsavedChanges: boolean;
+  isIntroTooLong: boolean;
+  nameError: string | null;
+  notice: string | null;
+  isSaving: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+  onViewChange: (view: GroupManagementView) => void;
+  onNameChange: (name: string) => void;
+  onIntroChange: (intro: string) => void;
+  onMemberSearchQueryChange: (query: string) => void;
+  onInviteMembers: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onRemoveMember: (memberUserId: string) => void;
+}): JSX.Element {
+  const activeMembers = conversation.members.filter((member) => !member.leftAt);
+  const ownerCount = activeMembers.filter((member) => member.role === 'OWNER').length || 1;
+
+  return (
+    <div className="group-management-backdrop" role="presentation" onMouseDown={onCancel}>
+      <section
+        className="group-management-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="group-management-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="group-management-header">
+          <div>
+            {view !== 'overview' ? (
+              <button
+                type="button"
+                className="group-management-back-button"
+                onClick={() => onViewChange('overview')}
+              >
+                {t('chat.backToGroupMembers')}
+              </button>
+            ) : null}
+            <h2 id="group-management-title" className="group-management-title">
+              {view === 'members'
+                ? t('chat.groupMemberManagement')
+                : view === 'admins'
+                ? t('chat.groupAdminManagement')
+                : t('chat.groupManageTitle')}
+            </h2>
+          </div>
+          <button type="button" className="group-management-close" aria-label={t('common.cancel')} onClick={onCancel}>
+            <img src="/vector_icon/x.svg" alt="" aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="group-management-body">
+          {view === 'members' ? (
+            <GroupManagementMembers
+              members={activeMembers}
+              currentUserId={currentUserId}
+              isOwner={isOwner}
+              isRemoving={isRemoving}
+              searchQuery={memberSearchQuery}
+              error={memberError}
+              t={t}
+              onSearchQueryChange={onMemberSearchQueryChange}
+              onInviteMembers={onInviteMembers}
+              onRemoveMember={onRemoveMember}
+            />
+          ) : view === 'admins' ? (
+            <GroupManagementAdmins members={activeMembers} t={t} />
+          ) : (
+            <GroupManagementOverview
+              title={name}
+              intro={intro}
+              isIntroTooLong={isIntroTooLong}
+              error={nameError}
+              notice={notice}
+              onTitleChange={onNameChange}
+              onIntroChange={onIntroChange}
+              memberCount={activeMembers.length}
+              adminCount={ownerCount}
+              t={t}
+              onViewChange={onViewChange}
+            />
+          )}
+        </div>
+
+        <footer className="group-management-footer">
+          <button type="button" className="secondary-button group-management-cancel" disabled={isSaving} onClick={onCancel}>
+            {t('chat.groupManageCancel')}
+          </button>
+          <button
+            type="button"
+            className="primary-button group-management-save"
+            disabled={isSaving || !name.trim() || !hasUnsavedChanges || isIntroTooLong}
+            onClick={onSave}
+          >
+            {isSaving ? t('chat.saving') : t('chat.groupManageSave')}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function GroupManagementOverview({
+  title,
+  intro,
+  isIntroTooLong,
+  error,
+  notice,
+  memberCount,
+  adminCount,
+  t,
+  onTitleChange,
+  onIntroChange,
+  onViewChange,
+}: {
+  title: string;
+  intro: string;
+  isIntroTooLong: boolean;
+  error: string | null;
+  notice: string | null;
+  memberCount: number;
+  adminCount: number;
+  t: ReturnType<typeof useI18n>['t'];
+  onTitleChange: (title: string) => void;
+  onIntroChange: (intro: string) => void;
+  onViewChange: (view: GroupManagementView) => void;
+}): JSX.Element {
+  return (
+    <>
+      <section className="group-management-profile" aria-label={t('chat.groupManageTitle')}>
+        <div className="group-management-avatar" aria-hidden="true">
+          <img src="/vector_icon/users.svg" alt="" />
+        </div>
+        <label className="group-management-field">
+          <span className="group-management-label">{t('chat.groupName')}</span>
+          <input className="group-management-input" value={title} onChange={(event) => onTitleChange(event.target.value)} />
+        </label>
+        {error ? <p className="group-management-error">{error}</p> : null}
+        {notice ? <p className="group-management-notice">{notice}</p> : null}
+        <label className="group-management-field">
+          <span className="group-management-label">{t('chat.groupIntroOptional')}</span>
+          <textarea
+            className="group-management-input group-management-textarea"
+            value={intro}
+            maxLength={GROUP_INTRO_MAX_LENGTH + 1}
+            rows={3}
+            onChange={(event) => onIntroChange(event.target.value)}
+          />
+        </label>
+        {isIntroTooLong ? <p className="group-management-error">{t('chat.groupIntroTooLong')}</p> : null}
+      </section>
+
+      <section className="group-management-section" aria-label={t('chat.groupType')}>
+        <GroupManagementRow label={t('chat.groupType')} value={t('chat.groupTypePrivate')} />
+        <GroupManagementRow label={t('chat.newMembersHistoryVisibility')} value={t('chat.hidden')} />
+        <GroupManagementRow label={t('chat.topic')} value={t('chat.closed')} />
+      </section>
+
+      <section className="group-management-section" aria-label={t('chat.permissionManagement')}>
+        <GroupManagementRow label={t('chat.permissionManagement')} value={t('chat.notAvailableYet')} />
+        <GroupManagementRow label={t('chat.inviteLink')} value={t('chat.notAvailableYet')} />
+        <GroupManagementRow
+          label={t('chat.admins')}
+          value={String(adminCount)}
+          isButton
+          onClick={() => onViewChange('admins')}
+        />
+        <GroupManagementRow
+          label={t('chat.members')}
+          value={String(memberCount)}
+          isButton
+          onClick={() => onViewChange('members')}
+        />
+      </section>
+    </>
+  );
+}
+
+function GroupManagementRow({
+  label,
+  value,
+  isButton = false,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  isButton?: boolean;
+  onClick?: () => void;
+}): JSX.Element {
+  const content = (
+    <>
+      <span className="group-management-row-label">{label}</span>
+      <span className="group-management-row-value">{value}</span>
+    </>
+  );
+
+  if (isButton) {
+    return (
+      <button type="button" className="group-management-row is-clickable" onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className="group-management-row">{content}</div>;
+}
+
+function GroupManagementMembers({
+  members,
+  currentUserId,
+  isOwner,
+  isRemoving,
+  searchQuery,
+  error,
+  t,
+  onSearchQueryChange,
+  onInviteMembers,
+  onRemoveMember,
+}: {
+  members: Conversation['members'];
+  currentUserId: string | null;
+  isOwner: boolean;
+  isRemoving: boolean;
+  searchQuery: string;
+  error: string | null;
+  t: ReturnType<typeof useI18n>['t'];
+  onSearchQueryChange: (query: string) => void;
+  onInviteMembers: () => void;
+  onRemoveMember: (memberUserId: string) => void;
+}): JSX.Element {
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const visibleMembers = sortGroupManagementMembers(members, currentUserId)
+    .filter((member) => {
+      if (!normalizedSearchQuery) {
+        return true;
+      }
+
+      const label = [
+        member.displayName,
+        member.groupNickname,
+        member.email,
+        member.id,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return label.includes(normalizedSearchQuery);
+    });
+
+  return (
+    <section className="group-management-subview" aria-label={t('chat.groupMemberManagement')}>
+      <header className="group-management-subview-header">
+        <span className="group-management-member-count">{members.length} {t('chat.members')}</span>
+        <button type="button" className="secondary-button compact-button" onClick={onInviteMembers}>
+          {t('chat.inviteMembers')}
+        </button>
+      </header>
+      <label className="group-management-search" htmlFor="group-management-member-search">
+        <input
+          id="group-management-member-search"
+          className="group-management-search-input"
+          type="search"
+          value={searchQuery}
+          placeholder={t('chat.searchGroupMembers')}
+          onChange={(event) => onSearchQueryChange(event.target.value)}
+        />
+      </label>
+      {error ? <p className="group-management-error">{error}</p> : null}
+      {visibleMembers.length === 0 ? (
+        <p className="group-management-empty">{t('chat.noGroupMembersFound')}</p>
+      ) : (
+        <div className="group-management-member-list">
+          {visibleMembers.map((member) => {
+            const isGroupOwner = member.role === 'OWNER';
+            const isSelf = currentUserId === member.id;
+            const canRemove = isOwner && !isGroupOwner && !isSelf;
+            return (
+              <div className="group-management-member-row" key={member.id}>
+                <UserAvatar userId={member.id} displayName={getMemberDisplayName(member)} avatarUrl={member.avatarUrl} />
+                <span className="group-management-member-main">
+                  <strong className="group-management-member-name">{getMemberDisplayName(member)}</strong>
+                  <small className="group-management-member-meta">{member.email || formatPresence(member.isOnline, member.lastSeenAt, t)}</small>
+                </span>
+                <span className="group-management-member-role">
+                  {isGroupOwner ? t('chat.groupOwnerRole') : t('chat.groupMemberRole')}
+                </span>
+                {canRemove ? (
+                  <span className="group-management-member-actions">
+                    <button
+                      type="button"
+                      className="group-management-danger-button"
+                      disabled={isRemoving}
+                      onClick={() => onRemoveMember(member.id)}
+                    >
+                      {t('chat.removeMember')}
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+function GroupManagementAdmins({
+  members,
+  t,
+}: {
+  members: Conversation['members'];
+  t: ReturnType<typeof useI18n>['t'];
+}): JSX.Element {
+  const admins = members.filter((member) => member.role === 'OWNER' || member.role === 'ADMIN');
+  return (
+    <section className="group-management-subview" aria-label={t('chat.groupAdminManagement')}>
+      <div className="group-management-member-list">
+        {admins.map((member) => {
+          const isGroupOwner = member.role === 'OWNER';
+          return (
+            <div className="group-management-member-row" key={member.id}>
+              <UserAvatar userId={member.id} displayName={getMemberDisplayName(member)} avatarUrl={member.avatarUrl} />
+              <span className="group-management-member-main">
+                <strong className="group-management-member-name">{getMemberDisplayName(member)}</strong>
+                <small className="group-management-member-meta">{member.email || formatPresence(member.isOnline, member.lastSeenAt, t)}</small>
+              </span>
+              <span className="group-management-member-role">
+                {isGroupOwner ? t('chat.groupOwnerRole') : t('chat.groupAdminManagement')}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="group-management-admin-note">{t('chat.adminFeatureUnavailable')}</p>
+    </section>
+  );
+}
 function GroupMemberProfileCard({
   member,
   friendship,
@@ -2636,6 +3434,8 @@ function GroupMemberProfileCard({
 }): JSX.Element {
   const displayName = getMemberDisplayName(member);
   const canMessage = Boolean(friendship && !isSelf);
+  const isOwner = member.role === 'OWNER';
+  const roleLabel = isOwner ? t('chat.groupOwnerRole') : t('chat.groupMemberRole');
 
   return (
     <section className="group-member-profile" aria-label={t('chat.groupMemberProfile')}>
@@ -2670,7 +3470,7 @@ function GroupMemberProfileCard({
         </div>
         <div className="group-member-profile-row">
           <dt>{t('chat.groupMemberRole')}</dt>
-          <dd>{t('chat.groupMemberRole')}</dd>
+          <dd>{roleLabel}</dd>
         </div>
       </dl>
 
@@ -2890,6 +3690,39 @@ function GroupInviteDialog({
   );
 }
 
+function sortGroupManagementMembers(
+  members: Conversation['members'],
+  currentUserId: string | null,
+): Conversation['members'] {
+  return [...members].sort((first, second) => {
+    const firstOwnerRank = first.role === 'OWNER' ? 0 : 1;
+    const secondOwnerRank = second.role === 'OWNER' ? 0 : 1;
+    if (firstOwnerRank !== secondOwnerRank) {
+      return firstOwnerRank - secondOwnerRank;
+    }
+
+    const firstSelfRank = currentUserId && first.id === currentUserId ? 0 : 1;
+    const secondSelfRank = currentUserId && second.id === currentUserId ? 0 : 1;
+    if (firstOwnerRank !== 0 && firstSelfRank !== secondSelfRank) {
+      return firstSelfRank - secondSelfRank;
+    }
+
+    const firstOnlineRank = first.isOnline ? 0 : 1;
+    const secondOnlineRank = second.isOnline ? 0 : 1;
+    if (firstOnlineRank !== secondOnlineRank) {
+      return firstOnlineRank - secondOnlineRank;
+    }
+
+    const firstName = getMemberDisplayName(first).toLowerCase();
+    const secondName = getMemberDisplayName(second).toLowerCase();
+    const nameOrder = firstName.localeCompare(secondName);
+    if (nameOrder !== 0) {
+      return nameOrder;
+    }
+
+    return first.id.localeCompare(second.id);
+  });
+}
 function getMemberDisplayName(member: Conversation['members'][number]): string {
   return getMessageSenderDisplayName(member);
 }
@@ -4803,15 +5636,6 @@ function renderHighlightedText(text: string, query: string): Array<string | JSX.
 
   return fragments;
 }
-
-
-
-
-
-
-
-
-
 
 
 

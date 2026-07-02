@@ -6,6 +6,8 @@ import {
   listConversations,
   listMessages,
   leaveGroupConversation as requestLeaveGroupConversation,
+  removeGroupMember as requestRemoveGroupMember,
+  updateGroupConversation as requestUpdateGroupConversation,
   updateGroupNickname as requestUpdateGroupNickname,
   updateGroupRemark as requestUpdateGroupRemark,
   type Conversation,
@@ -26,7 +28,7 @@ import {
   type CachedMessageRecord,
   type CachedMessageStatePatchInput,
 } from '../api/localCache.api';
-import { decryptMessage, encryptMessage, MESSAGE_ENCRYPTION_VERSION } from '../crypto/messageCrypto';
+import { decryptMessage, encryptMessage, isSupportedMessageEncryptionVersion } from '../crypto/messageCrypto';
 import { isNetworkRequestError } from '../utils/serverHealth';
 import { useNetworkStore } from './network.store';
 import {
@@ -37,6 +39,7 @@ import {
   sendRealtimeRead,
   sendRealtimeRecall,
   type ConversationMemberUpdatedPayload,
+  type ConversationUpdatedPayload,
   type MessageDeliveredPayload,
   type MessageEditedPayload,
   type MessageNewPayload,
@@ -119,9 +122,11 @@ interface ChatState {
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
   clearLocalConversation: (conversationId: string) => void;
   setSearchQuery: (query: string) => void;
+  updateGroupConversation: (conversationId: string, payload: { name?: string; intro?: string | null }) => Promise<boolean>;
   updateGroupNickname: (conversationId: string, groupNickname: string | null) => Promise<boolean>;
   updateGroupRemark: (conversationId: string, groupRemark: string | null) => Promise<boolean>;
   addGroupMembers: (conversationId: string, userIds: string[]) => Promise<void>;
+  removeGroupMember: (conversationId: string, memberUserId: string) => Promise<boolean>;
   leaveGroup: (conversationId: string) => Promise<boolean>;
   updatePresence: (payload: PresenceUpdatePayload) => void;
 }
@@ -518,6 +523,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       onConversationMemberUpdated: (payload) => {
         handleConversationMemberUpdated(payload, set);
       },
+      onConversationUpdated: (payload) => {
+        handleConversationUpdated(payload, set);
+      },
       onSessionKicked,
       onError: (payload) => {
         handleRealtimeError(payload, set);
@@ -874,6 +882,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       throw new Error('Failed to add group members');
     }
   },
+  updateGroupConversation: async (conversationId, payload) => {
+    set({ error: null });
+    try {
+      const conversation = await requestUpdateGroupConversation(conversationId, payload);
+      let nextConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (nextConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+          { currentUserId: state.currentUserId, preserveCurrentUserGroupRemark: true },
+        )),
+      }));
+      void cacheConversationSummaries(nextConversations);
+      return true;
+    } catch {
+      set({ error: 'Failed to save group info' });
+      return false;
+    }
+  },
   updateGroupNickname: async (conversationId, groupNickname) => {
     set({ error: null });
     try {
@@ -907,6 +934,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return true;
     } catch {
       set({ error: 'Failed to save group remark' });
+      return false;
+    }
+  },
+  removeGroupMember: async (conversationId, memberUserId) => {
+    set({ error: null });
+    try {
+      const conversation = await requestRemoveGroupMember(conversationId, memberUserId);
+      let nextConversations: Conversation[] = [];
+      set((state) => ({
+        conversations: (nextConversations = upsertOpenedConversation(
+          state.conversations,
+          conversation,
+          { currentUserId: state.currentUserId, preserveCurrentUserGroupRemark: true },
+        )),
+      }));
+      void cacheConversationSummaries(nextConversations);
+      return true;
+    } catch {
+      set({ error: 'Failed to remove group member' });
       return false;
     }
   },
@@ -1059,7 +1105,9 @@ async function toChatMessage(
     conversationId: message.conversationId,
     senderId: message.senderId,
     messageType: message.messageType,
-    plaintext: isRecalled ? '' : await decryptSafely(message.ciphertext, message.nonce, conversation),
+    plaintext: isRecalled
+      ? ''
+      : await decryptSafely(message.ciphertext, message.nonce, conversation, message.encryptionVersion),
     file: message.file,
     status: toLocalStatus(message.status),
     createdAt: message.createdAt,
@@ -1101,11 +1149,12 @@ async function cachedMessageToChatMessage(
   }
 
   const isRecalled = Boolean(record.recalledAt) || record.status === 'RECALLED';
+  const encryptionVersion = record.encryptionVersion ?? '';
   if (
     !isRecalled &&
     (!record.ciphertext ||
       !record.nonce ||
-      record.encryptionVersion !== MESSAGE_ENCRYPTION_VERSION)
+      !isSupportedMessageEncryptionVersion(encryptionVersion))
   ) {
     return null;
   }
@@ -1122,7 +1171,9 @@ async function cachedMessageToChatMessage(
     conversationId: record.conversationId,
     senderId: record.senderId,
     messageType: 'TEXT',
-    plaintext: isRecalled ? '' : await decryptSafely(ciphertext, nonce, conversation),
+    plaintext: isRecalled
+      ? ''
+      : await decryptSafely(ciphertext, nonce, conversation, encryptionVersion),
     file: null,
     status,
     createdAt: record.createdAt,
@@ -1161,7 +1212,12 @@ async function buildLastMessagePreview(
     return { lastMessagePlaintext: null, lastMessageDecryptionFailed: false };
   }
 
-  const plaintext = await decryptSafely(message.ciphertext, message.nonce, conversation);
+  const plaintext = await decryptSafely(
+    message.ciphertext,
+    message.nonce,
+    conversation,
+    message.encryptionVersion,
+  );
   return {
     lastMessagePlaintext: plaintext,
     lastMessageDecryptionFailed: plaintext === UNABLE_TO_DECRYPT_MESSAGE,
@@ -1500,7 +1556,12 @@ async function handleIncomingMessage(
     return;
   }
 
-  const plaintext = await decryptSafely(payload.ciphertext, payload.nonce, conversation);
+  const plaintext = await decryptSafely(
+    payload.ciphertext,
+    payload.nonce,
+    conversation,
+    payload.encryptionVersion,
+  );
   const existing = state.messagesByConversation[payload.conversationId] ?? [];
   const matched = payload.clientMessageId
     ? existing.find((message) => message.clientMessageId === payload.clientMessageId)
@@ -1641,7 +1702,12 @@ async function handleEdited(
     return;
   }
 
-  const plaintext = await decryptSafely(payload.ciphertext, payload.nonce, conversation);
+  const plaintext = await decryptSafely(
+    payload.ciphertext,
+    payload.nonce,
+    conversation,
+    payload.encryptionVersion,
+  );
   void cacheMessageStatePatches([
     buildCachedMessageStatePatch(payload.messageId, {
       ciphertext: payload.ciphertext,
@@ -1768,9 +1834,10 @@ async function decryptSafely(
   ciphertext: string,
   nonce: string,
   conversation: Conversation,
+  encryptionVersion: string,
 ): Promise<string> {
   try {
-    return await decryptMessage(ciphertext, nonce, conversation);
+    return await decryptMessage(ciphertext, nonce, conversation, encryptionVersion);
   } catch {
     return UNABLE_TO_DECRYPT_MESSAGE;
   }
@@ -2061,6 +2128,34 @@ function mergeConversationMembers(
     return member;
   });
 }
+function handleConversationUpdated(
+  payload: ConversationUpdatedPayload,
+  set: ChatSet,
+): void {
+  if (payload.reason !== 'group_updated') {
+    return;
+  }
+
+  let nextConversations: Conversation[] = [];
+  set((state) => {
+    const currentUserId = state.currentUserId;
+    const isCurrentUserMember = Boolean(
+      currentUserId && payload.conversation.members.some((member) => member.id === currentUserId && !member.leftAt),
+    );
+
+    if (!isCurrentUserMember) {
+      nextConversations = state.conversations;
+      return {};
+    }
+
+    nextConversations = upsertOpenedConversation(state.conversations, payload.conversation, {
+      currentUserId,
+      preserveCurrentUserGroupRemark: true,
+    });
+    return { conversations: nextConversations };
+  });
+  void cacheConversationSummaries(nextConversations);
+}
 function handleConversationMemberUpdated(
   payload: ConversationMemberUpdatedPayload,
   set: ChatSet,
@@ -2083,6 +2178,20 @@ function handleConversationMemberUpdated(
         preserveCurrentUserGroupRemark: true,
       });
       return { conversations: nextConversations };
+    }
+
+    if (payload.reason === 'group_member_removed' && state.currentUserId === payload.removedUserId) {
+      nextConversations = state.conversations.filter(
+        (conversation) => conversation.id !== payload.conversationId,
+      );
+      return {
+        conversations: nextConversations,
+        selectedConversationId:
+          state.selectedConversationId === payload.conversationId ? null : state.selectedConversationId,
+        isLoadingMessages:
+          state.selectedConversationId === payload.conversationId ? false : state.isLoadingMessages,
+        searchQuery: state.selectedConversationId === payload.conversationId ? '' : state.searchQuery,
+      };
     }
 
     nextConversations = state.conversations.map((conversation) => {
@@ -2114,7 +2223,7 @@ function patchConversationMember(
     return { ...item, ...member };
   });
 
-  if (!didUpdate && reason !== 'group_member_left') {
+  if (!didUpdate && (reason === 'group_member_left' || reason === 'group_member_removed')) {
     return conversation;
   }
 
@@ -2236,9 +2345,6 @@ function markOwnMessagesReadThrough(
     }),
   };
 }
-
-
-
 
 
 

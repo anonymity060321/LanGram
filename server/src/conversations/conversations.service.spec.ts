@@ -107,11 +107,15 @@ function conversationFixture(): unknown {
     id: 'conversation-id',
     type: ConversationType.DIRECT,
     title: null,
+    intro: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),
     updatedAt: new Date('2026-05-19T00:00:00.000Z'),
     members: [
       {
+        role: ConversationMemberRole.MEMBER,
         groupNickname: null,
+        groupRemark: null,
+        leftAt: null,
         user: {
           id: 'user-a',
           email: null,
@@ -120,7 +124,10 @@ function conversationFixture(): unknown {
         },
       },
       {
+        role: ConversationMemberRole.MEMBER,
         groupNickname: null,
+        groupRemark: null,
+        leftAt: null,
         user: {
           id: 'user-b',
           email: null,
@@ -138,9 +145,13 @@ function groupConversationFixture(): unknown {
     id: 'group-conversation-id',
     type: ConversationType.GROUP,
     title: 'Team Room',
+    intro: 'Team intro',
     members: [
       {
+        role: ConversationMemberRole.OWNER,
         groupNickname: null,
+        groupRemark: null,
+        leftAt: null,
         user: {
           id: 'user-a',
           email: null,
@@ -149,7 +160,10 @@ function groupConversationFixture(): unknown {
         },
       },
       {
+        role: ConversationMemberRole.MEMBER,
         groupNickname: null,
+        groupRemark: null,
+        leftAt: null,
         user: {
           id: 'user-b',
           email: null,
@@ -158,7 +172,10 @@ function groupConversationFixture(): unknown {
         },
       },
       {
+        role: ConversationMemberRole.MEMBER,
         groupNickname: null,
+        groupRemark: null,
+        leftAt: null,
         user: {
           id: 'user-c',
           email: null,
@@ -487,6 +504,188 @@ describe('ConversationsService', () => {
         }),
       }),
     );
+  });
+  it('allows group owner to update group name', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        title: 'New Team Room',
+      });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', { name: ' New Team Room ' }) as {
+      conversation: { title: string };
+      recipientConversations: Array<{ userId: string; conversation: { title: string } }>;
+    };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { title: 'New Team Room' },
+    });
+    expect(result.conversation.title).toBe('New Team Room');
+    expect(result.recipientConversations).toHaveLength(3);
+    expect(result.recipientConversations.map((item) => item.userId)).toEqual(['user-a', 'user-b', 'user-c']);
+  });
+
+  it('allows group owner to update group intro', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        intro: 'Updated intro',
+      });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', { intro: ' Updated intro ' }) as {
+      conversation: { intro: string | null };
+      recipientConversations: Array<{ userId: string; conversation: { intro: string | null } }>;
+    };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { intro: 'Updated intro' },
+    });
+    expect(result.conversation.intro).toBe('Updated intro');
+    expect(result.recipientConversations).toHaveLength(3);
+  });
+
+  it('allows group owner to update group name and intro together', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        title: 'New Team Room',
+        intro: 'Updated intro',
+      });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', {
+      name: ' New Team Room ',
+      intro: ' Updated intro ',
+    }) as { conversation: { title: string; intro: string | null } };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { title: 'New Team Room', intro: 'Updated intro' },
+    });
+    expect(result.conversation).toEqual(expect.objectContaining({ title: 'New Team Room', intro: 'Updated intro' }));
+  });
+
+  it('allows group owner to clear group intro', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        intro: null,
+      });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', { intro: null }) as {
+      conversation: { intro: string | null };
+    };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { intro: null },
+    });
+    expect(result.conversation.intro).toBeNull();
+  });
+
+  it('rejects group intro updates longer than 500 characters', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-a', 'group-conversation-id', { intro: 'a'.repeat(501) })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.findFirst).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty group name updates', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-a', 'group-conversation-id', { name: '   ' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.findFirst).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group name updates from normal members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(groupConversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-b', 'group-conversation-id', { name: 'Member Room' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group name updates from non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-x', 'group-conversation-id', { name: 'Hidden Room' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group name updates for direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-a', 'conversation-id', { name: 'Direct Room' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group intro updates from normal members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(groupConversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-b', 'group-conversation-id', { intro: 'Member intro' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group intro updates from non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-x', 'group-conversation-id', { intro: 'Hidden intro' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group intro updates for direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-a', 'conversation-id', { intro: 'Direct intro' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
   it('updates the current group member nickname and returns it in the conversation DTO', async () => {
     const prisma = createMockPrisma();
@@ -1025,7 +1224,7 @@ describe('ConversationsService', () => {
             userId: 'user-c',
           },
         },
-        data: { leftAt: null, joinedAt: expect.any(Date) },
+        data: { leftAt: null, joinedAt: expect.any(Date), role: ConversationMemberRole.MEMBER },
       }),
     );
     expect(result.conversation.members.find((member) => member.id === 'user-c')).toMatchObject({
@@ -1054,6 +1253,101 @@ describe('ConversationsService', () => {
       type: ConversationType.GROUP,
     });
   });
-});
 
+  it('allows a group owner to remove an active member', async () => {
+    const prisma = createMockPrisma();
+    const updatedConversation = {
+      ...(groupConversationFixture() as Record<string, unknown>),
+      members: (groupConversationFixture() as { members: unknown[] }).members.filter(
+        (member) => (member as { user: { id: string } }).user.id !== 'user-b',
+      ),
+    };
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce(updatedConversation);
+    prisma.conversationMember.update.mockResolvedValue({});
+    const service = createService(prisma);
 
+    const result = await service.removeGroupMember('user-a', 'group-conversation-id', 'user-b');
+
+    expect(prisma.conversationMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          conversationId_userId: {
+            conversationId: 'group-conversation-id',
+            userId: 'user-b',
+          },
+        },
+        data: { leftAt: expect.any(Date) },
+      }),
+    );
+    expect(result).toMatchObject({
+      conversationId: 'group-conversation-id',
+      removedUserId: 'user-b',
+      member: expect.objectContaining({ id: 'user-b', userId: 'user-b', role: ConversationMemberRole.MEMBER, leftAt: expect.any(Date) }),
+      remainingMemberIds: ['user-a', 'user-c'],
+    });
+  });
+
+  it('rejects removing members when the operator is a normal member', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(groupConversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.removeGroupMember('user-b', 'group-conversation-id', 'user-c')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects removing members when the operator is not an active member', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.removeGroupMember('user-x', 'group-conversation-id', 'user-b')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects removing members from direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.removeGroupMember('user-a', 'conversation-id', 'user-b')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects removing yourself through the remove member API', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(service.removeGroupMember('user-a', 'group-conversation-id', 'user-a')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.findFirst).not.toHaveBeenCalled();
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects removing another owner', async () => {
+    const prisma = createMockPrisma();
+    const conversation = {
+      ...(groupConversationFixture() as Record<string, unknown>),
+      members: (groupConversationFixture() as { members: Array<Record<string, unknown>> }).members.map((member) =>
+        (member.user as { id: string }).id === 'user-c'
+          ? { ...member, role: ConversationMemberRole.OWNER }
+          : member,
+      ),
+    };
+    prisma.conversation.findFirst.mockResolvedValue(conversation);
+    const service = createService(prisma);
+
+    await expect(service.removeGroupMember('user-a', 'group-conversation-id', 'user-c')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversationMember.update).not.toHaveBeenCalled();
+  });});

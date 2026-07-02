@@ -1228,6 +1228,472 @@ textarea,
 .group-member-profile-secondary {
   width: 100%;
 }
+
+
+.group-profile-actions {
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.group-profile-actions.is-three-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.group-profile-actions.is-two-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.group-profile-action-button {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel-muted);
+  color: var(--color-text);
+  padding: 8px 4px;
+  cursor: pointer;
+}
+
+.group-profile-action-button:hover:not(:disabled),
+.group-profile-action-button.is-active {
+  border-color: var(--color-border-strong);
+  background: var(--color-interactive-hover);
+}
+
+.group-profile-action-button:focus-visible,
+.group-management-close:focus-visible,
+.group-management-back-button:focus-visible,
+.group-management-row.is-clickable:focus-visible,
+.group-management-danger-button:focus-visible {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: 2px;
+}
+
+.group-profile-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.group-profile-action-button.is-danger {
+  color: var(--color-danger);
+}
+
+.group-profile-action-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.group-profile-action-label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-management-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.group-management-panel {
+  width: min(520px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+}
+
+.group-management-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-border-muted);
+  padding: 16px 18px;
+}
+
+.group-management-title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.group-management-back-button {
+  width: fit-content;
+  margin: 0 0 8px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel-muted);
+  color: var(--color-primary);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.group-management-close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel-muted);
+  cursor: pointer;
+}
+
+.group-management-close:hover,
+.group-management-back-button:hover {
+  background: var(--color-interactive-hover);
+}
+
+.group-management-close img {
+  width: 16px;
+  height: 16px;
+}
+
+.group-management-body {
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.group-management-profile,
+.group-management-section {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 10px;
+  background: var(--color-bg-panel-muted);
+  padding: 14px;
+}
+
+.group-management-avatar {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 12px;
+  background: var(--color-bg-elevated);
+}
+
+.group-management-avatar img {
+  width: 34px;
+  height: 34px;
+}
+
+.group-management-field {
+  display: grid;
+  gap: 6px;
+}
+
+.group-management-label {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.group-management-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.group-management-input:focus {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: 2px;
+}
+
+.group-management-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.group-management-textarea {
+  min-height: 72px;
+  max-height: 120px;
+  resize: vertical;
+}
+
+.group-management-save-status {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.group-management-unsaved-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.group-management-unsaved-confirm-dialog {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  padding: 18px;
+}
+
+.group-management-unsaved-confirm-title {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.group-management-unsaved-confirm-message {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.group-management-unsaved-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.group-management-unsaved-confirm-secondary,
+.group-management-unsaved-confirm-danger {
+  min-height: 34px;
+  border-radius: 10px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.group-management-unsaved-confirm-secondary {
+  border: 1px solid var(--color-border-muted);
+  background: var(--color-bg-panel-muted);
+  color: var(--color-text);
+}
+
+.group-management-unsaved-confirm-danger {
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.group-management-row {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 10px 8px;
+  text-align: left;
+}
+
+.group-management-row + .group-management-row {
+  border-top: 1px solid var(--color-border-muted);
+  border-radius: 0;
+}
+
+.group-management-row.is-clickable {
+  cursor: pointer;
+}
+
+.group-management-row.is-clickable:hover {
+  background: var(--color-interactive-hover);
+}
+
+.group-management-row-label,
+.group-management-row-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-management-row-label {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.group-management-row-value {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.group-management-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--color-border-muted);
+  padding: 10px 16px;
+}
+
+.group-management-footer .secondary-button,
+.group-management-footer .primary-button {
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.group-management-subview {
+  display: grid;
+  gap: 10px;
+}
+
+.group-management-subview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.group-management-member-count {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.group-management-search {
+  display: block;
+}
+
+.group-management-search-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.group-management-search-input:focus {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: 2px;
+}
+
+.group-management-member-list {
+  display: grid;
+  gap: 8px;
+}
+
+.group-management-member-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel-muted);
+  padding: 9px;
+}
+
+.group-management-member-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.group-management-member-name,
+.group-management-member-meta,
+.group-management-member-role {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-management-member-name {
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.group-management-member-meta,
+.group-management-member-role,
+.group-management-empty,
+.group-management-admin-note,
+.group-management-placeholder {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.group-management-member-role {
+  border: 1px solid var(--color-border-muted);
+  border-radius: 999px;
+  background: var(--color-bg-panel);
+  padding: 3px 7px;
+  font-weight: 700;
+}
+
+.group-management-member-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.group-management-danger-button {
+  border: 1px solid var(--color-danger);
+  border-radius: 8px;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.group-management-danger-button:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+}
+
+.group-management-danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.group-management-error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 13px;
+}
 .sidebar-header,
 .chat-header,
 .settings-header {
@@ -3301,6 +3767,10 @@ textarea,
   margin: 0;
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+
+.confirm-dialog-error {
+  color: var(--color-danger) !important;
 }
 
 .confirm-dialog-actions {
@@ -8768,8 +9238,4 @@ select:focus {
   --color-own-message: #223b5f;
   --color-peer-message: #1b2634;
 }
-
-
-
-
 

@@ -1,16 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 import { AuthenticatedUser } from '../common/current-user';
 import { REALTIME_EVENTS } from '../realtime/realtime.events';
 import { RealtimeSessionService } from '../realtime/realtime-session.service';
-import { ConversationsService, type AddGroupMembersResult, type GroupMemberRealtimeDto, type LeaveGroupResult } from './conversations.service';
+import { ConversationsService, type AddGroupMembersResult, type GroupMemberRealtimeDto, type LeaveGroupResult, type RemoveGroupMemberResult, type UpdateGroupConversationResult } from './conversations.service';
 import { AddGroupMembersDto } from './dto/add-group-members.dto';
 import { CreateDirectConversationDto } from './dto/create-direct-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
 import { MarkConversationReadDto } from './dto/mark-conversation-read.dto';
 import { UpdateGroupNicknameDto } from './dto/update-group-nickname.dto';
+import { UpdateGroupConversationDto } from './dto/update-group-conversation.dto';
 import { UpdateGroupRemarkDto } from './dto/update-group-remark.dto';
 
 interface AuthenticatedRequest extends Request {
@@ -28,6 +29,8 @@ interface ConversationMemberRealtimeDto {
   lastSeenAt?: Date | string | null;
   groupNickname?: string | null;
   groupRemark?: string | null;
+  role?: string;
+  leftAt?: Date | string | null;
 }
 
 interface ConversationRealtimeDto {
@@ -90,6 +93,66 @@ export class ConversationsController {
         {
           conversationId: result.conversationId,
           reason: 'group_member_added' as const,
+          conversation: item.conversation,
+        },
+      );
+    }
+  }
+  @Delete(':id/members/:memberUserId')
+  async removeGroupMember(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') conversationId: string,
+    @Param('memberUserId') memberUserId: string,
+  ): Promise<unknown> {
+    const result = await this.conversationsService.removeGroupMember(
+      request.user.id,
+      conversationId,
+      memberUserId,
+    );
+    this.broadcastGroupMemberRemoved(result);
+    return result.conversation;
+  }
+
+  private broadcastGroupMemberRemoved(result: RemoveGroupMemberResult): void {
+    const payload = {
+      conversationId: result.conversationId,
+      reason: 'group_member_removed' as const,
+      member: toPublicConversationMember(result.member),
+      removedUserId: result.removedUserId,
+    };
+
+    for (const memberId of result.remainingMemberIds) {
+      this.realtimeSessionService
+        .getSocket(memberId)
+        ?.emit(REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED, payload);
+    }
+
+    this.realtimeSessionService
+      .getSocket(result.removedUserId)
+      ?.emit(REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED, payload);
+  }
+  @Patch(':id/group')
+  async updateGroupConversation(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') conversationId: string,
+    @Body() dto: UpdateGroupConversationDto,
+  ): Promise<unknown> {
+    const result = await this.conversationsService.updateGroupConversation(
+      request.user.id,
+      conversationId,
+      dto,
+    );
+    this.broadcastConversationUpdated(result);
+    return result.conversation;
+  }
+
+  private broadcastConversationUpdated(result: UpdateGroupConversationResult): void {
+    for (const item of result.recipientConversations) {
+      this.realtimeSessionService.getSocket(item.userId)?.emit(
+        REALTIME_EVENTS.CONVERSATION_UPDATED,
+        {
+          conversationId: result.conversationId,
+          reason: 'group_updated' as const,
           conversation: item.conversation,
         },
       );
@@ -203,10 +266,3 @@ function isConversationRealtimeDto(value: unknown): value is ConversationRealtim
   const conversation = value as { id?: unknown; members?: unknown };
   return typeof conversation.id === 'string' && Array.isArray(conversation.members);
 }
-
-
-
-
-
-
-

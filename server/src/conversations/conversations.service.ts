@@ -29,9 +29,16 @@ type ConversationWithMembers = {
   id: string;
   type: ConversationType;
   title: string | null;
+  intro: string | null;
   createdAt: Date;
   updatedAt: Date;
-  members: Array<{ groupNickname: string | null; groupRemark: string | null; leftAt: Date | null; user: UserSummary }>;
+  members: Array<{
+    role: ConversationMemberRole;
+    groupNickname: string | null;
+    groupRemark: string | null;
+    leftAt: Date | null;
+    user: UserSummary;
+  }>;
 };
 
 export type GroupMemberRealtimeDto = {
@@ -46,6 +53,7 @@ export type GroupMemberRealtimeDto = {
   lastSeenAt?: Date | string | null;
   groupNickname?: string | null;
   groupRemark?: string | null;
+  role?: ConversationMemberRole;
   leftAt?: Date | string | null;
 };
 
@@ -57,6 +65,25 @@ export type LeaveGroupResult = {
 };
 
 export type AddGroupMembersResult = {
+  conversationId: string;
+  conversation: unknown;
+  recipientConversations: Array<{ userId: string; conversation: unknown }>;
+};
+
+export type RemoveGroupMemberResult = {
+  conversationId: string;
+  removedUserId: string;
+  member: GroupMemberRealtimeDto;
+  conversation: unknown;
+  remainingMemberIds: string[];
+};
+
+export type UpdateGroupConversationPayload = {
+  name?: string;
+  intro?: string | null;
+};
+
+export type UpdateGroupConversationResult = {
   conversationId: string;
   conversation: unknown;
   recipientConversations: Array<{ userId: string; conversation: unknown }>;
@@ -340,6 +367,7 @@ export class ConversationsService {
             data: {
               leftAt: null,
               joinedAt,
+              role: ConversationMemberRole.MEMBER,
             },
           }),
         ),
@@ -371,6 +399,142 @@ export class ConversationsService {
       conversationId,
       conversation: this.toConversationDto(updatedConversation, userId),
       recipientConversations,
+    };
+  }
+  async removeGroupMember(
+    userId: string,
+    conversationId: string,
+    memberUserId: string,
+  ): Promise<RemoveGroupMemberResult> {
+    if (userId === memberUserId) {
+      throw new BadRequestException('Group owner cannot remove themselves');
+    }
+
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    if (conversation.type !== ConversationType.GROUP) {
+      throw new BadRequestException('Only group conversations can remove members');
+    }
+
+    const typedConversation = conversation as unknown as ConversationWithMembers;
+    const operator = typedConversation.members.find((member) => member.user.id === userId);
+    if (!operator || operator.role !== ConversationMemberRole.OWNER) {
+      throw new ForbiddenException('Only the group owner can remove members');
+    }
+
+    const target = typedConversation.members.find((member) => member.user.id === memberUserId);
+    if (!target) {
+      throw new BadRequestException('Target member is not an active group member');
+    }
+
+    if (target.role === ConversationMemberRole.OWNER) {
+      throw new BadRequestException('Group owner cannot be removed');
+    }
+
+    const leftAt = new Date();
+    await this.prisma.conversationMember.update({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId: memberUserId,
+        },
+      },
+      data: { leftAt },
+    });
+
+    const updatedConversation = await this.findAccessibleConversation(conversationId, userId);
+
+    return {
+      conversationId,
+      removedUserId: memberUserId,
+      member: this.toConversationMemberDto(
+        target.user,
+        target.groupNickname,
+        target.groupRemark,
+        target.role,
+        leftAt,
+      ) as GroupMemberRealtimeDto,
+      conversation: this.toConversationDto(updatedConversation, userId),
+      remainingMemberIds: typedConversation.members
+        .map((member) => member.user.id)
+        .filter((memberId) => memberId !== memberUserId),
+    };
+  }
+
+  async updateGroupConversation(
+    userId: string,
+    conversationId: string,
+    payload: UpdateGroupConversationPayload,
+  ): Promise<UpdateGroupConversationResult> {
+    const data: Prisma.ConversationUpdateInput = {};
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'name')) {
+      const normalizedName = payload.name?.trim() ?? '';
+      if (!normalizedName) {
+        throw new BadRequestException('Group name is required');
+      }
+      data.title = normalizedName;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'intro')) {
+      const normalizedIntro = payload.intro?.trim() ?? '';
+      if (normalizedIntro.length > 500) {
+        throw new BadRequestException('Group intro is too long');
+      }
+      data.intro = normalizedIntro.length > 0 ? normalizedIntro : null;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('No group information changes provided');
+    }
+
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        members: { some: { userId, leftAt: null } },
+      },
+      include: this.conversationInclude(),
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException('Conversation is not accessible');
+    }
+
+    if (conversation.type !== ConversationType.GROUP) {
+      throw new BadRequestException('Only group conversations can be updated');
+    }
+
+    const typedConversation = conversation as unknown as ConversationWithMembers;
+    const operator = typedConversation.members.find((member) => member.user.id === userId);
+    if (!operator || operator.role !== ConversationMemberRole.OWNER) {
+      throw new ForbiddenException('Only the group owner can update group information');
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data,
+    });
+
+    const updatedConversation = await this.findAccessibleConversation(conversationId, userId);
+    const activeMemberIds = updatedConversation.members.map((member) => member.user.id);
+
+    return {
+      conversationId,
+      conversation: this.toConversationDto(updatedConversation, userId),
+      recipientConversations: activeMemberIds.map((memberId) => ({
+        userId: memberId,
+        conversation: this.toConversationDto(updatedConversation, memberId),
+      })),
     };
   }
   async updateGroupNickname(
@@ -507,6 +671,7 @@ export class ConversationsService {
         leavingMember.user,
         leavingMember.groupNickname,
         leavingMember.groupRemark,
+        leavingMember.role,
         leftAt,
       ) as GroupMemberRealtimeDto,
       remainingMemberIds: typedConversation.members
@@ -658,6 +823,7 @@ export class ConversationsService {
         select: {
           groupNickname: true,
           groupRemark: true,
+          role: true,
           leftAt: true,
           user: { select: this.userSelect() },
         },
@@ -737,12 +903,14 @@ export class ConversationsService {
       id: conversation.id,
       type: conversation.type,
       title: conversation.title,
+      intro: conversation.intro,
       peer: peer ? this.toUserDto(peer) : null,
       members: conversation.members.map((member) =>
         this.toConversationMemberDto(
           member.user,
           member.groupNickname,
           member.user.id === currentUserId ? member.groupRemark : null,
+          member.role,
           member.leftAt,
         ),
       ),
@@ -774,6 +942,7 @@ export class ConversationsService {
     user: UserSummary,
     groupNickname: string | null,
     groupRemark: string | null,
+    role: ConversationMemberRole = ConversationMemberRole.MEMBER,
     leftAt: Date | null = null,
   ): unknown {
     return {
@@ -781,6 +950,7 @@ export class ConversationsService {
       userId: user.id,
       groupNickname,
       groupRemark,
+      role,
       leftAt,
     };
   }
@@ -833,12 +1003,3 @@ export class ConversationsService {
     return userId < friendUserId ? [userId, friendUserId] : [friendUserId, userId];
   }
 }
-
-
-
-
-
-
-
-
-

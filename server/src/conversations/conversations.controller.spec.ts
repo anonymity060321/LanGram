@@ -4,6 +4,77 @@ import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
 
 describe('ConversationsController', () => {
+  it('emits group updated events only to active group members after group name changes', async () => {
+    const ownerConversation = {
+      id: 'group-conversation-id',
+      type: 'GROUP',
+      title: 'New Room',
+      intro: 'Updated intro',
+      peer: null,
+      members: [
+        { id: 'user-a', email: 'a@example.test', displayName: 'User A', avatarUrl: null, statusMessage: null },
+        { id: 'user-b', email: 'b@example.test', displayName: 'User B', avatarUrl: null, statusMessage: null },
+      ],
+      memberCount: 2,
+    };
+    const memberConversation = { ...ownerConversation };
+    const conversationsService = {
+      updateGroupConversation: jest.fn().mockResolvedValue({
+        conversationId: 'group-conversation-id',
+        conversation: ownerConversation,
+        recipientConversations: [
+          { userId: 'user-a', conversation: ownerConversation },
+          { userId: 'user-b', conversation: memberConversation },
+        ],
+      }),
+    } as unknown as ConversationsService;
+    const userASocket = { emit: jest.fn() };
+    const userBSocket = { emit: jest.fn() };
+    const nonMemberSocket = { emit: jest.fn() };
+    const realtimeSessionService = {
+      getSocket: jest.fn((userId: string) => {
+        if (userId === 'user-a') return userASocket;
+        if (userId === 'user-b') return userBSocket;
+        if (userId === 'user-x') return nonMemberSocket;
+        return null;
+      }),
+    } as unknown as RealtimeSessionService;
+    const controller = new ConversationsController(conversationsService, realtimeSessionService);
+
+    const result = await controller.updateGroupConversation(
+      { user: { id: 'user-a' } } as never,
+      'group-conversation-id',
+      { name: ' New Room ', intro: ' Updated intro ' },
+    );
+
+    expect(result).toBe(ownerConversation);
+    expect(conversationsService.updateGroupConversation).toHaveBeenCalledWith(
+      'user-a',
+      'group-conversation-id',
+      { name: ' New Room ', intro: ' Updated intro ' },
+    );
+    expect(userASocket.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.CONVERSATION_UPDATED,
+      expect.objectContaining({
+        conversationId: 'group-conversation-id',
+        reason: 'group_updated',
+        conversation: ownerConversation,
+      }),
+    );
+    expect(userBSocket.emit).toHaveBeenCalledWith(
+      REALTIME_EVENTS.CONVERSATION_UPDATED,
+      expect.objectContaining({
+        conversationId: 'group-conversation-id',
+        reason: 'group_updated',
+        conversation: memberConversation,
+      }),
+    );
+    expect(nonMemberSocket.emit).not.toHaveBeenCalled();
+    const payload = userASocket.emit.mock.calls[0][1];
+    expect(JSON.stringify(payload)).not.toContain('token');
+    expect(JSON.stringify(payload)).not.toContain('ciphertext');
+    expect(payload.conversation.intro).toBe('Updated intro');
+  });
   it('emits group member updates only to conversation members after group nickname changes', async () => {
     const updatedConversation = {
       id: 'group-conversation-id',
@@ -286,6 +357,76 @@ describe('ConversationsController', () => {
     expect(JSON.stringify(userCSocket.emit.mock.calls[0][1])).not.toContain('token');
     expect(JSON.stringify(userCSocket.emit.mock.calls[0][1])).not.toContain('ciphertext');
   });
+  it('emits removed group member updates to remaining active members and the removed member', async () => {
+    const removedAt = new Date('2026-06-30T08:00:00.000Z');
+    const updatedConversation = {
+      id: 'group-conversation-id',
+      type: 'GROUP',
+      title: 'Project Room',
+      peer: null,
+      members: [
+        { id: 'user-a', displayName: 'User A', email: null, role: 'OWNER', leftAt: null },
+        { id: 'user-c', displayName: 'User C', email: null, role: 'MEMBER', leftAt: null },
+      ],
+      memberCount: 2,
+    };
+    const conversationsService = {
+      removeGroupMember: jest.fn().mockResolvedValue({
+        conversationId: 'group-conversation-id',
+        removedUserId: 'user-b',
+        conversation: updatedConversation,
+        member: {
+          id: 'user-b',
+          userId: 'user-b',
+          email: 'b@example.test',
+          displayName: 'User B',
+          avatarUrl: null,
+          groupNickname: null,
+          groupRemark: 'Private B',
+          role: 'MEMBER',
+          leftAt: removedAt,
+        },
+        remainingMemberIds: ['user-a', 'user-c'],
+      }),
+    } as unknown as ConversationsService;
+    const userASocket = { emit: jest.fn() };
+    const userBSocket = { emit: jest.fn() };
+    const userCSocket = { emit: jest.fn() };
+    const nonMemberSocket = { emit: jest.fn() };
+    const realtimeSessionService = {
+      getSocket: jest.fn((userId: string) => {
+        if (userId === 'user-a') return userASocket;
+        if (userId === 'user-b') return userBSocket;
+        if (userId === 'user-c') return userCSocket;
+        if (userId === 'user-x') return nonMemberSocket;
+        return null;
+      }),
+    } as unknown as RealtimeSessionService;
+    const controller = new ConversationsController(conversationsService, realtimeSessionService);
+
+    const result = await controller.removeGroupMember(
+      { user: { id: 'user-a' } } as never,
+      'group-conversation-id',
+      'user-b',
+    );
+
+    expect(result).toBe(updatedConversation);
+    expect(conversationsService.removeGroupMember).toHaveBeenCalledWith('user-a', 'group-conversation-id', 'user-b');
+    for (const socket of [userASocket, userBSocket, userCSocket]) {
+      expect(socket.emit).toHaveBeenCalledWith(
+        REALTIME_EVENTS.CONVERSATION_MEMBER_UPDATED,
+        expect.objectContaining({
+          conversationId: 'group-conversation-id',
+          reason: 'group_member_removed',
+          removedUserId: 'user-b',
+          member: expect.objectContaining({ id: 'user-b', role: 'MEMBER', leftAt: removedAt }),
+        }),
+      );
+    }
+    expect(nonMemberSocket.emit).not.toHaveBeenCalled();
+    const payload = userASocket.emit.mock.calls[0][1];
+    expect(payload.member).not.toHaveProperty('groupRemark');
+    expect(JSON.stringify(payload)).not.toContain('token');
+    expect(JSON.stringify(payload)).not.toContain('ciphertext');
+  });
 });
-
-

@@ -20,6 +20,7 @@ export type ConversationUser = Pick<
   userId?: string;
   groupNickname?: string | null;
   groupRemark?: string | null;
+  role?: 'OWNER' | 'MEMBER' | string;
   leftAt?: string | null;
 };
 
@@ -27,6 +28,7 @@ export interface Conversation {
   id: string;
   type: ConversationType;
   title: string | null;
+  intro?: string | null;
   peer: ConversationUser | null;
   members: ConversationUser[];
   memberCount: number;
@@ -92,6 +94,15 @@ export function addGroupMembers(
     body: JSON.stringify({ userIds }),
   });
 }
+export function updateGroupConversation(
+  conversationId: string,
+  payload: { name?: string; intro?: string | null },
+): Promise<Conversation> {
+  return apiRequest(`/conversations/${conversationId}/group`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
 export function updateGroupNickname(
   conversationId: string,
   groupNickname: string | null,
@@ -109,6 +120,15 @@ export function updateGroupRemark(
   return apiRequest(`/conversations/${conversationId}/group-remark`, {
     method: 'PATCH',
     body: JSON.stringify({ groupRemark }),
+  });
+}
+
+export function removeGroupMember(
+  conversationId: string,
+  memberUserId: string,
+): Promise<Conversation> {
+  return apiRequest(`/conversations/${conversationId}/members/${memberUserId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -145,8 +165,3 @@ export function markConversationRead(
     body: JSON.stringify({ messageId }),
   });
 }
-
-
-
-
-

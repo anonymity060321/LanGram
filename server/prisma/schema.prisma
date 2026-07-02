@@ -256,6 +256,7 @@ model Conversation {
   id              String           @id @default(uuid()) @db.Uuid
   type            ConversationType
   title           String?
+  intro           String?          @db.VarChar(500)
   createdByUserId String?          @map("created_by_user_id") @db.Uuid
   directUserAId   String?          @map("direct_user_a_id") @db.Uuid
   directUserBId   String?          @map("direct_user_b_id") @db.Uuid
