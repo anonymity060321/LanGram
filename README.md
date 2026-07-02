@@ -6,35 +6,66 @@
 ![Database](https://img.shields.io/badge/database-PostgreSQL-336791)
 ![License](https://img.shields.io/badge/license-TBD-lightgrey)
 
-LanGram is a desktop-first, LAN-first chat app built with Tauri, React, NestJS, Prisma, PostgreSQL, and Socket.IO.
+LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面向 Windows 桌面端，目标是先完成局域网 / 小规模聊天 MVP，再逐步扩展到跨网段和 WAN 场景。
 
-## Overview / 项目概览
+## 目录
 
-LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面向 Windows 桌面端。项目目标是先完成局域网 / 小规模聊天 MVP，再逐步扩展到跨网段和 WAN 场景。
+- [项目背景](#项目背景)
+- [项目目标](#项目目标)
+- [功能特性](#功能特性)
+- [技术栈](#技术栈)
+- [系统架构](#系统架构)
+- [项目结构](#项目结构)
+- [数据库与 Migration](#数据库与-migration)
+- [安装与运行](#安装与运行)
+- [开发与验证命令](#开发与验证命令)
+- [安全说明](#安全说明)
+- [当前状态](#当前状态)
+- [Roadmap](#roadmap)
+- [License](#license)
 
-当前版本聚焦：
+## 项目背景
 
-- Desktop-first Windows client
-- LAN-first MVP chat workflow
-- Realtime direct chat and group chat
-- Group chat management panel
-- Client-side MVP message content encryption
-- Server-side relay and sync with Socket.IO
+LanGram 的目标是构建一个稳定、可运行、可验证的桌面端聊天应用。当前阶段优先服务小规模局域网、校园网和实验环境，先完成 MVP 级核心聊天体验，再逐步扩展到跨网段和 WAN 场景。
 
-## Screenshots
+项目采用客户端 + 服务端架构。客户端负责 Telegram-like 桌面 UI、桌面窗口能力、本地文件能力、消息输入体验和 MVP 消息内容加密；服务端负责认证、好友关系、会话、消息转发、文件中转、群管理和实时事件同步。
 
-> 截图将在 UI 稳定后补充。
+当前版本不是生产级安全通信系统，也不是完整 E2EE / Secret Chat 实现。安全设计以“服务端不处理消息明文”和“客户端 MVP 加密”为当前边界。
 
-## Features
+## 项目目标
 
-### Account & Friends
+### 当前 MVP 目标
 
-- [x] 邮箱 / 临时账号基础能力
+- Windows desktop first
+- 单聊
+- 群聊
+- 好友系统
+- 图片 / 文件消息
+- 群管理
+- 实时同步
+- MVP 消息加密
+- PostgreSQL 持久化
+
+### 长期目标
+
+- 跨网段 / WAN 场景支持
+- 完整管理员机制
+- 完整 E2EE
+- 多设备完整同步
+- P2P 能力
+- 更完整的群管理能力
+
+## 功能特性
+
+### 账号与好友
+
+- [x] 账号基础能力
+- [x] 邮箱 / 临时账号基础流程
 - [x] 好友系统
 - [x] 好友申请实时刷新
 - [x] 删除好友应用内二次确认
 
-### Direct Chat
+### 单聊
 
 - [x] 单聊会话
 - [x] 文本消息
@@ -48,7 +79,7 @@ LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面
 - [x] emoji 面板
 - [x] 发送快捷键菜单，选中项使用 ✔
 
-### Group Chat
+### 群聊
 
 - [x] 群聊基础能力
 - [x] 群聊文本 / 图片 / 文件消息
@@ -76,7 +107,7 @@ LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面
 - [x] group_member_removed 实时同步
 - [x] 管理员只读 / 占位视图
 
-### Files & Images
+### 文件与图片
 
 - [x] 图片发送与预览
 - [x] 图片预览滚轮缩放
@@ -88,7 +119,7 @@ LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面
 - [x] 文件消息卡片横向布局
 - [x] 移除旧 client/public/file_icon 资源
 
-### Realtime & Sync
+### 实时同步
 
 - [x] Socket.IO realtime gateway
 - [x] 好友申请实时刷新
@@ -99,7 +130,7 @@ LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面
 - [x] 群成员变更多端同步
 - [x] 群资料变更多端同步
 
-### MVP Security
+### MVP 加密
 
 - [x] AES-GCM MVP message encryption
 - [x] 服务端只保存 / 转发 ciphertext、nonce、encryptionVersion
@@ -107,56 +138,87 @@ LanGram 是一个基于 Tauri + React + NestJS 的桌面聊天应用，优先面
 - [x] 群聊离线成员后续上线可解密新群消息
 - [x] token/session 不写入 localStorage
 
-## Roadmap
-
-- [ ] 完整管理员机制
-- [ ] 管理员任命 / 取消管理员
-- [ ] 群主转让
-- [ ] 群头像上传
-- [ ] 邀请链接真实生成
-- [ ] 群公告
-- [ ] @ 功能
-- [ ] 举报系统
-- [ ] P2P
-- [ ] 完整 E2EE
-- [ ] 多设备完整同步
-- [ ] 完整 WAN 部署方案
-
-## Tech Stack
+## 技术栈
 
 | Layer | Stack |
 |---|---|
 | Desktop client | Tauri, React, TypeScript, Rust |
-| State | Zustand |
-| Realtime | Socket.IO client / Socket.IO Gateway |
+| State management | Zustand |
+| Realtime client | Socket.IO client |
 | Server | NestJS, TypeScript |
+| Realtime server | Socket.IO Gateway |
 | ORM | Prisma |
 | Database | PostgreSQL |
-| Local capability | Tauri / Rust file and window APIs |
-| UI | Telegram-like desktop layout |
+| Local desktop capability | Tauri / Rust file and window APIs |
+| Message crypto | Web Crypto AES-GCM MVP encryption |
 
-## Architecture
+## 系统架构
 
-LanGram 使用中心服务端模式：客户端负责桌面体验、本地能力、消息加解密和实时连接；服务端负责认证、会话、成员关系、文件中转、数据库持久化和 Socket.IO 同步。
+LanGram 使用中心服务端模式。客户端通过 REST API 完成认证、会话、文件等请求，通过 Socket.IO 接收实时事件；服务端使用 NestJS 组织业务模块，通过 Prisma 访问 PostgreSQL，并通过 Socket.IO Gateway 向在线客户端推送消息、好友、群成员和群资料变更。
 
 ```text
-client/
-  Tauri + React + TypeScript
-  Zustand stores
-  Socket.IO client
-  Local file / window capabilities
-
-server/
-  NestJS application
-  Prisma ORM
-  PostgreSQL
-  Socket.IO Gateway
-
-docs/
-  Project specs and development notes
+┌─────────────────────────────────────┐
+│              Client                 │
+│  Tauri + React + TypeScript          │
+│  Zustand Store                       │
+│  Socket.IO Client                    │
+│  Web Crypto AES-GCM                  │
+│  Rust / Tauri local capabilities     │
+└──────────────────┬──────────────────┘
+                   │ REST + WebSocket
+┌──────────────────▼──────────────────┐
+│              Server                 │
+│  NestJS                              │
+│  Socket.IO Gateway                   │
+│  Prisma ORM                          │
+│  Auth / Friends / Conversations      │
+│  Messages / Group Management         │
+└──────────────────┬──────────────────┘
+                   │
+┌──────────────────▼──────────────────┐
+│             PostgreSQL              │
+│  users / friendships / conversations │
+│  conversation_members / messages     │
+│  file metadata                       │
+└─────────────────────────────────────┘
 ```
 
-## Database / Migrations
+## 项目结构
+
+```text
+LanGram/
+  README.md
+  docs/
+    LanGram_MVP_Codex_Spec.md
+    Phase_8_13_Windows_Notifications.md
+  client/
+    src/
+      api/
+      crypto/
+      i18n/
+      pages/
+      realtime/
+      stores/
+      utils/
+    src-tauri/
+      src/
+  server/
+    prisma/
+      schema.prisma
+      migrations/
+    src/
+      auth/
+      conversations/
+      files/
+      friends/
+      messages/
+      realtime/
+      users/
+```
+
+## 数据库与 Migration
+
+数据库使用 PostgreSQL，服务端通过 Prisma ORM 访问。Prisma schema 位于 `server/prisma/schema.prisma`，migration 位于 `server/prisma/migrations/`。
 
 当前重要 migration：
 
@@ -165,7 +227,7 @@ docs/
   - 字段类型：`VARCHAR(500)`
   - 用于群简介保存
 
-开发环境更新数据库：
+开发环境应用 migration：
 
 ```powershell
 cd server
@@ -186,26 +248,49 @@ cd server
 npx.cmd prisma generate
 ```
 
-## Security Notes
+## 安装与运行
 
-- 当前 MVP 使用 AES-GCM 做消息内容加密。
-- 服务端保存 / 转发 `ciphertext`、`nonce`、`encryptionVersion`。
-- 服务端不应处理消息明文。
-- GROUP 新消息使用 `mvp-group-v2`，key derivation 基于稳定 `conversationId`，用于解决离线成员后续上线无法解密新群消息的问题。
-- 当前方案不是完整端到端加密，也不应宣称为完整 E2EE。
-- token/session 不写入 `localStorage`。
-- 不应在日志中输出 plaintext、token、password、verification、clipboard、本地文件路径、ciphertext、nonce 等敏感信息。
+### 前置要求
 
-## Development
+- Node.js / npm
+- Rust toolchain
+- Tauri v2 运行所需系统依赖
+- PostgreSQL
+- Windows 桌面环境用于客户端优先验证
+
+### Server
+
+```powershell
+cd server
+npm.cmd install
+npx.cmd prisma generate
+npx.cmd prisma migrate dev
+npm.cmd run build
+```
 
 ### Client
 
 ```powershell
 cd client
 npm.cmd install
-npm.cmd run lint
 npm.cmd run build
 npm.cmd run tauri dev
+```
+
+### 环境变量
+
+- `.env` 不提交。
+- 使用 `.env.example` 作为配置模板。
+- 数据库连接、JWT、SMTP、文件存储路径等应通过环境变量配置。
+
+## 开发与验证命令
+
+### Client
+
+```powershell
+cd client
+npm.cmd run lint
+npm.cmd run build
 ```
 
 ### Tauri / Rust
@@ -220,7 +305,6 @@ cargo test
 
 ```powershell
 cd server
-npm.cmd install
 npx.cmd prisma validate
 npx.cmd prisma generate
 npm.cmd run lint
@@ -237,14 +321,56 @@ npx.cmd prisma migrate deploy
 npx.cmd prisma generate
 ```
 
-## Repository Notes
+## 安全说明
 
-- `.env` 不提交。
-- 使用 `.env.example` 作为配置模板。
-- `node_modules`、`target`、`dist` 等生成目录不提交。
-- 旧的 `client/public/file_icon` 资源已移除，文件图标统一使用 file-icon-vectors。
-- `client/public/vector_icon` 仍保留，用于客户端 UI 图标。
+- 当前 MVP 使用 Web Crypto AES-GCM 做消息内容加密。
+- 服务端保存 / 转发 `ciphertext`、`nonce`、`encryptionVersion`，不应处理消息明文。
+- GROUP 新消息使用 `mvp-group-v2`，key derivation 基于稳定 `conversationId`，用于解决离线成员后续上线无法解密新群消息的问题。
+- 当前方案不是完整端到端加密，也不是 Secret Chat。
+- token/session 不写入 `localStorage`。
+- 不应在日志中输出 plaintext、token、password、verification、clipboard、本地文件路径、ciphertext、nonce 等敏感信息。
+- 文件传输使用服务端中转，下载接口需要鉴权，客户端下载保存通过 Tauri / Rust 本地能力完成。
 
-## Current Status
+## 当前状态
 
-LanGram 当前处于 MVP 开发阶段，重点是稳定、可运行、可验证的局域网 / 小规模聊天体验。安全能力是 MVP message content encryption，不是完整安全通信产品；生产化部署、完整 E2EE、多设备完整同步和 WAN 方案仍在后续路线图中。
+LanGram 当前处于 MVP 开发阶段，已具备账号、好友、单聊、群聊、图片与文件收发、群管理、群名称 / 群简介保存、实时同步和 MVP 消息内容加密等基础能力。
+
+近期已完成：
+
+- 群管理面板
+- 成员管理、搜索、排序、邀请入口
+- 群主移除成员与应用内确认
+- 管理员只读 / 占位视图
+- 群名称 / 群简介保存
+- `Conversation.intro` 字段与 `20260702012928_add_group_intro` migration
+- `conversation:updated` / `group_updated` 实时同步
+- `group_member_removed` 实时同步
+- GROUP 新消息 `mvp-group-v2`
+- 群聊离线成员后续上线可解密新群消息
+- 退出群聊应用内二次确认
+- 发送快捷键菜单选中项使用 ✔
+
+## Roadmap
+
+- [ ] 完整管理员机制
+- [ ] 管理员任命 / 取消管理员
+- [ ] 群主转让
+- [ ] 群头像上传
+- [ ] 邀请链接真实生成
+- [ ] 群公告
+- [ ] @ 功能
+- [ ] 举报系统
+- [ ] P2P
+- [ ] 完整 E2EE
+- [ ] 多设备完整同步
+- [ ] 完整 WAN 部署方案
+
+## License
+
+License: TBD
+
+当前仓库尚未声明 MIT / Apache 等开源许可证。正式分发或公开协作前需要补充明确的 LICENSE 文件。
+
+## Status
+
+MVP in active development. 当前版本适合开发、验证和小规模实验，不应被视为生产级安全通信系统。
