@@ -56,6 +56,9 @@ const EMPTY_SEARCH_MATCH_IDS = new Set<string>();
 const EMPTY_CONVERSATION_IDS: string[] = [];
 const GROUP_SETTINGS_AUTOSAVE_DELAY_MS = 800;
 const GROUP_INTRO_MAX_LENGTH = 500;
+const GROUP_AVATAR_MAX_SIZE_BYTES = 5 * 1024 * 1024;
+const GROUP_AVATAR_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const GROUP_AVATAR_UPLOAD_ACCEPT = Array.from(GROUP_AVATAR_UPLOAD_MIME_TYPES).join(',');
 type GroupManagementView = 'overview' | 'members' | 'admins';
 
 
@@ -185,6 +188,8 @@ export function MainLayout(): JSX.Element {
   const [groupManagementError, setGroupManagementError] = useState<string | null>(null);
   const [groupManagementNotice, setGroupManagementNotice] = useState<string | null>(null);
   const [isSavingGroupManagement, setIsSavingGroupManagement] = useState(false);
+  const [isUploadingGroupAvatar, setIsUploadingGroupAvatar] = useState(false);
+  const [groupAvatarError, setGroupAvatarError] = useState<string | null>(null);
   const [groupManagementSearchQuery, setGroupManagementSearchQuery] = useState('');
   const [groupInviteSearchQuery, setGroupInviteSearchQuery] = useState('');
   const [selectedGroupMemberProfileUserId, setSelectedGroupMemberProfileUserId] = useState<string | null>(null);
@@ -1429,6 +1434,7 @@ export function MainLayout(): JSX.Element {
     setPendingRemoveGroupMemberId(null);
     setRemoveGroupMemberError(null);
     setGroupManagementNotice(null);
+    setGroupAvatarError(null);
     setGroupManagementIntro('');
     setIsDiscardGroupChangesConfirmOpen(false);
   }
@@ -1443,6 +1449,7 @@ export function MainLayout(): JSX.Element {
     setGroupManagementSearchQuery('');
     setPendingRemoveGroupMemberId(null);
     setGroupManagementNotice(null);
+    setGroupAvatarError(null);
     setGroupManagementName(selectedConversation.title?.trim() || t('chat.groupConversation'));
     setGroupManagementIntro(selectedConversation.intro ?? '');
     setGroupManagementView('overview');
@@ -1451,7 +1458,7 @@ export function MainLayout(): JSX.Element {
   }
 
   function requestCloseGroupManagement(): void {
-    if (isSavingGroupManagement) {
+    if (isSavingGroupManagement || isUploadingGroupAvatar) {
       return;
     }
 
@@ -1511,6 +1518,51 @@ export function MainLayout(): JSX.Element {
     setGroupManagementName(normalizedName);
     setGroupManagementIntro(normalizedIntro);
     setGroupManagementNotice(t('chat.groupNameSaved'));
+  }
+
+  async function handleGroupAvatarInputChange(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = '';
+
+    if (!file || !selectedConversation || selectedConversation.type !== 'GROUP' || !isCurrentUserGroupOwner) {
+      return;
+    }
+
+    const mimeType = file.type.trim().toLowerCase();
+    if (!GROUP_AVATAR_UPLOAD_MIME_TYPES.has(mimeType)) {
+      setGroupAvatarError(t('chat.groupAvatarInvalidType'));
+      setGroupManagementNotice(null);
+      return;
+    }
+
+    if (file.size > GROUP_AVATAR_MAX_SIZE_BYTES) {
+      setGroupAvatarError(t('chat.groupAvatarTooLarge'));
+      setGroupManagementNotice(null);
+      return;
+    }
+
+    setIsUploadingGroupAvatar(true);
+    setGroupAvatarError(null);
+    setGroupManagementNotice(null);
+
+    try {
+      const metadata = await uploadFile({
+        file,
+        conversationId: selectedConversation.id,
+        kind: 'IMAGE',
+      });
+      const success = await updateGroupConversation(selectedConversation.id, {
+        avatarUrl: buildGroupAvatarUrl(metadata.id),
+      });
+
+      if (!success) {
+        setGroupAvatarError(t('chat.groupAvatarSaveFailed'));
+      }
+    } catch {
+      setGroupAvatarError(t('chat.groupAvatarUploadFailed'));
+    } finally {
+      setIsUploadingGroupAvatar(false);
+    }
   }
   function handleConversationContextMenu(event: MouseEvent, conversation: Conversation): void {
     event.preventDefault();
@@ -1853,11 +1905,19 @@ export function MainLayout(): JSX.Element {
                   onClick={() => void handleSelectConversation(conversation.id)}
                   onContextMenu={(event) => handleConversationContextMenu(event, conversation)}
                 >
-                  <UserAvatar
-                    userId={conversation.type === 'DIRECT' ? conversation.peer?.id : conversation.id}
-                    displayName={getConversationDisplayName(conversation, t('chat.unknownPeer'), user?.id ?? null)}
-                    avatarUrl={conversation.type === 'DIRECT' ? conversation.peer?.avatarUrl : null}
-                  />
+                  {conversation.type === 'GROUP' ? (
+                    <GroupConversationAvatar
+                      conversationId={conversation.id}
+                      displayName={getConversationDisplayName(conversation, t('chat.unknownPeer'), user?.id ?? null)}
+                      avatarUrl={conversation.avatarUrl}
+                    />
+                  ) : (
+                    <UserAvatar
+                      userId={conversation.peer?.id}
+                      displayName={getConversationDisplayName(conversation, t('chat.unknownPeer'), user?.id ?? null)}
+                      avatarUrl={conversation.peer?.avatarUrl}
+                    />
+                  )}
                   <span className="conversation-item-body">
                     <span className="conversation-item-header">
                       <strong>{getConversationDisplayName(conversation, t('chat.unknownPeer'), user?.id ?? null)}</strong>
@@ -2285,16 +2345,21 @@ export function MainLayout(): JSX.Element {
       </section>
 
       <aside className="profile-panel">
-        <UserAvatar
-          userId={isSelectedConversationGroup ? selectedConversation?.id : profileUser?.id}
-          displayName={
-            isSelectedConversationGroup
-              ? selectedConversationProfileTitle ?? t('chat.groupConversation')
-              : profileUser?.displayName
-          }
-          avatarUrl={isSelectedConversationGroup ? null : profileUser?.avatarUrl}
-          size="lg"
-        />
+        {isSelectedConversationGroup ? (
+          <GroupConversationAvatar
+            conversationId={selectedConversation?.id}
+            displayName={selectedConversationProfileTitle ?? t('chat.groupConversation')}
+            avatarUrl={selectedConversation?.avatarUrl}
+            size="lg"
+          />
+        ) : (
+          <UserAvatar
+            userId={profileUser?.id}
+            displayName={profileUser?.displayName}
+            avatarUrl={profileUser?.avatarUrl}
+            size="lg"
+          />
+        )}
         <strong>
           {isSelectedConversationGroup
             ? selectedConversationProfileTitle ?? t('chat.groupConversation')
@@ -2376,10 +2441,13 @@ export function MainLayout(): JSX.Element {
               nameError={groupManagementError}
               notice={groupManagementNotice}
               isSaving={isSavingGroupManagement}
+              isAvatarUploading={isUploadingGroupAvatar}
+              avatarError={groupAvatarError}
               t={t}
               onViewChange={setGroupManagementView}
               onNameChange={setGroupManagementName}
               onIntroChange={setGroupManagementIntro}
+              onAvatarChange={(event) => void handleGroupAvatarInputChange(event)}
               onMemberSearchQueryChange={setGroupManagementSearchQuery}
               onInviteMembers={requestAddGroupMembers}
               onCancel={requestCloseGroupManagement}
@@ -3046,6 +3114,77 @@ function GroupProfileActions({
   );
 }
 
+function GroupConversationAvatar({
+  conversationId,
+  displayName,
+  avatarUrl,
+  size = 'md',
+  className,
+}: {
+  conversationId?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+}): JSX.Element {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fileId = extractGroupAvatarFileId(avatarUrl);
+    if (!conversationId || !fileId || avatarUrl === failedAvatarUrl) {
+      setObjectUrl(null);
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let nextObjectUrl: string | null = null;
+
+    void downloadFile(fileId)
+      .then((blob) => {
+        if (!blob.type.toLowerCase().startsWith('image/')) {
+          throw new Error('Group avatar is not an image');
+        }
+
+        nextObjectUrl = URL.createObjectURL(blob);
+        if (isCancelled) {
+          URL.revokeObjectURL(nextObjectUrl);
+          return;
+        }
+
+        setObjectUrl(nextObjectUrl);
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setObjectUrl(null);
+          setFailedAvatarUrl(avatarUrl ?? null);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+      if (nextObjectUrl) {
+        URL.revokeObjectURL(nextObjectUrl);
+      }
+    };
+  }, [avatarUrl, conversationId, failedAvatarUrl]);
+
+  const classes = ['user-avatar', `user-avatar-${size}`, className].filter(Boolean).join(' ');
+  if (objectUrl) {
+    return (
+      <span className={classes}>
+        <img src={objectUrl} alt="" aria-hidden="true" />
+      </span>
+    );
+  }
+
+  return (
+    <span className={classes}>
+      <span className="user-avatar-initial">{getGroupAvatarInitial(displayName)}</span>
+    </span>
+  );
+}
+
 function GroupManagementDialog({
   conversation,
   currentUserId,
@@ -3061,10 +3200,13 @@ function GroupManagementDialog({
   nameError,
   notice,
   isSaving,
+  isAvatarUploading,
+  avatarError,
   t,
   onViewChange,
   onNameChange,
   onIntroChange,
+  onAvatarChange,
   onMemberSearchQueryChange,
   onInviteMembers,
   onCancel,
@@ -3085,10 +3227,13 @@ function GroupManagementDialog({
   nameError: string | null;
   notice: string | null;
   isSaving: boolean;
+  isAvatarUploading: boolean;
+  avatarError: string | null;
   t: ReturnType<typeof useI18n>['t'];
   onViewChange: (view: GroupManagementView) => void;
   onNameChange: (name: string) => void;
   onIntroChange: (intro: string) => void;
+  onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onMemberSearchQueryChange: (query: string) => void;
   onInviteMembers: () => void;
   onCancel: () => void;
@@ -3149,13 +3294,18 @@ function GroupManagementDialog({
             <GroupManagementAdmins members={activeMembers} t={t} />
           ) : (
             <GroupManagementOverview
+              conversationId={conversation.id}
               title={name}
               intro={intro}
+              avatarUrl={conversation.avatarUrl}
+              isAvatarUploading={isAvatarUploading}
+              avatarError={avatarError}
               isIntroTooLong={isIntroTooLong}
               error={nameError}
               notice={notice}
               onTitleChange={onNameChange}
               onIntroChange={onIntroChange}
+              onAvatarChange={onAvatarChange}
               memberCount={activeMembers.length}
               adminCount={ownerCount}
               t={t}
@@ -3165,13 +3315,13 @@ function GroupManagementDialog({
         </div>
 
         <footer className="group-management-footer">
-          <button type="button" className="secondary-button group-management-cancel" disabled={isSaving} onClick={onCancel}>
+          <button type="button" className="secondary-button group-management-cancel" disabled={isSaving || isAvatarUploading} onClick={onCancel}>
             {t('chat.groupManageCancel')}
           </button>
           <button
             type="button"
             className="primary-button group-management-save"
-            disabled={isSaving || !name.trim() || !hasUnsavedChanges || isIntroTooLong}
+            disabled={isSaving || isAvatarUploading || !name.trim() || !hasUnsavedChanges || isIntroTooLong}
             onClick={onSave}
           >
             {isSaving ? t('chat.saving') : t('chat.groupManageSave')}
@@ -3183,8 +3333,12 @@ function GroupManagementDialog({
 }
 
 function GroupManagementOverview({
+  conversationId,
   title,
   intro,
+  avatarUrl,
+  isAvatarUploading,
+  avatarError,
   isIntroTooLong,
   error,
   notice,
@@ -3193,10 +3347,15 @@ function GroupManagementOverview({
   t,
   onTitleChange,
   onIntroChange,
+  onAvatarChange,
   onViewChange,
 }: {
+  conversationId: string;
   title: string;
   intro: string;
+  avatarUrl?: string | null;
+  isAvatarUploading: boolean;
+  avatarError: string | null;
   isIntroTooLong: boolean;
   error: string | null;
   notice: string | null;
@@ -3205,14 +3364,47 @@ function GroupManagementOverview({
   t: ReturnType<typeof useI18n>['t'];
   onTitleChange: (title: string) => void;
   onIntroChange: (intro: string) => void;
+  onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onViewChange: (view: GroupManagementView) => void;
 }): JSX.Element {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <>
       <section className="group-management-profile" aria-label={t('chat.groupManageTitle')}>
-        <div className="group-management-avatar" aria-hidden="true">
-          <img src="/vector_icon/users.svg" alt="" />
-        </div>
+        <button
+          type="button"
+          className={`group-management-avatar-button ${isAvatarUploading ? 'is-uploading' : ''}`}
+          disabled={isAvatarUploading}
+          aria-label={t('chat.changeGroupAvatar')}
+          title={t('chat.changeGroupAvatar')}
+          onClick={() => avatarInputRef.current?.click()}
+        >
+          <GroupConversationAvatar
+            conversationId={conversationId}
+            displayName={title}
+            avatarUrl={avatarUrl}
+            className="group-management-avatar"
+          />
+          <span className="group-management-avatar-overlay">
+            <img
+              className="group-management-avatar-overlay-icon"
+              src={isAvatarUploading ? '/vector_icon/loader-circle.svg' : '/vector_icon/camera.svg'}
+              alt=""
+              aria-hidden="true"
+            />
+          </span>
+          <input
+            type="file"
+            ref={avatarInputRef}
+            accept={GROUP_AVATAR_UPLOAD_ACCEPT}
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={onAvatarChange}
+          />
+        </button>
+        {avatarError ? <p className="group-management-avatar-error">{avatarError}</p> : null}
+        {isAvatarUploading ? <p className="group-management-avatar-status">{t('chat.groupAvatarUploading')}</p> : null}
         <label className="group-management-field">
           <span className="group-management-label">{t('chat.groupName')}</span>
           <input className="group-management-input" value={title} onChange={(event) => onTitleChange(event.target.value)} />
@@ -5303,6 +5495,21 @@ function isSupportedUpload(file: File, requestedKind: FileKind): boolean {
   }
 
   return FILE_UPLOAD_MIME_TYPES.has(mimeType) || FILE_UPLOAD_EXTENSIONS.has(extension);
+}
+
+function buildGroupAvatarUrl(fileId: string): string {
+  return `/api/files/${encodeURIComponent(fileId)}/download`;
+}
+
+function extractGroupAvatarFileId(avatarUrl?: string | null): string | null {
+  const value = avatarUrl?.trim() ?? '';
+  const match = value.match(/^\/api\/files\/([^/]+)\/download$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function getGroupAvatarInitial(displayName?: string | null): string {
+  const value = displayName?.trim();
+  return value ? value.slice(0, 1).toUpperCase() : 'G';
 }
 
 function formatUploadNotice(metadata: FileMetadataResponse): string {

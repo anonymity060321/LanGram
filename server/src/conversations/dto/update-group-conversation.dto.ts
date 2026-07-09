@@ -10,4 +10,9 @@ export class UpdateGroupConversationDto {
   @IsString()
   @MaxLength(500)
   intro?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  avatarUrl?: string | null;
 }

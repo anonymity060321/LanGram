@@ -30,6 +30,7 @@ type ConversationWithMembers = {
   type: ConversationType;
   title: string | null;
   intro: string | null;
+  avatarUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
   members: Array<{
@@ -81,6 +82,7 @@ export type RemoveGroupMemberResult = {
 export type UpdateGroupConversationPayload = {
   name?: string;
   intro?: string | null;
+  avatarUrl?: string | null;
 };
 
 export type UpdateGroupConversationResult = {
@@ -494,6 +496,14 @@ export class ConversationsService {
       data.intro = normalizedIntro.length > 0 ? normalizedIntro : null;
     }
 
+    if (Object.prototype.hasOwnProperty.call(payload, 'avatarUrl')) {
+      const normalizedAvatarUrl = payload.avatarUrl?.trim() ?? '';
+      if (normalizedAvatarUrl.length > 1024) {
+        throw new BadRequestException('Group avatar URL is too long');
+      }
+      data.avatarUrl = normalizedAvatarUrl.length > 0 ? normalizedAvatarUrl : null;
+    }
+
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No group information changes provided');
     }
@@ -904,6 +914,7 @@ export class ConversationsService {
       type: conversation.type,
       title: conversation.title,
       intro: conversation.intro,
+      avatarUrl: conversation.avatarUrl,
       peer: peer ? this.toUserDto(peer) : null,
       members: conversation.members.map((member) =>
         this.toConversationMemberDto(

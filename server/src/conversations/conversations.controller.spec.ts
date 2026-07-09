@@ -10,6 +10,7 @@ describe('ConversationsController', () => {
       type: 'GROUP',
       title: 'New Room',
       intro: 'Updated intro',
+      avatarUrl: '/api/files/group-avatar-file/download',
       peer: null,
       members: [
         { id: 'user-a', email: 'a@example.test', displayName: 'User A', avatarUrl: null, statusMessage: null },
@@ -44,14 +45,14 @@ describe('ConversationsController', () => {
     const result = await controller.updateGroupConversation(
       { user: { id: 'user-a' } } as never,
       'group-conversation-id',
-      { name: ' New Room ', intro: ' Updated intro ' },
+      { name: ' New Room ', intro: ' Updated intro ', avatarUrl: ' /api/files/group-avatar-file/download ' },
     );
 
     expect(result).toBe(ownerConversation);
     expect(conversationsService.updateGroupConversation).toHaveBeenCalledWith(
       'user-a',
       'group-conversation-id',
-      { name: ' New Room ', intro: ' Updated intro ' },
+      { name: ' New Room ', intro: ' Updated intro ', avatarUrl: ' /api/files/group-avatar-file/download ' },
     );
     expect(userASocket.emit).toHaveBeenCalledWith(
       REALTIME_EVENTS.CONVERSATION_UPDATED,
@@ -74,6 +75,7 @@ describe('ConversationsController', () => {
     expect(JSON.stringify(payload)).not.toContain('token');
     expect(JSON.stringify(payload)).not.toContain('ciphertext');
     expect(payload.conversation.intro).toBe('Updated intro');
+    expect(payload.conversation.avatarUrl).toBe('/api/files/group-avatar-file/download');
   });
   it('emits group member updates only to conversation members after group nickname changes', async () => {
     const updatedConversation = {

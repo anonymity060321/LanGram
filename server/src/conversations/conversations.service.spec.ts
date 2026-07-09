@@ -108,6 +108,7 @@ function conversationFixture(): unknown {
     type: ConversationType.DIRECT,
     title: null,
     intro: null,
+    avatarUrl: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),
     updatedAt: new Date('2026-05-19T00:00:00.000Z'),
     members: [
@@ -146,6 +147,7 @@ function groupConversationFixture(): unknown {
     type: ConversationType.GROUP,
     title: 'Team Room',
     intro: 'Team intro',
+    avatarUrl: null,
     members: [
       {
         role: ConversationMemberRole.OWNER,
@@ -578,6 +580,64 @@ describe('ConversationsService', () => {
     expect(result.conversation).toEqual(expect.objectContaining({ title: 'New Team Room', intro: 'Updated intro' }));
   });
 
+  it('allows group owner to update group avatarUrl', async () => {
+    const prisma = createMockPrisma();
+    const avatarUrl = '/api/files/group-avatar-file/download';
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        avatarUrl,
+      });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', {
+      avatarUrl: ` ${avatarUrl} `,
+    }) as {
+      conversation: { avatarUrl: string | null };
+      recipientConversations: Array<{ userId: string; conversation: { avatarUrl: string | null } }>;
+    };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { avatarUrl },
+    });
+    expect(result.conversation.avatarUrl).toBe(avatarUrl);
+    expect(result.recipientConversations.map((item) => item.userId)).toEqual(['user-a', 'user-b', 'user-c']);
+  });
+
+  it('allows group owner to update group name, intro, and avatarUrl together', async () => {
+    const prisma = createMockPrisma();
+    const avatarUrl = '/api/files/group-avatar-file/download';
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(groupConversationFixture())
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        title: 'New Team Room',
+        intro: 'Updated intro',
+        avatarUrl,
+      });
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', {
+      name: ' New Team Room ',
+      intro: ' Updated intro ',
+      avatarUrl: ` ${avatarUrl} `,
+    }) as { conversation: { title: string; intro: string | null; avatarUrl: string | null } };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { title: 'New Team Room', intro: 'Updated intro', avatarUrl },
+    });
+    expect(result.conversation).toEqual(expect.objectContaining({
+      title: 'New Team Room',
+      intro: 'Updated intro',
+      avatarUrl,
+    }));
+  });
+
   it('allows group owner to clear group intro', async () => {
     const prisma = createMockPrisma();
     prisma.conversation.findFirst
@@ -600,11 +660,63 @@ describe('ConversationsService', () => {
     expect(result.conversation.intro).toBeNull();
   });
 
+  it('allows group owner to clear group avatarUrl', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        avatarUrl: '/api/files/group-avatar-file/download',
+      })
+      .mockResolvedValueOnce(groupConversationFixture());
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    const result = await service.updateGroupConversation('user-a', 'group-conversation-id', { avatarUrl: '' }) as {
+      conversation: { avatarUrl: string | null };
+    };
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { avatarUrl: null },
+    });
+    expect(result.conversation.avatarUrl).toBeNull();
+  });
+
+  it('allows group owner to clear group avatarUrl with null', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce({
+        ...(groupConversationFixture() as Record<string, unknown>),
+        avatarUrl: '/api/files/group-avatar-file/download',
+      })
+      .mockResolvedValueOnce(groupConversationFixture());
+    prisma.conversation.update.mockResolvedValue({});
+    const service = createService(prisma);
+
+    await service.updateGroupConversation('user-a', 'group-conversation-id', { avatarUrl: null });
+
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'group-conversation-id' },
+      data: { avatarUrl: null },
+    });
+  });
+
   it('rejects group intro updates longer than 500 characters', async () => {
     const prisma = createMockPrisma();
     const service = createService(prisma);
 
     await expect(service.updateGroupConversation('user-a', 'group-conversation-id', { intro: 'a'.repeat(501) })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.findFirst).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group avatarUrl updates longer than 1024 characters', async () => {
+    const prisma = createMockPrisma();
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-a', 'group-conversation-id', { avatarUrl: 'a'.repeat(1025) })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(prisma.conversation.findFirst).not.toHaveBeenCalled();
@@ -666,6 +778,17 @@ describe('ConversationsService', () => {
     expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
 
+  it('rejects group avatarUrl updates from normal members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(groupConversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-b', 'group-conversation-id', { avatarUrl: '/api/files/avatar/download' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
   it('rejects group intro updates from non-members', async () => {
     const prisma = createMockPrisma();
     prisma.conversation.findFirst.mockResolvedValue(null);
@@ -677,12 +800,34 @@ describe('ConversationsService', () => {
     expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
 
+  it('rejects group avatarUrl updates from non-members', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-x', 'group-conversation-id', { avatarUrl: '/api/files/avatar/download' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
   it('rejects group intro updates for direct conversations', async () => {
     const prisma = createMockPrisma();
     prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
     const service = createService(prisma);
 
     await expect(service.updateGroupConversation('user-a', 'conversation-id', { intro: 'Direct intro' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects group avatarUrl updates for direct conversations', async () => {
+    const prisma = createMockPrisma();
+    prisma.conversation.findFirst.mockResolvedValue(conversationFixture());
+    const service = createService(prisma);
+
+    await expect(service.updateGroupConversation('user-a', 'conversation-id', { avatarUrl: '/api/files/avatar/download' })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(prisma.conversation.update).not.toHaveBeenCalled();

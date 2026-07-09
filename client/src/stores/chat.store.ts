@@ -122,7 +122,7 @@ interface ChatState {
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
   clearLocalConversation: (conversationId: string) => void;
   setSearchQuery: (query: string) => void;
-  updateGroupConversation: (conversationId: string, payload: { name?: string; intro?: string | null }) => Promise<boolean>;
+  updateGroupConversation: (conversationId: string, payload: { name?: string; intro?: string | null; avatarUrl?: string | null }) => Promise<boolean>;
   updateGroupNickname: (conversationId: string, groupNickname: string | null) => Promise<boolean>;
   updateGroupRemark: (conversationId: string, groupRemark: string | null) => Promise<boolean>;
   addGroupMembers: (conversationId: string, userIds: string[]) => Promise<void>;
@@ -1350,6 +1350,7 @@ function cachedConversationToConversation(
       id: record.id,
       type: 'GROUP',
       title: record.title?.trim() || null,
+      avatarUrl: record.avatarUrl,
       peer: null,
       members: [currentUser],
       memberCount: 1,
@@ -1428,7 +1429,7 @@ function toCachedConversationInput(conversation: Conversation): CachedConversati
       conversation.type === 'GROUP'
         ? conversation.title
         : conversation.peer?.displayName ?? null,
-    avatarUrl: conversation.type === 'GROUP' ? null : conversation.peer?.avatarUrl ?? null,
+    avatarUrl: conversation.type === 'GROUP' ? conversation.avatarUrl ?? null : conversation.peer?.avatarUrl ?? null,
     lastMessageId: conversation.lastMessage?.id ?? null,
     lastMessageAt: conversation.lastMessageAt ?? conversation.lastMessage?.createdAt ?? null,
     updatedAt: conversation.updatedAt,
