@@ -428,6 +428,13 @@
   "chat.groupActions": "Group actions",
   "chat.groupManageTitle": "Edit group info",
   "chat.groupIntroOptional": "Intro (optional)",
+  "chat.groupAnnouncement": "Group announcement",
+  "chat.groupAnnouncementOptional": "Announcement (optional)",
+  "chat.noGroupAnnouncement": "No group announcement",
+  "chat.groupAnnouncementSaved": "Group announcement saved",
+  "chat.groupAnnouncementSaveFailed": "Failed to save group announcement",
+  "chat.saveGroupAnnouncement": "Save announcement",
+  "chat.clearGroupAnnouncement": "Clear",
   "chat.groupType": "Group type",
   "chat.groupTypePrivate": "Private",
   "chat.newMembersHistoryVisibility": "New members can view history",
@@ -459,5 +466,6 @@
   "chat.discardGroupChangesMessage": "You have unsaved group info changes. Discard them?",
   "chat.continueEditing": "Continue editing",
   "chat.discardChanges": "Discard",
-  "chat.groupIntroTooLong": "Group intro is too long"
+  "chat.groupIntroTooLong": "Group intro is too long",
+  "chat.groupAnnouncementTooLong": "Group announcement is too long"
 }

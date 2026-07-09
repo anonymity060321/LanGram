@@ -122,7 +122,10 @@ interface ChatState {
   deleteLocalMessage: (conversationId: string, messageId: string) => void;
   clearLocalConversation: (conversationId: string) => void;
   setSearchQuery: (query: string) => void;
-  updateGroupConversation: (conversationId: string, payload: { name?: string; intro?: string | null; avatarUrl?: string | null }) => Promise<boolean>;
+  updateGroupConversation: (
+    conversationId: string,
+    payload: { name?: string; intro?: string | null; avatarUrl?: string | null; announcement?: string | null },
+  ) => Promise<boolean>;
   updateGroupNickname: (conversationId: string, groupNickname: string | null) => Promise<boolean>;
   updateGroupRemark: (conversationId: string, groupRemark: string | null) => Promise<boolean>;
   addGroupMembers: (conversationId: string, userIds: string[]) => Promise<void>;

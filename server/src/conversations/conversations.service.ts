@@ -31,6 +31,7 @@ type ConversationWithMembers = {
   title: string | null;
   intro: string | null;
   avatarUrl: string | null;
+  announcement: string | null;
   createdAt: Date;
   updatedAt: Date;
   members: Array<{
@@ -83,6 +84,7 @@ export type UpdateGroupConversationPayload = {
   name?: string;
   intro?: string | null;
   avatarUrl?: string | null;
+  announcement?: string | null;
 };
 
 export type UpdateGroupConversationResult = {
@@ -504,6 +506,14 @@ export class ConversationsService {
       data.avatarUrl = normalizedAvatarUrl.length > 0 ? normalizedAvatarUrl : null;
     }
 
+    if (Object.prototype.hasOwnProperty.call(payload, 'announcement')) {
+      const normalizedAnnouncement = payload.announcement?.trim() ?? '';
+      if (normalizedAnnouncement.length > 2000) {
+        throw new BadRequestException('Group announcement is too long');
+      }
+      data.announcement = normalizedAnnouncement.length > 0 ? normalizedAnnouncement : null;
+    }
+
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No group information changes provided');
     }
@@ -915,6 +925,7 @@ export class ConversationsService {
       title: conversation.title,
       intro: conversation.intro,
       avatarUrl: conversation.avatarUrl,
+      announcement: conversation.announcement,
       peer: peer ? this.toUserDto(peer) : null,
       members: conversation.members.map((member) =>
         this.toConversationMemberDto(

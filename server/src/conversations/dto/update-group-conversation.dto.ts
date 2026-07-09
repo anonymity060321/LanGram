@@ -15,4 +15,9 @@ export class UpdateGroupConversationDto {
   @IsString()
   @MaxLength(1024)
   avatarUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  announcement?: string | null;
 }

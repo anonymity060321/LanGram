@@ -736,6 +736,35 @@ textarea,
   gap: 10px;
 }
 
+.group-announcement-panel {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 12px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-bg-panel-muted);
+}
+
+.group-announcement-panel strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.group-announcement-panel p {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.group-announcement-panel p.is-empty {
+  color: var(--color-text-muted);
+}
+
 .profile-group-section {
   min-width: 0;
   margin-top: 12px;
@@ -1512,6 +1541,29 @@ textarea,
   font-weight: 700;
 }
 
+.group-management-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.group-management-inline-action {
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.group-management-inline-action:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .group-management-input {
   width: 100%;
   min-width: 0;
@@ -1537,6 +1589,11 @@ textarea,
   min-height: 72px;
   max-height: 120px;
   resize: vertical;
+}
+
+.group-management-announcement-textarea {
+  min-height: 112px;
+  max-height: 180px;
 }
 
 .group-management-save-status {

@@ -428,6 +428,13 @@
   "chat.groupActions": "群操作",
   "chat.groupManageTitle": "编辑群组信息",
   "chat.groupIntroOptional": "简介（可选）",
+  "chat.groupAnnouncement": "群公告",
+  "chat.groupAnnouncementOptional": "群公告（可选）",
+  "chat.noGroupAnnouncement": "暂无群公告",
+  "chat.groupAnnouncementSaved": "群公告已保存",
+  "chat.groupAnnouncementSaveFailed": "保存群公告失败",
+  "chat.saveGroupAnnouncement": "保存群公告",
+  "chat.clearGroupAnnouncement": "清空",
   "chat.groupType": "群组类型",
   "chat.groupTypePrivate": "私密",
   "chat.newMembersHistoryVisibility": "新成员是否可见聊天记录",
@@ -459,5 +466,6 @@
   "chat.discardGroupChangesMessage": "当前群资料有未保存更改，确定要放弃吗？",
   "chat.continueEditing": "继续编辑",
   "chat.discardChanges": "放弃",
-  "chat.groupIntroTooLong": "群简介过长"
+  "chat.groupIntroTooLong": "群简介过长",
+  "chat.groupAnnouncementTooLong": "群公告过长"
 }

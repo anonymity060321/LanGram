@@ -258,6 +258,7 @@ model Conversation {
   title           String?
   intro           String?          @db.VarChar(500)
   avatarUrl       String?          @map("avatar_url") @db.VarChar(1024)
+  announcement    String?          @db.VarChar(2000)
   createdByUserId String?          @map("created_by_user_id") @db.Uuid
   directUserAId   String?          @map("direct_user_a_id") @db.Uuid
   directUserBId   String?          @map("direct_user_b_id") @db.Uuid

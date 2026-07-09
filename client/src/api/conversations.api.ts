@@ -30,6 +30,7 @@ export interface Conversation {
   title: string | null;
   intro?: string | null;
   avatarUrl?: string | null;
+  announcement?: string | null;
   peer: ConversationUser | null;
   members: ConversationUser[];
   memberCount: number;
@@ -97,7 +98,7 @@ export function addGroupMembers(
 }
 export function updateGroupConversation(
   conversationId: string,
-  payload: { name?: string; intro?: string | null; avatarUrl?: string | null },
+  payload: { name?: string; intro?: string | null; avatarUrl?: string | null; announcement?: string | null },
 ): Promise<Conversation> {
   return apiRequest(`/conversations/${conversationId}/group`, {
     method: 'PATCH',

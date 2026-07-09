@@ -56,6 +56,7 @@ const EMPTY_SEARCH_MATCH_IDS = new Set<string>();
 const EMPTY_CONVERSATION_IDS: string[] = [];
 const GROUP_SETTINGS_AUTOSAVE_DELAY_MS = 800;
 const GROUP_INTRO_MAX_LENGTH = 500;
+const GROUP_ANNOUNCEMENT_MAX_LENGTH = 2000;
 const GROUP_AVATAR_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const GROUP_AVATAR_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const GROUP_AVATAR_UPLOAD_ACCEPT = Array.from(GROUP_AVATAR_UPLOAD_MIME_TYPES).join(',');
@@ -184,6 +185,7 @@ export function MainLayout(): JSX.Element {
   const [groupManagementView, setGroupManagementView] = useState<GroupManagementView>('overview');
   const [groupManagementName, setGroupManagementName] = useState('');
   const [groupManagementIntro, setGroupManagementIntro] = useState('');
+  const [groupManagementAnnouncement, setGroupManagementAnnouncement] = useState('');
   const [isDiscardGroupChangesConfirmOpen, setIsDiscardGroupChangesConfirmOpen] = useState(false);
   const [groupManagementError, setGroupManagementError] = useState<string | null>(null);
   const [groupManagementNotice, setGroupManagementNotice] = useState<string | null>(null);
@@ -233,6 +235,7 @@ export function MainLayout(): JSX.Element {
   const lastSavedGroupRemarkRef = useRef('');
   const lastSyncedGroupManagementNameRef = useRef('');
   const lastSyncedGroupManagementIntroRef = useRef('');
+  const lastSyncedGroupManagementAnnouncementRef = useRef('');
 
   useDismissOnOutsideOrEscape(isAppMenuOpen, appMenuRef, setIsAppMenuOpen);
   useDismissOnOutsideOrEscape(isChatActionsOpen, chatActionsRef, setIsChatActionsOpen);
@@ -541,8 +544,11 @@ export function MainLayout(): JSX.Element {
 
     const nextName = selectedConversation.title?.trim() || t('chat.groupConversation');
     const nextIntro = selectedConversation.intro?.trim() ?? '';
+    const nextAnnouncement = selectedConversation.announcement?.trim() ?? '';
     const hasLocalNameEdit = groupManagementName.trim() !== lastSyncedGroupManagementNameRef.current;
     const hasLocalIntroEdit = groupManagementIntro.trim() !== lastSyncedGroupManagementIntroRef.current;
+    const hasLocalAnnouncementEdit =
+      groupManagementAnnouncement.trim() !== lastSyncedGroupManagementAnnouncementRef.current;
 
     if (!hasLocalNameEdit && groupManagementName !== nextName) {
       setGroupManagementName(nextName);
@@ -552,9 +558,15 @@ export function MainLayout(): JSX.Element {
       setGroupManagementIntro(nextIntro);
     }
 
+    if (!hasLocalAnnouncementEdit && groupManagementAnnouncement !== nextAnnouncement) {
+      setGroupManagementAnnouncement(nextAnnouncement);
+    }
+
     lastSyncedGroupManagementNameRef.current = nextName;
     lastSyncedGroupManagementIntroRef.current = nextIntro;
+    lastSyncedGroupManagementAnnouncementRef.current = nextAnnouncement;
   }, [
+    groupManagementAnnouncement,
     groupManagementIntro,
     groupManagementName,
     isGroupManagementOpen,
@@ -1452,9 +1464,14 @@ export function MainLayout(): JSX.Element {
     return selectedConversation?.intro?.trim() ?? '';
   }
 
+  function currentGroupManagementAnnouncement(): string {
+    return selectedConversation?.announcement?.trim() ?? '';
+  }
+
   function hasUnsavedGroupManagementChanges(): boolean {
     return groupManagementName.trim() !== currentGroupManagementName()
-      || groupManagementIntro.trim() !== currentGroupManagementIntro();
+      || groupManagementIntro.trim() !== currentGroupManagementIntro()
+      || groupManagementAnnouncement.trim() !== currentGroupManagementAnnouncement();
   }
 
   function resetGroupManagementState(): void {
@@ -1468,8 +1485,10 @@ export function MainLayout(): JSX.Element {
     setGroupAvatarError(null);
     setGroupManagementName('');
     setGroupManagementIntro('');
+    setGroupManagementAnnouncement('');
     lastSyncedGroupManagementNameRef.current = '';
     lastSyncedGroupManagementIntroRef.current = '';
+    lastSyncedGroupManagementAnnouncementRef.current = '';
     setIsDiscardGroupChangesConfirmOpen(false);
   }
 
@@ -1486,10 +1505,13 @@ export function MainLayout(): JSX.Element {
     setGroupAvatarError(null);
     const nextName = selectedConversation.title?.trim() || t('chat.groupConversation');
     const nextIntro = selectedConversation.intro ?? '';
+    const nextAnnouncement = selectedConversation.announcement ?? '';
     setGroupManagementName(nextName);
     setGroupManagementIntro(nextIntro);
+    setGroupManagementAnnouncement(nextAnnouncement);
     lastSyncedGroupManagementNameRef.current = nextName;
     lastSyncedGroupManagementIntroRef.current = nextIntro;
+    lastSyncedGroupManagementAnnouncementRef.current = nextAnnouncement.trim();
     setGroupManagementView('overview');
     setIsDiscardGroupChangesConfirmOpen(false);
     setIsGroupManagementOpen(true);
@@ -1523,6 +1545,7 @@ export function MainLayout(): JSX.Element {
 
     const normalizedName = groupManagementName.trim();
     const normalizedIntro = groupManagementIntro.trim();
+    const normalizedAnnouncement = groupManagementAnnouncement.trim();
     if (!normalizedName) {
       setGroupManagementNotice(null);
       setGroupManagementError(t('chat.groupNameRequired'));
@@ -1535,9 +1558,20 @@ export function MainLayout(): JSX.Element {
       return;
     }
 
+    if (normalizedAnnouncement.length > GROUP_ANNOUNCEMENT_MAX_LENGTH) {
+      setGroupManagementNotice(null);
+      setGroupManagementError(t('chat.groupAnnouncementTooLong'));
+      return;
+    }
+
     if (!hasUnsavedGroupManagementChanges()) {
       return;
     }
+
+    const didOnlyAnnouncementChange =
+      groupManagementName.trim() === currentGroupManagementName()
+      && groupManagementIntro.trim() === currentGroupManagementIntro()
+      && normalizedAnnouncement !== currentGroupManagementAnnouncement();
 
     setIsSavingGroupManagement(true);
     setGroupManagementError(null);
@@ -1545,19 +1579,22 @@ export function MainLayout(): JSX.Element {
     const success = await updateGroupConversation(selectedConversation.id, {
       name: normalizedName,
       intro: normalizedIntro.length > 0 ? normalizedIntro : null,
+      announcement: normalizedAnnouncement.length > 0 ? normalizedAnnouncement : null,
     });
     setIsSavingGroupManagement(false);
 
     if (!success) {
-      setGroupManagementError(t('chat.groupInfoSaveFailed'));
+      setGroupManagementError(t(didOnlyAnnouncementChange ? 'chat.groupAnnouncementSaveFailed' : 'chat.groupInfoSaveFailed'));
       return;
     }
 
     setGroupManagementName(normalizedName);
     setGroupManagementIntro(normalizedIntro);
+    setGroupManagementAnnouncement(normalizedAnnouncement);
     lastSyncedGroupManagementNameRef.current = normalizedName;
     lastSyncedGroupManagementIntroRef.current = normalizedIntro;
-    setGroupManagementNotice(t('chat.groupNameSaved'));
+    lastSyncedGroupManagementAnnouncementRef.current = normalizedAnnouncement;
+    setGroupManagementNotice(t(didOnlyAnnouncementChange ? 'chat.groupAnnouncementSaved' : 'chat.groupNameSaved'));
   }
 
   async function handleGroupAvatarInputChange(event: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -2412,6 +2449,14 @@ export function MainLayout(): JSX.Element {
             : profileUser?.statusMessage || profileUser?.email || profileUser?.accountType || 'MVP'}
         </span>
         {isSelectedConversationGroup && selectedConversation ? (
+          <section className="group-announcement-panel" aria-label={t('chat.groupAnnouncement')}>
+            <strong>{t('chat.groupAnnouncement')}</strong>
+            <p className={selectedConversation.announcement?.trim() ? '' : 'is-empty'}>
+              {selectedConversation.announcement?.trim() || t('chat.noGroupAnnouncement')}
+            </p>
+          </section>
+        ) : null}
+        {isSelectedConversationGroup && selectedConversation ? (
           <GroupProfileActions
             isOwner={isCurrentUserGroupOwner}
             isMuted={isSelectedConversationMuted}
@@ -2476,8 +2521,10 @@ export function MainLayout(): JSX.Element {
               memberSearchQuery={groupManagementSearchQuery}
               name={groupManagementName}
               intro={groupManagementIntro}
+              announcement={groupManagementAnnouncement}
               hasUnsavedChanges={hasUnsavedGroupManagementChanges()}
               isIntroTooLong={groupManagementIntro.trim().length > GROUP_INTRO_MAX_LENGTH}
+              isAnnouncementTooLong={groupManagementAnnouncement.trim().length > GROUP_ANNOUNCEMENT_MAX_LENGTH}
               nameError={groupManagementError}
               notice={groupManagementNotice}
               isSaving={isSavingGroupManagement}
@@ -2487,6 +2534,7 @@ export function MainLayout(): JSX.Element {
               onViewChange={setGroupManagementView}
               onNameChange={setGroupManagementName}
               onIntroChange={setGroupManagementIntro}
+              onAnnouncementChange={setGroupManagementAnnouncement}
               onAvatarChange={(event) => void handleGroupAvatarInputChange(event)}
               onMemberSearchQueryChange={setGroupManagementSearchQuery}
               onInviteMembers={requestAddGroupMembers}
@@ -3235,8 +3283,10 @@ function GroupManagementDialog({
   memberSearchQuery,
   name,
   intro,
+  announcement,
   hasUnsavedChanges,
   isIntroTooLong,
+  isAnnouncementTooLong,
   nameError,
   notice,
   isSaving,
@@ -3246,6 +3296,7 @@ function GroupManagementDialog({
   onViewChange,
   onNameChange,
   onIntroChange,
+  onAnnouncementChange,
   onAvatarChange,
   onMemberSearchQueryChange,
   onInviteMembers,
@@ -3262,8 +3313,10 @@ function GroupManagementDialog({
   memberSearchQuery: string;
   name: string;
   intro: string;
+  announcement: string;
   hasUnsavedChanges: boolean;
   isIntroTooLong: boolean;
+  isAnnouncementTooLong: boolean;
   nameError: string | null;
   notice: string | null;
   isSaving: boolean;
@@ -3273,6 +3326,7 @@ function GroupManagementDialog({
   onViewChange: (view: GroupManagementView) => void;
   onNameChange: (name: string) => void;
   onIntroChange: (intro: string) => void;
+  onAnnouncementChange: (announcement: string) => void;
   onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onMemberSearchQueryChange: (query: string) => void;
   onInviteMembers: () => void;
@@ -3337,14 +3391,17 @@ function GroupManagementDialog({
               conversationId={conversation.id}
               title={name}
               intro={intro}
+              announcement={announcement}
               avatarUrl={conversation.avatarUrl}
               isAvatarUploading={isAvatarUploading}
               avatarError={avatarError}
               isIntroTooLong={isIntroTooLong}
+              isAnnouncementTooLong={isAnnouncementTooLong}
               error={nameError}
               notice={notice}
               onTitleChange={onNameChange}
               onIntroChange={onIntroChange}
+              onAnnouncementChange={onAnnouncementChange}
               onAvatarChange={onAvatarChange}
               memberCount={activeMembers.length}
               adminCount={ownerCount}
@@ -3361,7 +3418,7 @@ function GroupManagementDialog({
           <button
             type="button"
             className="primary-button group-management-save"
-            disabled={isSaving || isAvatarUploading || !name.trim() || !hasUnsavedChanges || isIntroTooLong}
+            disabled={isSaving || isAvatarUploading || !name.trim() || !hasUnsavedChanges || isIntroTooLong || isAnnouncementTooLong}
             onClick={onSave}
           >
             {isSaving ? t('chat.saving') : t('chat.groupManageSave')}
@@ -3376,10 +3433,12 @@ function GroupManagementOverview({
   conversationId,
   title,
   intro,
+  announcement,
   avatarUrl,
   isAvatarUploading,
   avatarError,
   isIntroTooLong,
+  isAnnouncementTooLong,
   error,
   notice,
   memberCount,
@@ -3387,16 +3446,19 @@ function GroupManagementOverview({
   t,
   onTitleChange,
   onIntroChange,
+  onAnnouncementChange,
   onAvatarChange,
   onViewChange,
 }: {
   conversationId: string;
   title: string;
   intro: string;
+  announcement: string;
   avatarUrl?: string | null;
   isAvatarUploading: boolean;
   avatarError: string | null;
   isIntroTooLong: boolean;
+  isAnnouncementTooLong: boolean;
   error: string | null;
   notice: string | null;
   memberCount: number;
@@ -3404,6 +3466,7 @@ function GroupManagementOverview({
   t: ReturnType<typeof useI18n>['t'];
   onTitleChange: (title: string) => void;
   onIntroChange: (intro: string) => void;
+  onAnnouncementChange: (announcement: string) => void;
   onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onViewChange: (view: GroupManagementView) => void;
 }): JSX.Element {
@@ -3462,6 +3525,27 @@ function GroupManagementOverview({
           />
         </label>
         {isIntroTooLong ? <p className="group-management-error">{t('chat.groupIntroTooLong')}</p> : null}
+        <label className="group-management-field">
+          <span className="group-management-label-row">
+            <span className="group-management-label">{t('chat.groupAnnouncementOptional')}</span>
+            <button
+              type="button"
+              className="group-management-inline-action"
+              disabled={!announcement.trim()}
+              onClick={() => onAnnouncementChange('')}
+            >
+              {t('chat.clearGroupAnnouncement')}
+            </button>
+          </span>
+          <textarea
+            className="group-management-input group-management-textarea group-management-announcement-textarea"
+            value={announcement}
+            maxLength={GROUP_ANNOUNCEMENT_MAX_LENGTH + 1}
+            rows={5}
+            onChange={(event) => onAnnouncementChange(event.target.value)}
+          />
+        </label>
+        {isAnnouncementTooLong ? <p className="group-management-error">{t('chat.groupAnnouncementTooLong')}</p> : null}
       </section>
 
       <section className="group-management-section" aria-label={t('chat.groupType')}>
