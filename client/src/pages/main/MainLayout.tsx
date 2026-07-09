@@ -231,6 +231,8 @@ export function MainLayout(): JSX.Element {
 
   const lastSavedGroupNicknameRef = useRef('');
   const lastSavedGroupRemarkRef = useRef('');
+  const lastSyncedGroupManagementNameRef = useRef('');
+  const lastSyncedGroupManagementIntroRef = useRef('');
 
   useDismissOnOutsideOrEscape(isAppMenuOpen, appMenuRef, setIsAppMenuOpen);
   useDismissOnOutsideOrEscape(isChatActionsOpen, chatActionsRef, setIsChatActionsOpen);
@@ -531,6 +533,35 @@ export function MainLayout(): JSX.Element {
   ]);
 
   useEffect(() => () => cancelGroupSettingsAutosaveTimers(), [cancelGroupSettingsAutosaveTimers]);
+
+  useEffect(() => {
+    if (!isGroupManagementOpen || !selectedConversation || selectedConversation.type !== 'GROUP') {
+      return;
+    }
+
+    const nextName = selectedConversation.title?.trim() || t('chat.groupConversation');
+    const nextIntro = selectedConversation.intro?.trim() ?? '';
+    const hasLocalNameEdit = groupManagementName.trim() !== lastSyncedGroupManagementNameRef.current;
+    const hasLocalIntroEdit = groupManagementIntro.trim() !== lastSyncedGroupManagementIntroRef.current;
+
+    if (!hasLocalNameEdit && groupManagementName !== nextName) {
+      setGroupManagementName(nextName);
+    }
+
+    if (!hasLocalIntroEdit && groupManagementIntro !== nextIntro) {
+      setGroupManagementIntro(nextIntro);
+    }
+
+    lastSyncedGroupManagementNameRef.current = nextName;
+    lastSyncedGroupManagementIntroRef.current = nextIntro;
+  }, [
+    groupManagementIntro,
+    groupManagementName,
+    isGroupManagementOpen,
+    selectedConversation,
+    t,
+  ]);
+
   useEffect(() => {
     if (!messageLimitNotice) {
       return undefined;
@@ -1435,7 +1466,10 @@ export function MainLayout(): JSX.Element {
     setRemoveGroupMemberError(null);
     setGroupManagementNotice(null);
     setGroupAvatarError(null);
+    setGroupManagementName('');
     setGroupManagementIntro('');
+    lastSyncedGroupManagementNameRef.current = '';
+    lastSyncedGroupManagementIntroRef.current = '';
     setIsDiscardGroupChangesConfirmOpen(false);
   }
 
@@ -1450,8 +1484,12 @@ export function MainLayout(): JSX.Element {
     setPendingRemoveGroupMemberId(null);
     setGroupManagementNotice(null);
     setGroupAvatarError(null);
-    setGroupManagementName(selectedConversation.title?.trim() || t('chat.groupConversation'));
-    setGroupManagementIntro(selectedConversation.intro ?? '');
+    const nextName = selectedConversation.title?.trim() || t('chat.groupConversation');
+    const nextIntro = selectedConversation.intro ?? '';
+    setGroupManagementName(nextName);
+    setGroupManagementIntro(nextIntro);
+    lastSyncedGroupManagementNameRef.current = nextName;
+    lastSyncedGroupManagementIntroRef.current = nextIntro;
     setGroupManagementView('overview');
     setIsDiscardGroupChangesConfirmOpen(false);
     setIsGroupManagementOpen(true);
@@ -1517,6 +1555,8 @@ export function MainLayout(): JSX.Element {
 
     setGroupManagementName(normalizedName);
     setGroupManagementIntro(normalizedIntro);
+    lastSyncedGroupManagementNameRef.current = normalizedName;
+    lastSyncedGroupManagementIntroRef.current = normalizedIntro;
     setGroupManagementNotice(t('chat.groupNameSaved'));
   }
 
