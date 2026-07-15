@@ -39,3 +39,6 @@ uploads/
 
 # Local Codex configuration and skills
 .codex/
+
+# Local development notes
+docs/Phase_8_13_Windows_Notifications.md
