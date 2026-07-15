@@ -36,3 +36,6 @@ client/src-tauri/gen/
 *.db
 storage/
 uploads/
+
+# Local Codex configuration and skills
+.codex/
